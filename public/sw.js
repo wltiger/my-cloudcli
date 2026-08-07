@@ -1,21 +1,39 @@
 // Service Worker for CloudCLI PWA
-// Cache only manifest (needed for PWA install). HTML and JS are never pre-cached
-// so a rebuild + refresh always picks up the latest assets.
-const CACHE_NAME = 'claude-ui-v2';
+// Cache-first for the app shell so the UI opens with no network connection.
+// Picking up a newer shell is a manual action (the "Refresh offline cache"
+// control in Settings posts a REFRESH_CACHE message) — there is deliberately no
+// automatic staleness detection. See docs/adr/0002-cache-first-app-shell-manual-refresh.md
+const CACHE_NAME = 'claude-ui-v3';
+// The SPA serves every client-side route from the same document, so the shell
+// is cached once under '/' and replayed for any navigation.
+const APP_SHELL_URL = '/';
 const urlsToCache = [
-  '/manifest.json'
+  APP_SHELL_URL,
+  '/manifest.json',
+  // Referenced by the shell's own chrome (auth screens), and not under /assets/
+  '/logo.svg'
 ];
+
+// Fetch bypassing the HTTP cache so a (re)populated entry is genuinely fresh.
+function cacheFreshCopies() {
+  return caches.open(CACHE_NAME).then(cache =>
+    Promise.all(
+      urlsToCache.map(url =>
+        fetch(new Request(url, { cache: 'reload' }))
+          .then(response => (response.ok ? cache.put(url, response) : undefined))
+          .catch(() => undefined)
+      )
+    )
+  );
+}
 
 // Install event
 self.addEventListener('install', event => {
-  event.waitUntil(
-    caches.open(CACHE_NAME)
-      .then(cache => cache.addAll(urlsToCache))
-  );
+  event.waitUntil(cacheFreshCopies());
   self.skipWaiting();
 });
 
-// Fetch event — network-first for everything except hashed assets
+// Fetch event — cache-first for the app shell and hashed assets, network-first otherwise
 self.addEventListener('fetch', event => {
   const url = event.request.url;
 
@@ -24,14 +42,26 @@ self.addEventListener('fetch', event => {
     return;
   }
 
-  // Navigation requests (HTML) — always go to network, no caching
+  // Navigation requests (HTML) — cache-first so the app opens offline
   if (event.request.mode === 'navigate') {
     event.respondWith(
-      fetch(event.request).catch(() => caches.match('/manifest.json').then(() =>
-        new Response('<h1>Offline</h1><p>Please check your connection.</p>', {
-          headers: { 'Content-Type': 'text/html' }
-        })
-      ))
+      caches.match(APP_SHELL_URL).then(cached => {
+        if (cached) return cached;
+        // Not precached yet (first ever load, or the install fetch failed)
+        return fetch(event.request)
+          .then(response => {
+            if (response.ok) {
+              const clone = response.clone();
+              caches.open(CACHE_NAME).then(cache => cache.put(APP_SHELL_URL, clone));
+            }
+            return response;
+          })
+          .catch(() =>
+            new Response('<h1>Offline</h1><p>Please check your connection.</p>', {
+              headers: { 'Content-Type': 'text/html' }
+            })
+          );
+      })
     );
     return;
   }
@@ -69,6 +99,20 @@ self.addEventListener('activate', event => {
     )
   );
   self.clients.claim();
+});
+
+// Manual "Refresh offline cache" from Settings — drop everything we cached
+// (shell + hashed assets) and re-fetch the shell, then tell the client to reload.
+self.addEventListener('message', event => {
+  if (event.data?.type !== 'REFRESH_CACHE') return;
+
+  event.waitUntil(
+    caches.delete(CACHE_NAME)
+      .then(() => cacheFreshCopies())
+      .then(() => {
+        event.source?.postMessage({ type: 'REFRESH_CACHE_DONE' });
+      })
+  );
 });
 
 // Push notification event

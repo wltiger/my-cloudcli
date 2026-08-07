@@ -1,4 +1,5 @@
-import { Cloud, ExternalLink, MessageSquare, Star, Users } from 'lucide-react';
+import { Cloud, ExternalLink, MessageSquare, RefreshCw, Star, Users } from 'lucide-react';
+import { useCallback, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { CLOUDCLI_WORDMARK_FONT_FAMILY } from '../../../../constants/branding';
@@ -10,6 +11,8 @@ const GITHUB_REPO_URL = 'https://github.com/siteboon/claudecodeui';
 const DISCORD_URL = 'https://discord.gg/buxwujPNRE';
 const DOCS_URL = 'https://cloudcli.ai/docs/plugin-overview';
 const CLOUDCLI_URL = 'https://cloudcli.ai';
+// Fallback in case the service worker never acknowledges the refresh message.
+const CACHE_REFRESH_TIMEOUT_MS = 5000;
 
 function GitHubIcon({ className }: { className?: string }) {
   return (
@@ -31,6 +34,39 @@ export default function AboutTab() {
   const { t } = useTranslation('settings');
   const { updateAvailable, latestVersion, currentVersion, releaseInfo } = useVersionCheck('siteboon', 'claudecodeui');
   const releasesUrl = releaseInfo?.htmlUrl || `${GITHUB_REPO_URL}/releases`;
+  const [refreshingCache, setRefreshingCache] = useState(false);
+
+  // Drops the service worker's offline cache and reloads onto the freshly
+  // fetched shell. Deliberately manual only — unrelated to the release-version
+  // check above, which tracks the running server's version, not the cache.
+  const handleRefreshOfflineCache = useCallback(() => {
+    setRefreshingCache(true);
+
+    const controller =
+      typeof navigator !== 'undefined' && 'serviceWorker' in navigator
+        ? navigator.serviceWorker.controller
+        : null;
+
+    if (!controller) {
+      window.location.reload();
+      return;
+    }
+
+    let reloaded = false;
+    const reload = () => {
+      if (reloaded) return;
+      reloaded = true;
+      window.location.reload();
+    };
+
+    const onMessage = (event: MessageEvent) => {
+      if (event.data?.type === 'REFRESH_CACHE_DONE') reload();
+    };
+
+    navigator.serviceWorker.addEventListener('message', onMessage);
+    window.setTimeout(reload, CACHE_REFRESH_TIMEOUT_MS);
+    controller.postMessage({ type: 'REFRESH_CACHE' });
+  }, []);
 
   return (
     <div className="space-y-6">
@@ -84,6 +120,23 @@ export default function AboutTab() {
         <Star className="h-3.5 w-3.5" />
         <span>Star on GitHub</span>
       </a>
+
+      {/* Offline cache */}
+      <div className="border-t border-border/50 pt-4">
+        <button
+          type="button"
+          onClick={handleRefreshOfflineCache}
+          disabled={refreshingCache}
+          className="inline-flex items-center gap-2 rounded-lg border border-border/60 bg-background px-3.5 py-2 text-sm font-medium text-muted-foreground transition-colors hover:bg-muted/50 hover:text-foreground disabled:cursor-not-allowed disabled:opacity-60"
+        >
+          <RefreshCw className={`h-4 w-4 ${refreshingCache ? 'animate-spin' : ''}`} />
+          <span>{refreshingCache ? 'Refreshing…' : 'Refresh offline cache'}</span>
+        </button>
+        <p className="mt-2 text-xs text-muted-foreground">
+          CloudCLI keeps a cached copy of its interface so it opens without a network
+          connection. Refresh it to clear that cache and reload the latest deployed version.
+        </p>
+      </div>
 
       {/* Links */}
       <div className="flex flex-wrap gap-4 text-sm">
