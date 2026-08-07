@@ -6,6 +6,7 @@ import { ChevronDown, ChevronRight } from 'lucide-react';
 import type { ProviderModelOption } from '../../../../types/app';
 import { DEFAULT_EFFORT_VALUE } from '../../constants/providerEffort';
 import { useComposerMenuAnchor } from '../../hooks/useComposerMenuAnchor';
+import { prettifyModelLabel } from '../../utils/modelLabel';
 
 import {
   ComposerMenuHeading,
@@ -62,7 +63,10 @@ export default function ComposerModelMenu({
     () => modelOptions.find((option) => option.value === model) ?? null,
     [model, modelOptions],
   );
-  const modelLabel = selectedModelOption?.label || model;
+  // Models picked here match the catalog exactly. A model set outside CloudCLI
+  // (e.g. through the Claude Code CLI) doesn't, so fall back to a short label
+  // when the raw id is recognisable, and to the raw id itself when it isn't.
+  const modelLabel = selectedModelOption?.label || prettifyModelLabel(model) || model;
 
   const hasEffortSection = resolvedEffortOptions.length > 0;
   const hasModelSection = modelOptions.length > 0 || modelsLoading;
@@ -84,7 +88,7 @@ export default function ComposerModelMenu({
           updateAnchor();
           setIsOpen((current) => !current);
         }}
-        className="flex h-8 max-w-20 shrink-0 items-center gap-1 rounded-lg border border-border/60 bg-muted/40 px-2 text-xs font-medium text-foreground transition-colors hover:bg-muted sm:max-w-56"
+        className="flex h-8 max-w-32 shrink-0 items-center gap-1 rounded-lg border border-border/60 bg-muted/40 px-2 text-xs font-medium text-foreground transition-colors hover:bg-muted sm:max-w-56"
         aria-haspopup="menu"
         aria-expanded={isOpen}
         aria-label={ariaLabel}
