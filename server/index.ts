@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // Load environment variables before other imports execute.
 import './load-env.js';
+import { execSync } from 'child_process';
 import fs, { promises as fsPromises } from 'fs';
 import path from 'path';
 import os from 'os';
@@ -70,6 +71,34 @@ const RUNNING_VERSION = (() => {
         return null;
     }
 })();
+// Commit that is CURRENTLY CHECKED OUT for this process, resolved once at
+// startup. Unlike the frontend's build-time SHA this is not baked into a
+// bundle, so after a `git pull` without a rebuild the two can legitimately
+// differ — that divergence is itself the diagnostic signal.
+// Only attempted for git checkouts; an npm-installed user has no .git folder.
+const RUNNING_GIT_SHA = installMode === 'git'
+    ? (() => {
+        try {
+            return execSync('git rev-parse --short HEAD', {
+                cwd: APP_ROOT,
+                stdio: ['ignore', 'pipe', 'ignore'],
+            }).toString().trim() || null;
+        } catch {
+            return null;
+        }
+    })()
+    : null;
+// Process start time, the backend counterpart to the frontend's build time.
+const STARTED_AT = new Date();
+// Local time, 24h, no seconds: "2026-08-07 14:32".
+const formatStamp = (date: Date) => {
+    const pad = (n: number) => String(n).padStart(2, '0');
+    return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`
+        + ` ${pad(date.getHours())}:${pad(date.getMinutes())}`;
+};
+// "v1.37.0 (a1b2c3d · 2026-08-07 14:32)", or without the SHA outside a git checkout.
+const BUILD_LABEL = `v${RUNNING_VERSION ?? 'unknown'}`
+    + (RUNNING_GIT_SHA ? ` (${RUNNING_GIT_SHA} · ${formatStamp(STARTED_AT)})` : ` (${formatStamp(STARTED_AT)})`);
 const systemRoutes = createSystemModule({
     appRoot: APP_ROOT,
     installMode,
@@ -139,7 +168,9 @@ app.get('/health', (req, res) => {
         status: 'ok',
         timestamp: new Date().toISOString(),
         installMode,
-        version: RUNNING_VERSION
+        version: RUNNING_VERSION,
+        gitSha: RUNNING_GIT_SHA,
+        startedAt: STARTED_AT.toISOString()
     });
 });
 
@@ -357,6 +388,7 @@ async function startServer() {
             console.log(terminalTextStyles.dim('═'.repeat(63)));
             console.log('');
             console.log(`${terminalTextStyles.info('[INFO]')} Server URL:  ${terminalTextStyles.bright('http://' + DISPLAY_HOST + ':' + SERVER_PORT)}`);
+            console.log(`${terminalTextStyles.info('[INFO]')} Build:       ${terminalTextStyles.dim(BUILD_LABEL + ' [' + installMode + ']')}`);
             console.log(`${terminalTextStyles.info('[INFO]')} Installed at: ${terminalTextStyles.dim(appInstallPath)}`);
             console.log(`${terminalTextStyles.tip('[TIP]')}  Run "cloudcli status" for full configuration details`);
             console.log('');

@@ -91,6 +91,11 @@ export default function AboutTab() {
             >
               v{currentVersion}
             </a>
+            {/* Build identifier: which commit this bundle was built from, and when.
+                Baked in at build time, so a stale service-worker cache is easy to spot. */}
+            <span className="whitespace-nowrap text-[11px] text-muted-foreground/70">
+              ({__GIT_SHA__} · {__BUILD_TIME__})
+            </span>
             {updateAvailable && latestVersion && (
               <a
                 href={releasesUrl}

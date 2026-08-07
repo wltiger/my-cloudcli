@@ -1,7 +1,32 @@
+import { execSync } from 'node:child_process'
 import { fileURLToPath, URL } from 'node:url'
 import { defineConfig, loadEnv } from 'vite'
 import react from '@vitejs/plugin-react'
 import { getConnectableHost, normalizeLoopbackHost } from './shared/networkHosts.js'
+
+// Build identifier: which commit this bundle was built from, and when.
+// package.json's `version` is deliberately left untouched by this fork, so the
+// SHA + build time are the only way to tell a fresh build from a stale one
+// served out of the service worker's offline cache.
+function getGitSha() {
+  try {
+    return execSync('git rev-parse --short HEAD', { stdio: ['ignore', 'pipe', 'ignore'] })
+      .toString()
+      .trim() || 'unknown'
+  } catch {
+    // No git binary, or a source tarball rather than a clone.
+    return 'unknown'
+  }
+}
+
+// Local time, 24h, no seconds: "2026-08-07 14:32".
+function formatBuildTime(date) {
+  const pad = (n) => String(n).padStart(2, '0')
+  return (
+    `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}` +
+    ` ${pad(date.getHours())}:${pad(date.getMinutes())}`
+  )
+}
 
 export default defineConfig(({ mode }) => {
   // Load env file based on `mode` in the current working directory.
@@ -19,6 +44,11 @@ export default defineConfig(({ mode }) => {
   const serverPort = env.SERVER_PORT || env.PORT || 3001
 
   return {
+    define: {
+      // Vite's `define` is raw text replacement, so string values must be JSON-stringified.
+      __GIT_SHA__: JSON.stringify(getGitSha()),
+      __BUILD_TIME__: JSON.stringify(formatBuildTime(new Date()))
+    },
     plugins: [react()],
     resolve: {
       alias: {
