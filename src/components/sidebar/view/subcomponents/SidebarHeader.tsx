@@ -3,7 +3,7 @@ import type { TFunction } from 'i18next';
 
 import { Button, Input, Tooltip } from '../../../../shared/view/ui';
 import { CLOUDCLI_WORDMARK_FONT_FAMILY } from '../../../../constants/branding';
-import { IS_PLATFORM } from '../../../../constants/config';
+import { COMPACT_MOBILE_SIDEBAR, IS_PLATFORM } from '../../../../constants/config';
 import { cn } from '../../../../lib/utils';
 import type { SidebarSearchMode } from '../../types/types';
 
@@ -29,6 +29,7 @@ type SidebarHeaderProps = {
   isRefreshing: boolean;
   onCreateProject: () => void;
   onCollapseSidebar: () => void;
+  onShowSettings: () => void;
   t: TFunction;
 };
 
@@ -49,6 +50,7 @@ export default function SidebarHeader({
   isRefreshing,
   onCreateProject,
   onCollapseSidebar,
+  onShowSettings,
   t,
 }: SidebarHeaderProps) {
   const showSearchTools = (projectsCount > 0 || runningSessionsCount > 0 || archivedSessionsCount > 0 || isArchivedSessionsLoading) && !isLoading;
@@ -255,6 +257,15 @@ export default function SidebarHeader({
             >
               <LogoBlock />
             </a>
+          ) : COMPACT_MOBILE_SIDEBAR ? (
+            <button
+              type="button"
+              onClick={onShowSettings}
+              className="flex min-w-0 items-center gap-2.5 transition-opacity active:opacity-70"
+              title={t('actions.settings')}
+            >
+              <LogoBlock />
+            </button>
           ) : (
             <LogoBlock />
           )}
