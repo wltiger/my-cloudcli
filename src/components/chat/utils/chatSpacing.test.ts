@@ -7,11 +7,15 @@ import {
   normalizeChatSpacingLevel,
 } from './chatSpacing';
 
-test('default spacing keeps today\'s mobile and desktop padding', () => {
-  assert.deepEqual(getChatSpacingClasses('default'), {
+test('spacious spacing keeps the roomiest mobile and desktop padding', () => {
+  assert.deepEqual(getChatSpacingClasses('spacious'), {
     pane: 'px-4',
     row: 'px-3 sm:px-0',
   });
+});
+
+test('compact is the level used when nothing is stored yet', () => {
+  assert.equal(DEFAULT_CHAT_SPACING_LEVEL, 'compact');
 });
 
 test('compact spacing shrinks the mobile padding but keeps the desktop one', () => {
@@ -29,7 +33,7 @@ test('none spacing removes the mobile padding and keeps the desktop one', () => 
 });
 
 test('every level restores the same desktop padding', () => {
-  for (const level of ['default', 'compact', 'none'] as const) {
+  for (const level of ['spacious', 'compact', 'none'] as const) {
     const { pane, row } = getChatSpacingClasses(level);
     assert.ok(pane === 'px-4' || pane.includes('sm:px-4'), `pane keeps 16px on desktop for "${level}"`);
     assert.ok(row.includes('sm:px-0'), `row keeps 0px on desktop for "${level}"`);
@@ -46,7 +50,7 @@ test('unknown levels fall back to the default classes', () => {
 test('normalizes stored values to a known spacing level', () => {
   assert.equal(normalizeChatSpacingLevel('compact'), 'compact');
   assert.equal(normalizeChatSpacingLevel('none'), 'none');
-  assert.equal(normalizeChatSpacingLevel('default'), 'default');
+  assert.equal(normalizeChatSpacingLevel('spacious'), 'spacious');
 });
 
 test('normalizes missing or unknown stored values to the default level', () => {

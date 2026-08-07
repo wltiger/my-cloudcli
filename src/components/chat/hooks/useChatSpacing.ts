@@ -1,19 +1,19 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import {
   CHAT_SPACING_SETTINGS_CHANGED_EVENT,
-  CHAT_SPACING_STORAGE_KEY,
   getChatSpacingClasses,
-  normalizeChatSpacingLevel,
+  readChatSpacingLevel,
+  writeChatSpacingLevel,
 } from '../utils/chatSpacing';
-import type { ChatSpacingClasses } from '../utils/chatSpacing';
+import type { ChatSpacingClasses, ChatSpacingLevel } from '../utils/chatSpacing';
 
-const readChatSpacingLevel = () => (
-  normalizeChatSpacingLevel(localStorage.getItem(CHAT_SPACING_STORAGE_KEY))
-);
-
-/** Mobile-only spacing classes for the message list, live-updated from Settings. */
-export const useChatSpacing = (): ChatSpacingClasses => {
+/**
+ * The stored spacing level plus a setter that persists it. Every surface that
+ * edits the level (Settings, Quick Settings) shares this hook, so a change in
+ * one is picked up by the others without a reload.
+ */
+export const useChatSpacingLevel = (): [ChatSpacingLevel, (level: ChatSpacingLevel) => void] => {
   const [level, setLevel] = useState(readChatSpacingLevel);
 
   useEffect(() => {
@@ -27,6 +27,18 @@ export const useChatSpacing = (): ChatSpacingClasses => {
       window.removeEventListener(CHAT_SPACING_SETTINGS_CHANGED_EVENT, refreshFromStorage);
     };
   }, []);
+
+  const updateLevel = useCallback((next: ChatSpacingLevel) => {
+    setLevel(next);
+    writeChatSpacingLevel(next);
+  }, []);
+
+  return [level, updateLevel];
+};
+
+/** Mobile-only spacing classes for the message list, live-updated from Settings. */
+export const useChatSpacing = (): ChatSpacingClasses => {
+  const [level] = useChatSpacingLevel();
 
   return useMemo(() => getChatSpacingClasses(level), [level]);
 };

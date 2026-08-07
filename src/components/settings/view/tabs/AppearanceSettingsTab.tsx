@@ -143,7 +143,7 @@ export default function AppearanceSettingsTab({
               onChange={(event) => onChatSpacingLevelChange(normalizeChatSpacingLevel(event.target.value))}
               className="w-full touch-manipulation rounded-lg border border-input bg-card p-2.5 text-sm text-foreground focus:border-primary focus:ring-1 focus:ring-primary sm:w-36"
             >
-              <option value="default">{t('appearanceSettings.chatSpacing.default', 'Default')}</option>
+              <option value="spacious">{t('appearanceSettings.chatSpacing.spacious', 'Spacious')}</option>
               <option value="compact">{t('appearanceSettings.chatSpacing.compact', 'Compact')}</option>
               <option value="none">{t('appearanceSettings.chatSpacing.none', 'None')}</option>
             </select>

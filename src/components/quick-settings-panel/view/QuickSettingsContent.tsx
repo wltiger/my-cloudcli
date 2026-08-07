@@ -14,6 +14,7 @@ import type {
   QuickSettingsPreferences,
 } from '../types';
 
+import QuickSettingsChatSpacingRow from './QuickSettingsChatSpacingRow';
 import QuickSettingsSection from './QuickSettingsSection';
 import QuickSettingsToggleRow from './QuickSettingsToggleRow';
 
@@ -60,6 +61,7 @@ export default function QuickSettingsContent({
           <DarkModeToggle />
         </div>
         <LanguageSelector compact />
+        <QuickSettingsChatSpacingRow />
       </QuickSettingsSection>
 
       <QuickSettingsSection title={t('quickSettings.sections.toolDisplay')}>

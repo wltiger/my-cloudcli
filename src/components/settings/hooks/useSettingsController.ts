@@ -4,12 +4,7 @@ import { useTheme } from '../../../contexts/ThemeContext';
 import { authenticatedFetch } from '../../../utils/api';
 import { setNotificationSoundEnabled } from '../../../utils/notificationSound';
 import { useProviderAuthStatus } from '../../provider-auth/hooks/useProviderAuthStatus';
-import {
-  CHAT_SPACING_SETTINGS_CHANGED_EVENT,
-  CHAT_SPACING_STORAGE_KEY,
-  normalizeChatSpacingLevel,
-} from '../../chat/utils/chatSpacing';
-import type { ChatSpacingLevel } from '../../chat/utils/chatSpacing';
+import { useChatSpacingLevel } from '../../chat/hooks/useChatSpacing';
 import {
   DEFAULT_CODE_EDITOR_SETTINGS,
   DEFAULT_CURSOR_PERMISSIONS,
@@ -97,10 +92,6 @@ const readCodeEditorSettings = (): CodeEditorSettingsState => ({
   fontSize: localStorage.getItem('codeEditorFontSize') ?? DEFAULT_CODE_EDITOR_SETTINGS.fontSize,
 });
 
-const readChatSpacingLevel = (): ChatSpacingLevel => (
-  normalizeChatSpacingLevel(localStorage.getItem(CHAT_SPACING_STORAGE_KEY))
-);
-
 const toResponseJson = async <T>(response: Response): Promise<T> => response.json() as Promise<T>;
 
 const createEmptyClaudePermissions = (): ClaudePermissionsState => ({
@@ -157,7 +148,7 @@ export function useSettingsController({ isOpen, initialTab }: UseSettingsControl
   const [codeEditorSettings, setCodeEditorSettings] = useState<CodeEditorSettingsState>(() => (
     readCodeEditorSettings()
   ));
-  const [chatSpacingLevel, setChatSpacingLevel] = useState<ChatSpacingLevel>(readChatSpacingLevel);
+  const [chatSpacingLevel, setChatSpacingLevel] = useChatSpacingLevel();
 
   const [claudePermissions, setClaudePermissions] = useState<ClaudePermissionsState>(() => (
     createEmptyClaudePermissions()
@@ -339,11 +330,6 @@ export function useSettingsController({ isOpen, initialTab }: UseSettingsControl
     localStorage.setItem('codeEditorFontSize', codeEditorSettings.fontSize);
     window.dispatchEvent(new Event('codeEditorSettingsChanged'));
   }, [codeEditorSettings]);
-
-  useEffect(() => {
-    localStorage.setItem(CHAT_SPACING_STORAGE_KEY, chatSpacingLevel);
-    window.dispatchEvent(new Event(CHAT_SPACING_SETTINGS_CHANGED_EVENT));
-  }, [chatSpacingLevel]);
 
   // Auto-save permissions and sort order with debounce
   const autoSaveTimerRef = useRef<number | null>(null);
