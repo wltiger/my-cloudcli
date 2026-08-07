@@ -1,6 +1,8 @@
 import { useTranslation } from 'react-i18next';
 import { DarkModeToggle } from '../../../../shared/view/ui';
 import type { CodeEditorSettingsState, ProjectSortOrder } from '../../types/types';
+import { normalizeChatSpacingLevel } from '../../../chat/utils/chatSpacing';
+import type { ChatSpacingLevel } from '../../../chat/utils/chatSpacing';
 import LanguageSelector from '../../../../shared/view/ui/LanguageSelector';
 import SettingsCard from '../SettingsCard';
 import SettingsRow from '../SettingsRow';
@@ -15,6 +17,8 @@ type AppearanceSettingsTabProps = {
   onCodeEditorShowMinimapChange: (value: boolean) => void;
   onCodeEditorLineNumbersChange: (value: boolean) => void;
   onCodeEditorFontSizeChange: (value: string) => void;
+  chatSpacingLevel: ChatSpacingLevel;
+  onChatSpacingLevelChange: (value: ChatSpacingLevel) => void;
 };
 
 export default function AppearanceSettingsTab({
@@ -25,6 +29,8 @@ export default function AppearanceSettingsTab({
   onCodeEditorShowMinimapChange,
   onCodeEditorLineNumbersChange,
   onCodeEditorFontSizeChange,
+  chatSpacingLevel,
+  onChatSpacingLevelChange,
 }: AppearanceSettingsTabProps) {
   const { t } = useTranslation('settings');
 
@@ -118,6 +124,28 @@ export default function AppearanceSettingsTab({
               <option value="16">16px</option>
               <option value="18">18px</option>
               <option value="20">20px</option>
+            </select>
+          </SettingsRow>
+        </SettingsCard>
+      </SettingsSection>
+
+      <SettingsSection title={t('appearanceSettings.chatSpacing.title', 'Chat')}>
+        <SettingsCard>
+          <SettingsRow
+            label={t('appearanceSettings.chatSpacing.label', 'Message spacing')}
+            description={t(
+              'appearanceSettings.chatSpacing.description',
+              'Horizontal space around chat messages on mobile screens.',
+            )}
+          >
+            <select
+              value={chatSpacingLevel}
+              onChange={(event) => onChatSpacingLevelChange(normalizeChatSpacingLevel(event.target.value))}
+              className="w-full touch-manipulation rounded-lg border border-input bg-card p-2.5 text-sm text-foreground focus:border-primary focus:ring-1 focus:ring-primary sm:w-36"
+            >
+              <option value="default">{t('appearanceSettings.chatSpacing.default', 'Default')}</option>
+              <option value="compact">{t('appearanceSettings.chatSpacing.compact', 'Compact')}</option>
+              <option value="none">{t('appearanceSettings.chatSpacing.none', 'None')}</option>
             </select>
           </SettingsRow>
         </SettingsCard>

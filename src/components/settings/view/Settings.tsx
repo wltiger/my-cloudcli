@@ -43,6 +43,8 @@ function Settings({ isOpen, onClose, projects = [], initialTab = 'agents' }: Set
     setProjectSortOrder,
     codeEditorSettings,
     updateCodeEditorSetting,
+    chatSpacingLevel,
+    setChatSpacingLevel,
     claudePermissions,
     setClaudePermissions,
     notificationPreferences,
@@ -170,6 +172,8 @@ function Settings({ isOpen, onClose, projects = [], initialTab = 'agents' }: Set
                   onCodeEditorShowMinimapChange={(value) => updateCodeEditorSetting('showMinimap', value)}
                   onCodeEditorLineNumbersChange={(value) => updateCodeEditorSetting('lineNumbers', value)}
                   onCodeEditorFontSizeChange={(value) => updateCodeEditorSetting('fontSize', value)}
+                  chatSpacingLevel={chatSpacingLevel}
+                  onChatSpacingLevelChange={setChatSpacingLevel}
                 />
               )}
 
