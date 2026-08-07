@@ -14,7 +14,12 @@ const getIsMobile = (mobileBreakpoint: number): boolean => {
   return window.innerWidth < mobileBreakpoint;
 };
 
-const getIsPWA = (): boolean => {
+/**
+ * True when the page runs as an installed PWA rather than a normal browser tab:
+ * the standard `display-mode: standalone` media feature, plus the iOS Safari
+ * (`navigator.standalone`) and Android TWA (`android-app://` referrer) variants.
+ */
+export const getIsPWA = (): boolean => {
   if (typeof window === 'undefined') {
     return false;
   }

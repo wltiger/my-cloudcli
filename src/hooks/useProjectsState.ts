@@ -11,6 +11,7 @@ import type {
   ProjectSession,
 } from '../types/app';
 
+import { getIsPWA } from './useDeviceSettings';
 import type { SessionActivityMap } from './useSessionProtection';
 
 type UseProjectsStateArgs = {
@@ -371,6 +372,45 @@ const readPersistedTab = (): AppTab => {
   return 'chat';
 };
 
+/**
+ * Last session the user actually had open, remembered across app launches.
+ *
+ * Only read when the app starts as an installed PWA: a home-screen launch
+ * always enters through the manifest `start_url` (`/`), so without this the
+ * user lands on the empty project picker instead of what they were doing.
+ * A plain browser tab keeps its own history and must not be redirected.
+ */
+const LAST_ACTIVE_SESSION_KEY = 'lastActiveSessionId';
+
+const readLastActiveSessionId = (): string | null => {
+  try {
+    const stored = localStorage.getItem(LAST_ACTIVE_SESSION_KEY);
+    return stored && stored.trim() ? stored : null;
+  } catch {
+    // localStorage unavailable
+    return null;
+  }
+};
+
+const rememberLastActiveSessionId = (targetSessionId: string): void => {
+  try {
+    localStorage.setItem(LAST_ACTIVE_SESSION_KEY, targetSessionId);
+  } catch {
+    // Silently ignore storage errors
+  }
+};
+
+/** Drops the remembered id, but only if it is still the one that just failed. */
+const forgetLastActiveSessionId = (targetSessionId: string): void => {
+  try {
+    if (localStorage.getItem(LAST_ACTIVE_SESSION_KEY) === targetSessionId) {
+      localStorage.removeItem(LAST_ACTIVE_SESSION_KEY);
+    }
+  } catch {
+    // Silently ignore storage errors
+  }
+};
+
 export function useProjectsState({
   sessionId,
   navigate,
@@ -446,6 +486,33 @@ export function useProjectsState({
   useEffect(() => {
     sessionLookupRef.current = null;
   }, [sessionId]);
+
+  /** Guards the PWA relaunch redirect so it can only ever fire once per mount. */
+  const pwaSessionRestoreRef = useRef(false);
+
+  // Restore the last open session when the app is relaunched from a home-screen
+  // icon. This runs before the project list arrives so the picker never flashes;
+  // resolving the id is left entirely to the `/session/:id` effect below, which
+  // already handles ids that are not in the loaded project pages — including
+  // stale ones, where it clears the remembered id so the next launch lands on
+  // the normal empty state instead of retrying a dead session.
+  useEffect(() => {
+    if (pwaSessionRestoreRef.current) {
+      return;
+    }
+    pwaSessionRestoreRef.current = true;
+
+    // Only a bare `/` launch of an installed app qualifies. A deep link already
+    // carries its session, and a plain browser tab must keep today's behavior.
+    if (sessionId || !getIsPWA()) {
+      return;
+    }
+
+    const lastActiveSessionId = readLastActiveSessionId();
+    if (lastActiveSessionId) {
+      navigate(`/session/${lastActiveSessionId}`, { replace: true });
+    }
+  }, [navigate, sessionId]);
 
   const markSessionAttention = useCallback((targetSessionId?: string | null) => {
     if (!targetSessionId) {
@@ -837,6 +904,7 @@ export function useProjectsState({
         if (shouldUpdateSession) {
           setSelectedSession(normalizedSession);
         }
+        rememberLastActiveSessionId(sessionId);
         return;
       }
     }
@@ -874,6 +942,10 @@ export function useProjectsState({
       }
 
       if (!details) {
+        // The id no longer resolves (deleted session, or the lookup failed):
+        // stop remembering it so a PWA relaunch does not retry it forever.
+        forgetLastActiveSessionId(sessionId);
+
         // Unknown session id (or lookup failed). Fall back to the legacy
         // behavior: host a placeholder under the currently selected project so
         // chat state stays alive (without a `selectedSession`, chat clears
@@ -944,6 +1016,7 @@ export function useProjectsState({
           ? { ...previousSession, ...resolvedSession }
           : resolvedSession,
       );
+      rememberLastActiveSessionId(sessionId);
     })();
   }, [navigate, sessionId, projects, selectedProject, selectedSession?.id, selectedSession?.__provider]);
 
