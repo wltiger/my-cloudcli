@@ -68,6 +68,8 @@ function Sidebar({
     searchFilter,
     searchMode,
     setSearchMode,
+    favoritesFilterEnabled,
+    toggleFavoritesFilter,
     conversationResults,
     isSearching,
     searchProgress,
@@ -250,6 +252,8 @@ function Sidebar({
               setSearchMode(mode);
               if (mode === 'projects') clearConversationResults();
             }}
+            favoritesFilterEnabled={favoritesFilterEnabled}
+            onToggleFavoritesFilter={toggleFavoritesFilter}
             conversationResults={conversationResults}
             isSearching={isSearching}
             searchProgress={searchProgress}

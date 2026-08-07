@@ -16,11 +16,14 @@ import type {
 } from '../types/types';
 import {
   clearLegacyStarredProjectIds,
+  filterFavoriteProjects,
   filterProjects,
   getAllSessions,
+  readFavoritesFilterEnabled,
   readLegacyStarredProjectIds,
   readProjectSortOrder,
   sortProjects,
+  writeFavoritesFilterEnabled,
 } from '../utils/utils';
 
 type SnippetHighlight = {
@@ -124,6 +127,7 @@ export function useSidebarController({
   const [initialSessionsLoaded, setInitialSessionsLoaded] = useState<Set<string>>(new Set());
   const [currentTime, setCurrentTime] = useState(new Date());
   const [projectSortOrder, setProjectSortOrder] = useState<ProjectSortOrder>('name');
+  const [favoritesFilterEnabled, setFavoritesFilterEnabled] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [editingSession, setEditingSession] = useState<string | null>(null);
   const [editingSessionName, setEditingSessionName] = useState('');
@@ -196,15 +200,16 @@ export function useSidebarController({
   }, [projects, isLoading]);
 
   useEffect(() => {
-    const loadSortOrder = () => {
+    const loadStoredPreferences = () => {
       setProjectSortOrder(readProjectSortOrder());
+      setFavoritesFilterEnabled(readFavoritesFilterEnabled());
     };
 
-    loadSortOrder();
+    loadStoredPreferences();
 
     const handleStorageChange = (event: StorageEvent) => {
       if (event.key === 'claude-settings') {
-        loadSortOrder();
+        loadStoredPreferences();
       }
     };
 
@@ -212,7 +217,7 @@ export function useSidebarController({
 
     const interval = setInterval(() => {
       if (document.hasFocus()) {
-        loadSortOrder();
+        loadStoredPreferences();
       }
     }, 1000);
 
@@ -613,10 +618,16 @@ export function useSidebarController({
     }, []);
   }, [activeSessionIds, sortedProjects]);
 
-  const filteredProjects = useMemo(
-    () => filterProjects(searchMode === 'running' ? runningProjects : sortedProjects, debouncedSearchQuery),
-    [debouncedSearchQuery, runningProjects, searchMode, sortedProjects],
-  );
+  const filteredProjects = useMemo(() => {
+    const baseProjects = searchMode === 'running' ? runningProjects : sortedProjects;
+    // Favorites filter is scoped to the Projects tab only.
+    const favoriteScopedProjects = filterFavoriteProjects(
+      baseProjects,
+      searchMode === 'projects' && favoritesFilterEnabled,
+    );
+
+    return filterProjects(favoriteScopedProjects, debouncedSearchQuery);
+  }, [debouncedSearchQuery, favoritesFilterEnabled, runningProjects, searchMode, sortedProjects]);
 
   const filteredArchivedSessions = useMemo(() => {
     const normalizedSearch = debouncedSearchQuery.trim().toLowerCase();
@@ -918,6 +929,12 @@ export function useSidebarController({
     [onRefresh, t],
   );
 
+  const toggleFavoritesFilter = useCallback(() => {
+    const nextEnabled = !favoritesFilterEnabled;
+    setFavoritesFilterEnabled(nextEnabled);
+    writeFavoritesFilterEnabled(nextEnabled);
+  }, [favoritesFilterEnabled]);
+
   const collapseSidebar = useCallback(() => {
     setSidebarVisible(false);
   }, [setSidebarVisible]);
@@ -935,6 +952,8 @@ export function useSidebarController({
     initialSessionsLoaded,
     currentTime,
     projectSortOrder,
+    favoritesFilterEnabled,
+    toggleFavoritesFilter,
     isRefreshing,
     editingSession,
     editingSessionName,

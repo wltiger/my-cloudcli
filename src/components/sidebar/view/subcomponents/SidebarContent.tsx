@@ -126,6 +126,8 @@ type SidebarContentProps = {
   onClearSearchFilter: () => void;
   searchMode: SidebarSearchMode;
   onSearchModeChange: (mode: SidebarSearchMode) => void;
+  favoritesFilterEnabled: boolean;
+  onToggleFavoritesFilter: () => void;
   conversationResults: ConversationSearchResults | null;
   isSearching: boolean;
   searchProgress: SearchProgress | null;
@@ -166,6 +168,8 @@ export default function SidebarContent({
   onClearSearchFilter,
   searchMode,
   onSearchModeChange,
+  favoritesFilterEnabled,
+  onToggleFavoritesFilter,
   conversationResults,
   isSearching,
   searchProgress,
@@ -214,6 +218,8 @@ export default function SidebarContent({
         onClearSearchFilter={onClearSearchFilter}
         searchMode={searchMode}
         onSearchModeChange={onSearchModeChange}
+        favoritesFilterEnabled={favoritesFilterEnabled}
+        onToggleFavoritesFilter={onToggleFavoritesFilter}
         onRefresh={onRefresh}
         isRefreshing={isRefreshing}
         onCreateProject={onCreateProject}

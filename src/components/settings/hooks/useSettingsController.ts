@@ -248,7 +248,14 @@ export function useSettingsController({ isOpen, initialTab }: UseSettingsControl
 
     try {
       const now = new Date().toISOString();
+      // Keep entries this panel doesn't own (e.g. the sidebar Favorites filter)
+      // instead of overwriting the whole `claude-settings` object.
+      const existingClaudeSettings = parseJson<Record<string, unknown>>(
+        localStorage.getItem('claude-settings'),
+        {},
+      );
       localStorage.setItem('claude-settings', JSON.stringify({
+        ...existingClaudeSettings,
         allowedTools: claudePermissions.allowedTools,
         disallowedTools: claudePermissions.disallowedTools,
         skipPermissions: claudePermissions.skipPermissions,

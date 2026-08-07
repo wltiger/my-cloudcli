@@ -17,6 +17,37 @@ export const readProjectSortOrder = (): ProjectSortOrder => {
   }
 };
 
+/**
+ * Reads the Favorites filter preference (Projects tab only) from the shared
+ * `claude-settings` entry, mirroring how `projectSortOrder` is persisted.
+ */
+export const readFavoritesFilterEnabled = (): boolean => {
+  try {
+    const rawSettings = localStorage.getItem('claude-settings');
+    if (!rawSettings) {
+      return false;
+    }
+
+    const settings = JSON.parse(rawSettings) as { favoritesFilterEnabled?: boolean };
+    return settings.favoritesFilterEnabled === true;
+  } catch {
+    return false;
+  }
+};
+
+export const writeFavoritesFilterEnabled = (enabled: boolean) => {
+  try {
+    const rawSettings = localStorage.getItem('claude-settings');
+    const settings = rawSettings ? (JSON.parse(rawSettings) as Record<string, unknown>) : {};
+    localStorage.setItem('claude-settings', JSON.stringify({
+      ...settings,
+      favoritesFilterEnabled: enabled,
+    }));
+  } catch {
+    // Keep UI responsive even if storage is unavailable.
+  }
+};
+
 const LEGACY_STARRED_PROJECTS_STORAGE_KEY = 'starredProjects';
 
 /**
@@ -159,6 +190,18 @@ export const filterProjects = (projects: Project[], searchFilter: string): Proje
     const searchPath = (project.path || project.fullPath || '').toLowerCase();
     return displayName.includes(normalizedSearch) || searchPath.includes(normalizedSearch);
   });
+};
+
+/**
+ * Favorites filter: keeps only Starred projects when enabled. Purely a view
+ * filter — it never changes what is stored on a project.
+ */
+export const filterFavoriteProjects = (projects: Project[], favoritesOnly: boolean): Project[] => {
+  if (!favoritesOnly) {
+    return projects;
+  }
+
+  return projects.filter((project) => Boolean(project.isStarred));
 };
 
 export const getTaskIndicatorStatus = (

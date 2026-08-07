@@ -1,4 +1,4 @@
-import { Activity, Archive, Folder, FolderPlus, MessageSquare, Plus, RefreshCw, Search, X, PanelLeftClose } from 'lucide-react';
+import { Activity, Archive, Folder, FolderPlus, MessageSquare, Plus, RefreshCw, Search, Star, X, PanelLeftClose } from 'lucide-react';
 import type { TFunction } from 'i18next';
 
 import { Button, Input, Tooltip } from '../../../../shared/view/ui';
@@ -11,6 +11,35 @@ import GitHubStarBadge from './GitHubStarBadge';
 
 const MOD_KEY =
   typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform) ? '⌘' : 'Ctrl';
+
+type FavoritesFilterToggleProps = {
+  enabled: boolean;
+  label: string;
+  className?: string;
+  onToggle: () => void;
+};
+
+/** Favorites filter: Projects tab only, purely a client-side view filter. */
+function FavoritesFilterToggle({ enabled, label, className, onToggle }: FavoritesFilterToggleProps) {
+  return (
+    <button
+      type="button"
+      onClick={onToggle}
+      aria-pressed={enabled}
+      aria-label={label}
+      title={label}
+      className={cn(
+        'flex flex-shrink-0 items-center justify-center rounded-xl border transition-all',
+        enabled
+          ? 'border-amber-500/30 bg-amber-500/10 text-amber-500'
+          : 'border-border/60 text-muted-foreground hover:bg-accent/60 hover:text-foreground',
+        className,
+      )}
+    >
+      <Star className={cn('h-3.5 w-3.5', enabled && 'fill-current')} />
+    </button>
+  );
+}
 
 type SidebarHeaderProps = {
   isPWA: boolean;
@@ -25,6 +54,8 @@ type SidebarHeaderProps = {
   onClearSearchFilter: () => void;
   searchMode: SidebarSearchMode;
   onSearchModeChange: (mode: SidebarSearchMode) => void;
+  favoritesFilterEnabled: boolean;
+  onToggleFavoritesFilter: () => void;
   onRefresh: () => void;
   isRefreshing: boolean;
   onCreateProject: () => void;
@@ -46,6 +77,8 @@ export default function SidebarHeader({
   onClearSearchFilter,
   searchMode,
   onSearchModeChange,
+  favoritesFilterEnabled,
+  onToggleFavoritesFilter,
   onRefresh,
   isRefreshing,
   onCreateProject,
@@ -62,6 +95,8 @@ export default function SidebarHeader({
         ? t('search.runningPlaceholder', 'Search running sessions...')
         : t('projects.searchPlaceholder');
   const runningBadgeText = runningSessionsCount > 99 ? '99+' : String(runningSessionsCount);
+
+  const favoritesFilterLabel = t('search.favoritesOnlyTooltip', 'Show starred projects only');
 
   const LogoBlock = () => (
     <div className="flex min-w-0 items-center gap-2.5">
@@ -208,32 +243,42 @@ export default function SidebarHeader({
                 </button>
               </Tooltip>
             </div>
-            <div className="relative">
-              <Search className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground/50" />
-              <Input
-                type="text"
-                placeholder={searchPlaceholder}
-                value={searchFilter}
-                onChange={(event) => onSearchFilterChange(event.target.value)}
-                className="nav-search-input h-9 rounded-xl border-0 pl-9 pr-14 text-sm transition-all duration-200 placeholder:text-muted-foreground/40 focus-visible:ring-0 focus-visible:ring-offset-0"
-              />
-              {searchFilter ? (
-                <button
-                  onClick={onClearSearchFilter}
-                  aria-label={t('tooltips.clearSearch')}
-                  className="absolute right-2.5 top-1/2 -translate-y-1/2 rounded-md p-0.5 hover:bg-accent"
-                >
-                  <X className="h-3 w-3 text-muted-foreground" />
-                </button>
-              ) : (
-                <kbd
-                  aria-hidden
-                  title={t('tooltips.openCommandPalette')}
-                  className="pointer-events-none absolute right-2.5 top-1/2 hidden -translate-y-1/2 items-center gap-0.5 rounded border border-border/60 bg-muted/40 px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground md:inline-flex"
-                >
-                  {MOD_KEY}
-                  <span>K</span>
-                </kbd>
+            <div className="flex items-center gap-1.5">
+              <div className="relative min-w-0 flex-1">
+                <Search className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground/50" />
+                <Input
+                  type="text"
+                  placeholder={searchPlaceholder}
+                  value={searchFilter}
+                  onChange={(event) => onSearchFilterChange(event.target.value)}
+                  className="nav-search-input h-9 rounded-xl border-0 pl-9 pr-14 text-sm transition-all duration-200 placeholder:text-muted-foreground/40 focus-visible:ring-0 focus-visible:ring-offset-0"
+                />
+                {searchFilter ? (
+                  <button
+                    onClick={onClearSearchFilter}
+                    aria-label={t('tooltips.clearSearch')}
+                    className="absolute right-2.5 top-1/2 -translate-y-1/2 rounded-md p-0.5 hover:bg-accent"
+                  >
+                    <X className="h-3 w-3 text-muted-foreground" />
+                  </button>
+                ) : (
+                  <kbd
+                    aria-hidden
+                    title={t('tooltips.openCommandPalette')}
+                    className="pointer-events-none absolute right-2.5 top-1/2 hidden -translate-y-1/2 items-center gap-0.5 rounded border border-border/60 bg-muted/40 px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground md:inline-flex"
+                  >
+                    {MOD_KEY}
+                    <span>K</span>
+                  </kbd>
+                )}
+              </div>
+              {searchMode === 'projects' && (
+                <FavoritesFilterToggle
+                  enabled={favoritesFilterEnabled}
+                  label={favoritesFilterLabel}
+                  className="h-9 w-9"
+                  onToggle={onToggleFavoritesFilter}
+                />
               )}
             </div>
           </div>
@@ -358,23 +403,33 @@ export default function SidebarHeader({
                 </button>
               </Tooltip>
             </div>
-            <div className="relative">
-              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground/50" />
-              <Input
-                type="text"
-                placeholder={searchPlaceholder}
-                value={searchFilter}
-                onChange={(event) => onSearchFilterChange(event.target.value)}
-                className="nav-search-input h-10 rounded-xl border-0 pl-10 pr-9 text-sm transition-all duration-200 placeholder:text-muted-foreground/40 focus-visible:ring-0 focus-visible:ring-offset-0"
-              />
-              {searchFilter && (
-                <button
-                  onClick={onClearSearchFilter}
-                  aria-label={t('tooltips.clearSearch')}
-                  className="absolute right-2.5 top-1/2 -translate-y-1/2 rounded-md p-1 hover:bg-accent"
-                >
-                  <X className="h-3.5 w-3.5 text-muted-foreground" />
-                </button>
+            <div className="flex items-center gap-1.5">
+              <div className="relative min-w-0 flex-1">
+                <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground/50" />
+                <Input
+                  type="text"
+                  placeholder={searchPlaceholder}
+                  value={searchFilter}
+                  onChange={(event) => onSearchFilterChange(event.target.value)}
+                  className="nav-search-input h-10 rounded-xl border-0 pl-10 pr-9 text-sm transition-all duration-200 placeholder:text-muted-foreground/40 focus-visible:ring-0 focus-visible:ring-offset-0"
+                />
+                {searchFilter && (
+                  <button
+                    onClick={onClearSearchFilter}
+                    aria-label={t('tooltips.clearSearch')}
+                    className="absolute right-2.5 top-1/2 -translate-y-1/2 rounded-md p-1 hover:bg-accent"
+                  >
+                    <X className="h-3.5 w-3.5 text-muted-foreground" />
+                  </button>
+                )}
+              </div>
+              {searchMode === 'projects' && (
+                <FavoritesFilterToggle
+                  enabled={favoritesFilterEnabled}
+                  label={favoritesFilterLabel}
+                  className="h-10 w-10"
+                  onToggle={onToggleFavoritesFilter}
+                />
               )}
             </div>
           </div>
