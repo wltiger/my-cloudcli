@@ -100,7 +100,7 @@ temp/
 .netlify
 
 # AI specific
-.claude/
+.claude/*
 .cursor/
 .roo/
 .taskmaster/
@@ -110,6 +110,16 @@ temp/
 CLAUDE.md
 .mcp.json
 .gemini/
+
+# .claude/ is tracked selectively in this fork: CLAUDE.md and skills/ travel
+# with the repo, everything else (local settings, session state) stays
+# ignored. Must come after the blanket `.claude/*` and bare `CLAUDE.md`
+# rules above — gitignore re-inclusion only wins over rules earlier in the
+# file, and `CLAUDE.md` (no leading slash) would otherwise re-ignore
+# .claude/CLAUDE.md too.
+!.claude/CLAUDE.md
+!.claude/skills/
+!.claude/skills/**
 
 # Database files
 *.db
