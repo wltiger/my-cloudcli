@@ -81,6 +81,10 @@ const DEFAULT_SETTINGS: BrowserUseSettings = {
 };
 const AGENT_OWNER_ID = 'agent';
 const PROFILE_ROOT = path.join(os.homedir(), '.cloudcli', 'browser-use', 'profiles');
+// Playwright is installed on demand, so it needs a directory that both the
+// installer and the resolver agree on. process.cwd() is whatever the user
+// launched CloudCLI from, which node's resolution never walks into.
+const RUNTIME_ROOT = path.join(os.homedir(), '.cloudcli', 'browser-use', 'runtime');
 const MCP_SERVER_NAME = 'cloudcli-browser';
 const LEGACY_MCP_SERVER_NAMES = ['cloudcli-browser-use'];
 const RUNTIME_READINESS_CACHE_TTL_MS = 30_000;
@@ -142,11 +146,17 @@ function getSetupMessage(settings: BrowserUseSettings, readiness: RuntimeReadine
 }
 
 function getPlaywright(): any | null {
-  try {
-    return require('playwright');
-  } catch {
-    return null;
+  // This module first (dev checkout or a global install that bundles it),
+  // then the runtime directory installRuntime() writes to.
+  for (const resolve of [require, createRequire(path.join(RUNTIME_ROOT, 'index.js'))]) {
+    try {
+      return resolve('playwright');
+    } catch {
+      continue;
+    }
   }
+
+  return null;
 }
 
 function getMcpCommand(): { command: string; args: string[] } {
@@ -244,10 +254,10 @@ const INSTALL_COMMAND_TIMEOUT_MS = Number.parseInt(
   10,
 );
 
-function runCommand(command: string, args: string[]): Promise<void> {
+function runCommand(command: string, args: string[], cwd: string): Promise<void> {
   return new Promise((resolve, reject) => {
     const child = spawn(command, args, {
-      cwd: process.cwd(),
+      cwd,
       env: process.env,
       shell: false,
       stdio: ['ignore', 'pipe', 'pipe'],
@@ -295,6 +305,24 @@ function formatInstallError(error: unknown): string {
   return message || 'Failed to install Browser runtime.';
 }
 
+// npm resolves the project root by walking up from cwd, so the runtime
+// directory needs its own manifest to stay isolated from whatever sits above it.
+function ensureRuntimeRoot(): string {
+  fs.mkdirSync(RUNTIME_ROOT, { recursive: true });
+
+  const manifestPath = path.join(RUNTIME_ROOT, 'package.json');
+  if (!fs.existsSync(manifestPath)) {
+    fs.writeFileSync(manifestPath, `${JSON.stringify({
+      name: 'cloudcli-browser-use-runtime',
+      version: '1.0.0',
+      private: true,
+      description: 'Playwright runtime installed on demand by CloudCLI Browser.',
+    }, null, 2)}\n`);
+  }
+
+  return RUNTIME_ROOT;
+}
+
 async function installRuntime(): Promise<{ success: boolean; message: string }> {
   if (installPromise) {
     return installPromise;
@@ -305,15 +333,16 @@ async function installRuntime(): Promise<{ success: boolean; message: string }> 
   installPromise = (async () => {
     try {
       lastInstallMessage = 'Installing Playwright package...';
-      await runCommand(npmCommand, ['install', '--no-save', '--no-package-lock', 'playwright']);
+      const runtimeRoot = ensureRuntimeRoot();
+      await runCommand(npmCommand, ['install', 'playwright'], runtimeRoot);
 
       if (process.platform === 'linux') {
         lastInstallMessage = 'Installing Chromium system dependencies...';
-        await runCommand(npmCommand, ['exec', '--', 'playwright', 'install-deps', 'chromium']);
+        await runCommand(npmCommand, ['exec', '--', 'playwright', 'install-deps', 'chromium'], runtimeRoot);
       }
 
       lastInstallMessage = 'Installing Chromium runtime...';
-      await runCommand(npmCommand, ['exec', '--', 'playwright', 'install', 'chromium']);
+      await runCommand(npmCommand, ['exec', '--', 'playwright', 'install', 'chromium'], runtimeRoot);
 
       lastInstallMessage = 'Browser runtime installed.';
       return { success: true, message: lastInstallMessage };

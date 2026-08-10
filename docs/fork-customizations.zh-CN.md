@@ -109,3 +109,11 @@
 **为什么改：** 官方的命令面板本来就能切会话，但唯一的触发方式是 Cmd/Ctrl+K——sidebar 里那个看着像按钮的东西其实是 `pointer-events-none` 的 `<kbd>` 徽章，而且 `md:` 以下根本不显示。于是手机上面板完全打不开，切会话只能开 sidebar。现在点聊天标题会直接把面板开在 Sessions 页，顺带也让面板的文件/commit/分支搜索在触屏上能用了。官方的 Sessions 分组只列当前项目（和 sidebar 是同一批），所以另加了一个 fork 自有的「Recent sessions (all projects)」分组来回答「我刚才在哪」，并且会和官方已经列出的行去重。切换本身就是 `navigate('/session/:id')`——已有的会话解析逻辑会自己找到所属项目，所以跨项目不需要额外的切项目代码。后端加了 `getRecentSessions(limit)`（`getAllSessions` 既没排序也没上限）和 `GET /api/providers/sessions/recent`；`sessions/running` 用不上，它是故意做成只返回状态的。
 
 **同步官方时怎么办：** 保留我的。上游改动刻意只有三处：`CommandPalette.tsx` 里一个监听 fork 自定义 `cloudcli:open-command-palette` window 事件的 `useEffect`、官方 Sessions 分组后面一个 `<ForkRecentSessions />`、以及 `MainContentTitle.tsx` 里标题变成按钮。列表、hook、事件全部在 fork 自有文件里，冲突后把这三处放回去即可。用 window 事件就是为了让面板不需要多一个 prop 或 context 句柄；官方以后要是自己做了外部打开的机制，就把监听删掉改调官方的。文案用 `t(key, '英文兜底')`，没动 `src/i18n/locales/**`（和第 3 条一致）。会话没有存名字时行标题会退化成 session id——那是 #9 记录的命名问题，不是这条引入的。
+
+## 14. Browser 运行时装到自己管理的目录
+
+**涉及文件：** `server/modules/browser-use/browser-use.service.ts`
+
+**为什么改：** 官方的 `installRuntime()` 用 `cwd: process.cwd()` 跑 `npm install --no-save --no-package-lock playwright`，但 `getPlaywright()` 是从模块自身所在位置去 `require('playwright')`。全局安装的 CloudCLI 下这是两棵完全不同的树：包会装到用户当时启动 CLI 的那个目录（多半是用户主目录），而从 `<npm root -g>/@cloudcli-ai/cloudcli/dist-server/server/modules/browser-use/` 往上找 `node_modules` 永远走不到那里。结果就是装其实成功了，设置页却一直显示 `Playwright: missing`，"Install Runtime" 按钮点多少次都像没反应——每次只是往同一个够不着的地方重装一遍。现在固定装到 `~/.cloudcli/browser-use/runtime`（和已有的 `profiles/` 并列），并先写一个私有 `package.json`，免得 npm 往上找项目根、把上层目录当成自己的工程；`getPlaywright()` 则先按模块自身位置解析，找不到再从这个目录解析。`runCommand()` 为此多了一个 `cwd` 参数。manifest 既然是自己的，去掉 `--no-save --no-package-lock` 就没有副作用，留着 lockfile 重装还更快。
+
+**同步官方时怎么办：** 这属于纯 bug 修复而不是 fork 偏好，值得给官方提 PR，官方收了就把这条删掉。在那之前保留我的，但要把 `installRuntime()` 和 `getPlaywright()` 当成一对看：两边必须配套才成立，官方要是改了其中一个，就两半一起重新应用，别只合一边留另一边。如果官方改成把 playwright 作为正式依赖发布，那这条整条丢掉即可——第一级解析本来就覆盖那种情况。
