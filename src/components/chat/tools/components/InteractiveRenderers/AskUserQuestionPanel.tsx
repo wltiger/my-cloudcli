@@ -6,6 +6,7 @@ import { FullscreenSurface, FullscreenToggleButton } from '../../../../../shared
 export const AskUserQuestionPanel: React.FC<PermissionPanelProps> = ({
   request,
   onDecision,
+  sessionTitle,
 }) => {
   const input = request.input as { questions?: Question[] } | undefined;
   const questions: Question[] = input?.questions || [];
@@ -150,6 +151,69 @@ export const AskUserQuestionPanel: React.FC<PermissionPanelProps> = ({
   const isFirst = currentStep === 0;
   const hasCurrentSelection = selected.size > 0 || (isOtherOn && (otherTexts.get(currentStep) || '').trim().length > 0);
 
+  // Split out of the card so fullscreen can pin it to the bottom of the
+  // viewport — the card's own `overflow-hidden` would trap a sticky footer.
+  const footer = (
+    <div className={`flex items-center justify-between gap-2 border-gray-100 px-4 dark:border-gray-700/50 ${
+      isFullscreen
+        ? 'py-3'
+        : 'border-t bg-gray-50/50 py-2 dark:bg-gray-800/50'
+    }`}>
+      <button
+        type="button"
+        onClick={handleSkip}
+        className={`text-gray-400 transition-colors hover:text-gray-600 dark:text-gray-500 dark:hover:text-gray-300 ${
+          isFullscreen ? 'text-[13px]' : 'text-[11px]'
+        }`}
+      >
+        {isSingle ? 'Skip' : 'Skip all'}
+        <span className="ml-1 text-[9px] text-gray-300 dark:text-gray-600">Esc</span>
+      </button>
+
+      <div className="flex items-center gap-1.5">
+        {!isSingle && !isFirst && (
+          <button
+            type="button"
+            onClick={() => setCurrentStep(s => s - 1)}
+            className={`inline-flex items-center gap-0.5 rounded-lg font-medium text-gray-600 transition-all duration-150 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700/60 ${
+              isFullscreen ? 'px-3.5 py-2.5 text-[14px]' : 'px-2.5 py-1.5 text-[11px]'
+            }`}
+          >
+            <svg className="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
+            </svg>
+            Back
+          </button>
+        )}
+
+        {isLast ? (
+          <button
+            type="button"
+            onClick={handleSubmit}
+            disabled={!hasCurrentSelection && !Object.keys(buildAnswers()).length}
+            className={`inline-flex items-center gap-1 rounded-lg bg-gradient-to-r from-blue-600 to-blue-500 font-semibold text-white shadow-sm transition-all duration-200 hover:shadow-md disabled:cursor-not-allowed disabled:opacity-30 disabled:shadow-none dark:from-blue-500 dark:to-blue-600 ${
+              isFullscreen ? 'px-6 py-2.5 text-[14px]' : 'px-3.5 py-1.5 text-[11px]'
+            }`}
+          >
+            Submit
+            <span className="ml-0.5 font-mono text-[9px] opacity-70">Enter</span>
+          </button>
+        ) : (
+          <button
+            type="button"
+            onClick={() => setCurrentStep(s => s + 1)}
+            className={`inline-flex items-center gap-1 rounded-lg bg-gradient-to-r from-blue-600 to-blue-500 font-semibold text-white shadow-sm transition-all duration-200 hover:shadow-md dark:from-blue-500 dark:to-blue-600 ${
+              isFullscreen ? 'px-6 py-2.5 text-[14px]' : 'px-3.5 py-1.5 text-[11px]'
+            }`}
+          >
+            Next
+            <span className="ml-0.5 font-mono text-[9px] opacity-70">Enter</span>
+          </button>
+        )}
+      </div>
+    </div>
+  );
+
   const panel = (
     <div
       ref={containerRef}
@@ -226,7 +290,7 @@ export const AskUserQuestionPanel: React.FC<PermissionPanelProps> = ({
           )}
 
           {/* Question text */}
-          <p className={`font-medium leading-snug text-gray-900 dark:text-gray-100 ${isFullscreen ? 'text-xl' : 'text-[14px]'}`}>
+          <p className={`font-medium leading-snug text-gray-900 dark:text-gray-100 ${isFullscreen ? 'text-[19px]' : 'text-[14px]'}`}>
             {q.question}
           </p>
           {multi && (
@@ -263,7 +327,7 @@ export const AskUserQuestionPanel: React.FC<PermissionPanelProps> = ({
 
                   <div className="min-w-0 flex-1">
                     <div className={`leading-tight transition-colors duration-150 ${
-                      isFullscreen ? 'text-[19px]' : 'text-[13px]'
+                      isFullscreen ? 'text-[18px]' : 'text-[13px]'
                     } ${
                       isSelected
                         ? 'font-medium text-gray-900 dark:text-gray-100'
@@ -273,7 +337,7 @@ export const AskUserQuestionPanel: React.FC<PermissionPanelProps> = ({
                     </div>
                     {opt.description && (
                       <div className={`leading-snug transition-colors duration-150 ${
-                        isFullscreen ? 'mt-1 text-[17px]' : 'text-[11px]'
+                        isFullscreen ? 'mt-1 text-[15px]' : 'text-[11px]'
                       } ${
                         isSelected
                           ? 'text-blue-600/70 dark:text-blue-300/70'
@@ -312,7 +376,7 @@ export const AskUserQuestionPanel: React.FC<PermissionPanelProps> = ({
                 0
               </kbd>
               <span className={`leading-tight transition-colors ${
-                isFullscreen ? 'text-[19px]' : 'text-[13px]'
+                isFullscreen ? 'text-[18px]' : 'text-[13px]'
               } ${
                 isOtherOn
                   ? 'font-medium text-gray-900 dark:text-gray-100'
@@ -357,53 +421,7 @@ export const AskUserQuestionPanel: React.FC<PermissionPanelProps> = ({
           </div>
         </div>
 
-        {/* Footer — compact */}
-        <div className="flex items-center justify-between gap-2 border-t border-gray-100 bg-gray-50/50 px-4 py-2 dark:border-gray-700/50 dark:bg-gray-800/50">
-          <button
-            type="button"
-            onClick={handleSkip}
-            className="text-[11px] text-gray-400 transition-colors hover:text-gray-600 dark:text-gray-500 dark:hover:text-gray-300"
-          >
-            {isSingle ? 'Skip' : 'Skip all'}
-            <span className="ml-1 text-[9px] text-gray-300 dark:text-gray-600">Esc</span>
-          </button>
-
-          <div className="flex items-center gap-1.5">
-            {!isSingle && !isFirst && (
-              <button
-                type="button"
-                onClick={() => setCurrentStep(s => s - 1)}
-                className="inline-flex items-center gap-0.5 rounded-lg px-2.5 py-1.5 text-[11px] font-medium text-gray-600 transition-all duration-150 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700/60"
-              >
-                <svg className="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
-                </svg>
-                Back
-              </button>
-            )}
-
-            {isLast ? (
-              <button
-                type="button"
-                onClick={handleSubmit}
-                disabled={!hasCurrentSelection && !Object.keys(buildAnswers()).length}
-                className="inline-flex items-center gap-1 rounded-lg bg-gradient-to-r from-blue-600 to-blue-500 px-3.5 py-1.5 text-[11px] font-semibold text-white shadow-sm transition-all duration-200 hover:shadow-md disabled:cursor-not-allowed disabled:opacity-30 disabled:shadow-none dark:from-blue-500 dark:to-blue-600"
-              >
-                Submit
-                <span className="ml-0.5 font-mono text-[9px] opacity-70">Enter</span>
-              </button>
-            ) : (
-              <button
-                type="button"
-                onClick={() => setCurrentStep(s => s + 1)}
-                className="inline-flex items-center gap-1 rounded-lg bg-gradient-to-r from-blue-600 to-blue-500 px-3.5 py-1.5 text-[11px] font-semibold text-white shadow-sm transition-all duration-200 hover:shadow-md dark:from-blue-500 dark:to-blue-600"
-              >
-                Next
-                <span className="ml-0.5 font-mono text-[9px] opacity-70">Enter</span>
-              </button>
-            )}
-          </div>
-        </div>
+        {!isFullscreen && footer}
       </div>
     </div>
   );
@@ -414,8 +432,9 @@ export const AskUserQuestionPanel: React.FC<PermissionPanelProps> = ({
     <FullscreenSurface
       open
       onClose={() => setIsFullscreen(false)}
-      title="Claude needs your input"
+      title={sessionTitle || 'Claude needs your input'}
       closeLabel="Exit fullscreen"
+      footer={footer}
     >
       {panel}
     </FullscreenSurface>

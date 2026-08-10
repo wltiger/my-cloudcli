@@ -61,6 +61,7 @@ interface ChatComposerProps {
     decision: { allow?: boolean; message?: string; rememberEntry?: string | null; updatedInput?: unknown },
   ) => void;
   handleGrantToolPermission: (suggestion: { entry: string; toolName: string }) => { success: boolean };
+  sessionTitle?: string;
   activity: SessionActivity | null;
   isLoading: boolean;
   onAbortSession: () => void;
@@ -125,6 +126,7 @@ export default function ChatComposer({
   pendingPermissionRequests,
   handlePermissionDecision,
   handleGrantToolPermission,
+  sessionTitle,
   activity,
   isLoading,
   onAbortSession,
@@ -258,6 +260,7 @@ export default function ChatComposer({
             pendingPermissionRequests={pendingPermissionRequests}
             handlePermissionDecision={handlePermissionDecision}
             handleGrantToolPermission={handleGrantToolPermission}
+            sessionTitle={sessionTitle}
           />
         </div>
       )}

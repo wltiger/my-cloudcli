@@ -221,6 +221,15 @@ function ChatInterface({
     resolvePermissionModeForProvider,
   });
 
+  // Shown as the header of anything this session opens fullscreen (currently
+  // the AskUserQuestion panel), so the question is attributable when it fills
+  // the whole screen. Mirrors MainContentTitle's own session naming.
+  const sessionTitle = selectedSession
+    ? (selectedSession.__provider === 'cursor'
+      ? (selectedSession.name as string | undefined)
+      : (selectedSession.summary as string | undefined)) || undefined
+    : undefined;
+
   // On WebSocket reconnect, re-fetch the current session's messages from the
   // server so missed streaming events are shown, then re-subscribe — the
   // `chat_subscribed` ack restores or clears the activity indicator, replays
@@ -396,6 +405,7 @@ function ChatInterface({
           pendingPermissionRequests={pendingPermissionRequests}
           handlePermissionDecision={handlePermissionDecision}
           handleGrantToolPermission={handleGrantToolPermission}
+          sessionTitle={sessionTitle}
           activity={sessionActivity}
           isLoading={isProcessing}
           onAbortSession={handleAbortSession}

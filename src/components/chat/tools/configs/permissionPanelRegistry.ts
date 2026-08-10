@@ -3,6 +3,8 @@ import type { PendingPermissionRequest } from '../../types/types';
 
 export interface PermissionPanelProps {
   request: PendingPermissionRequest;
+  /** Title of the session the request belongs to, for panels that open fullscreen. */
+  sessionTitle?: string;
   onDecision: (
     requestIds: string | string[],
     decision: { allow?: boolean; message?: string; updatedInput?: unknown },
