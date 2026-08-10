@@ -180,17 +180,20 @@ const markdownComponents = {
     <ol className="mb-2 list-outside list-decimal space-y-1 pl-5 marker:text-current last:mb-0">{children}</ol>
   ),
   li: ({ children }: { children?: React.ReactNode }) => <li className="[&>div:last-child]:mb-0 [&>div]:mb-1">{children}</li>,
+  // `w-max` (rather than only `min-w-full`) lets the table grow past the chat
+  // column so the wrapper's `overflow-x-auto` actually has something to
+  // scroll — otherwise a many-column table just squeezes every cell instead.
   table: ({ children }: { children?: React.ReactNode }) => (
-    <div className="my-2 overflow-x-auto">
-      <table className="min-w-full border-collapse border border-gray-200 dark:border-gray-700">{children}</table>
+    <div className="my-2 overflow-x-auto overscroll-x-contain">
+      <table className="w-max min-w-full border-collapse border border-gray-200 dark:border-gray-700">{children}</table>
     </div>
   ),
   thead: ({ children }: { children?: React.ReactNode }) => <thead className="bg-gray-50 dark:bg-gray-800">{children}</thead>,
   th: ({ children }: { children?: React.ReactNode }) => (
-    <th className="border border-gray-200 px-3 py-2 text-left text-sm font-semibold dark:border-gray-700">{children}</th>
+    <th className="min-w-28 max-w-[22rem] border border-gray-200 px-3 py-2 text-left text-sm font-semibold dark:border-gray-700">{children}</th>
   ),
   td: ({ children }: { children?: React.ReactNode }) => (
-    <td className="border border-gray-200 px-3 py-2 align-top text-sm dark:border-gray-700">{children}</td>
+    <td className="min-w-28 max-w-[22rem] border border-gray-200 px-3 py-2 align-top text-sm dark:border-gray-700">{children}</td>
   ),
 };
 
