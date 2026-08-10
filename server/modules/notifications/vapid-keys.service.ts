@@ -28,7 +28,11 @@ function getPublicKey() {
 function configureWebPush() {
   const keys = ensureVapidKeys();
   webPush.setVapidDetails(
-    'mailto:noreply@claudecodeui.local',
+    // Must be a routable mailto: or https: URL — APNs validates the VAPID `sub`
+    // claim and rejects every iOS push with 403 BadJwtToken otherwise. The old
+    // value used the reserved `.local` TLD. FCM and Mozilla Autopush don't
+    // validate this, so the breakage was iOS-only.
+    'https://cloudcli.ai',
     keys.publicKey,
     keys.privateKey
   );
