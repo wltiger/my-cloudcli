@@ -1,6 +1,8 @@
 import { useTranslation } from 'react-i18next';
 
+import QuickSettingsChatFontRow from './QuickSettingsChatFontRow';
 import QuickSettingsChatSpacingRow from './QuickSettingsChatSpacingRow';
+import QuickSettingsChatWidthRow from './QuickSettingsChatWidthRow';
 import QuickSettingsSection from './QuickSettingsSection';
 
 /**
@@ -15,6 +17,8 @@ export default function ForkQuickSettings() {
 
   return (
     <QuickSettingsSection title={t('appearanceSettings.chatSpacing.title', 'Chat')}>
+      <QuickSettingsChatFontRow />
+      <QuickSettingsChatWidthRow />
       <QuickSettingsChatSpacingRow />
       <p className="ml-3 text-xs text-muted-foreground">
         {t(

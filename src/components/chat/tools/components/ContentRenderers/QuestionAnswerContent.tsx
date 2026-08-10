@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import type { Question } from '../../../types/types';
+import { useChatFontClasses } from '../../../hooks/useChatTypography';
 
 interface QuestionAnswerContentProps {
   questions: Question[];
@@ -14,6 +15,7 @@ export const QuestionAnswerContent: React.FC<QuestionAnswerContentProps> = ({
   className = '',
 }) => {
   const [expandedIdx, setExpandedIdx] = useState<number | null>(null);
+  const fontClasses = useChatFontClasses();
 
   // Tool inputs are runtime data loaded from session transcripts and may be
   // malformed (e.g. `questions` arriving as a non-array). Guard with
@@ -83,7 +85,7 @@ export const QuestionAnswerContent: React.FC<QuestionAnswerContentProps> = ({
                     </span>
                   )}
                 </div>
-                <div className="mt-0.5 text-xs leading-snug text-gray-600 dark:text-gray-400">
+                <div className={`mt-0.5 ${fontClasses.answeredQuestion} leading-snug text-gray-600 dark:text-gray-400`}>
                   {q.question}
                 </div>
 
@@ -94,7 +96,7 @@ export const QuestionAnswerContent: React.FC<QuestionAnswerContentProps> = ({
                       return (
                         <span
                           key={lbl}
-                          className="inline-flex items-center gap-1 rounded-md bg-blue-50 px-1.5 py-0.5 text-[11px] font-medium text-blue-700 dark:bg-blue-900/30 dark:text-blue-300"
+                          className={`inline-flex items-center gap-1 rounded-md bg-blue-50 px-1.5 py-0.5 ${fontClasses.optionDescription} font-medium text-blue-700 dark:bg-blue-900/30 dark:text-blue-300`}
                         >
                           {lbl}
                           {isCustom && (
@@ -131,7 +133,7 @@ export const QuestionAnswerContent: React.FC<QuestionAnswerContentProps> = ({
                     return (
                       <div
                         key={opt.label}
-                        className={`flex items-start gap-2 rounded-lg px-2.5 py-1.5 text-[12px] ${
+                        className={`flex items-start gap-2 rounded-lg px-2.5 py-1.5 ${fontClasses.answeredQuestion} ${
                           wasSelected
                             ? 'border border-blue-200/60 bg-blue-50/80 dark:border-blue-800/40 dark:bg-blue-900/20'
                             : 'text-gray-400 dark:text-gray-500'
@@ -153,7 +155,7 @@ export const QuestionAnswerContent: React.FC<QuestionAnswerContentProps> = ({
                             {opt.label}
                           </span>
                           {opt.description && (
-                            <span className={`mt-0.5 block text-[11px] ${
+                            <span className={`mt-0.5 block ${fontClasses.optionDescription} ${
                               wasSelected ? 'text-blue-600/70 dark:text-blue-300/70' : 'text-gray-400 dark:text-gray-600'
                             }`}>
                               {opt.description}
@@ -167,7 +169,7 @@ export const QuestionAnswerContent: React.FC<QuestionAnswerContentProps> = ({
                   {answerLabels.filter(lbl => !options.some(o => o.label === lbl)).map(lbl => (
                     <div
                       key={lbl}
-                      className="flex items-start gap-2 rounded-lg border border-blue-200/60 bg-blue-50/80 px-2.5 py-1.5 text-[12px] dark:border-blue-800/40 dark:bg-blue-900/20"
+                      className={`flex items-start gap-2 rounded-lg border border-blue-200/60 bg-blue-50/80 px-2.5 py-1.5 ${fontClasses.answeredQuestion} dark:border-blue-800/40 dark:bg-blue-900/20`}
                     >
                       <div className={`mt-0.5 h-3.5 w-3.5 flex-shrink-0 ${q.multiSelect ? 'rounded-[3px]' : 'rounded-full'} flex items-center justify-center border-[1.5px] border-blue-500 bg-blue-500 dark:border-blue-400 dark:bg-blue-500`}>
                         <svg className="h-2 w-2 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={3}>

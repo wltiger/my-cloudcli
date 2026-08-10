@@ -19,6 +19,10 @@ _Avoid_: Delete, hide, remove, exclude
 **Favorites filter**:
 A client-side view filter, scoped to the Projects tab, that shows only Starred projects. Distinct from Star (which only affects sort order) and Archive (which is a server-side soft-hide with auto-reactivation) — toggling it changes nothing about what's stored, only what's rendered.
 
+**Reading text** (chat):
+The text in a chat message a person actually reads word by word to follow the conversation: the message bodies themselves, and the questions, options and option explanations an agent puts to the user. Everything else in the message stream is _chrome_ — timestamps, token counts, status badges, button labels, keyboard hints, tool card summary lines — glanced at rather than read, and sized for density instead of legibility. Code, diffs and command output are their own category again: read closely, but sized as code rather than as prose. The distinction exists because only reading text follows the reader's chosen font size.
+_Avoid_: Content, body text — both get read as "everything that isn't a control", which wrongly pulls in tool card summaries and command output
+
 **Raw model id**:
 The exact model string a provider's own CLI/SDK wrote into a session transcript — read verbatim, with no normalization applied.
 _Avoid_: Model name — ambiguous with the friendly display label below

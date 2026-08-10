@@ -179,6 +179,30 @@
         "label": "Font Size",
         "description": "Editor font size in pixels"
       }
+    },
+    "chatSpacing": {
+      "title": "Chat",
+      "label": "Message spacing",
+      "description": "Horizontal space around chat messages on mobile screens.",
+      "spacious": "Spacious",
+      "compact": "Compact",
+      "none": "None"
+    },
+    "chatFontSize": {
+      "label": "Reading font size",
+      "description": "Size of the text you read in chat: message bodies and the questions an agent asks. Code, tool cards and timestamps keep their own sizes.",
+      "small": "Small",
+      "medium": "Medium",
+      "large": "Large",
+      "xlarge": "X-Large"
+    },
+    "chatWidth": {
+      "label": "Content width",
+      "description": "How wide the message column runs on a large screen. No effect on narrow screens, which are already narrower than every level.",
+      "standard": "Standard",
+      "wide": "Wide",
+      "wider": "Wider",
+      "full": "Full"
     }
   },
   "mcpForm": {

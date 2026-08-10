@@ -8,6 +8,7 @@ import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { oneDark, oneLight } from 'react-syntax-highlighter/dist/esm/styles/prism';
 import { useTranslation } from 'react-i18next';
 
+import { useChatFontClasses } from '../../hooks/useChatTypography';
 import { normalizeInlineCodeFences } from '../../utils/chatFormatting';
 import { copyTextToClipboard } from '../../../../utils/clipboard';
 import { usePaletteOps } from '../../../../contexts/PaletteOpsContext';
@@ -197,8 +198,23 @@ const markdownComponents = {
   ),
 };
 
+const PROSE_PATTERN = /\bprose\b/;
+const PROSE_SIZE_PATTERN = /\bprose-(sm|base|lg|xl|2xl)\b/;
+
 export function Markdown({ children, className, breaks = false }: MarkdownProps) {
   const content = normalizeInlineCodeFences(String(children ?? ''));
+  const fontClasses = useChatFontClasses();
+  // Every Markdown body in the chat sizes itself from the reader's chosen
+  // level, so call sites don't name a prose size at all. One that does — the
+  // fullscreen reader, which is meant to be larger than the message stream —
+  // keeps what it asked for.
+  const proseClassName = useMemo(() => {
+    if (!className || !PROSE_PATTERN.test(className) || PROSE_SIZE_PATTERN.test(className)) {
+      return className;
+    }
+
+    return `${className} ${fontClasses.prose}`;
+  }, [className, fontClasses.prose]);
   const remarkPlugins = useMemo(
     () => (breaks
       ? [remarkGfm, [remarkMath, { singleDollarTextMath: false }], remarkBreaks]
@@ -248,7 +264,7 @@ export function Markdown({ children, className, breaks = false }: MarkdownProps)
   );
 
   return (
-    <div className={className}>
+    <div className={proseClassName}>
       <ReactMarkdown remarkPlugins={remarkPlugins} rehypePlugins={rehypePlugins} components={components as any}>
         {content}
       </ReactMarkdown>

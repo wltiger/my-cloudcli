@@ -22,13 +22,21 @@
 
 **同步官方时怎么办：** 保留我的。附带提一句：里面对 `useSettingsController.ts` 的修改顺便修了一个真实 bug（保存设置会覆盖整个 `claude-settings` 对象，把不属于这个面板的字段静默清空）——这个修复是通用的正确性修复，不是个人偏好，方便的话可以考虑单独提给官方。
 
-## 3. 聊天消息间距设置
+## 3. 聊天阅读外观设置（间距 / 字号 / 宽度）
 
-**涉及文件：** `src/components/chat/utils/chatSpacing.ts`、`hooks/useChatSpacing.ts`、`view/subcomponents/ChatMessagesPane.tsx`、`MessageComponent.tsx`、`ToolGroupContainer.tsx`、`src/components/settings/hooks/useSettingsController.ts`、`settings/view/tabs/AppearanceSettingsTab.tsx`、`src/components/quick-settings-panel/view/QuickSettingsContent.tsx`、`ForkQuickSettings.tsx`、`QuickSettingsChatSpacingRow.tsx`
+**涉及文件：** `src/components/chat/utils/chatSpacing.ts`、`chatTypography.ts`、`hooks/useChatSpacing.ts`、`useChatTypography.ts`、`view/subcomponents/ChatMessagesPane.tsx`、`MessageComponent.tsx`、`ToolGroupContainer.tsx`、`Markdown.tsx`、`ChatComposer.tsx`、`QueuedMessageCard.tsx`、`chat/tools/components/PlanDisplay.tsx`、`ToolErrorDisplay.tsx`、`ContentRenderers/MarkdownContent.tsx`、`QuestionAnswerContent.tsx`、`InteractiveRenderers/AskUserQuestionPanel.tsx`、`src/components/settings/hooks/useSettingsController.ts`、`settings/view/Settings.tsx`、`settings/view/tabs/AppearanceSettingsTab.tsx`、`src/components/quick-settings-panel/view/QuickSettingsContent.tsx`、`ForkQuickSettings.tsx`、`QuickSettingsChatSpacingRow.tsx`、`QuickSettingsChatFontRow.tsx`、`QuickSettingsChatWidthRow.tsx`、`src/i18n/locales/{en,zh-CN}/settings.json`
 
-**为什么改：** 手机屏幕小，聊天气泡左右固定的留白很浪费空间。加了"宽松/紧凑/无间距"三档设置（只影响移动端），完整 Settings 和 Quick Settings 面板都能调，两边共用同一个 `useChatSpacingLevel()` hook。因为这个设置在 `sm:` 断点以上是空操作，Quick Settings 那一行下面留了一句小字说明"只影响窄屏"——而不是在桌面端直接隐藏，隐藏会让人以为设置被删了。（分三次迭代做的：先加设置本身，然后改名+接入 Quick Settings，最后抽出下面说的 `ForkQuickSettings`——算作一条自定义。）
+**为什么改：** 三个管"聊天读起来舒不舒服"的旋钮，共用同一套存储+事件机制、同一对入口（Settings 的 Appearance 标签页 + Quick Settings 面板）。三个默认值都等于官方现状，所以装上不动任何设置，界面和官方一模一样。
 
-**同步官方时怎么办：** 保留我的。纯 opt-in 设置项，加法改动。现在 `QuickSettingsContent.tsx` 里 fork 的全部痕迹只有两行——一行 `ForkQuickSettings` 的 import，一行贴在面板 body 最末尾的 `<ForkQuickSettings />`。fork 自己加的快捷设置全部放在 `ForkQuickSettings.tsx`（官方没有这个文件）里，所以冲突后只要把那两行放回去就行，别再把新设置塞进官方自己的分组里。所有文案都用 `t(key, '英文兜底')` 的写法，是故意的——不动 `src/i18n/locales/**`，翻译文件保持零冲突面。
+- **消息间距**（宽松/紧凑/无，只影响移动端）：手机屏幕小，聊天气泡左右固定的留白很浪费空间。因为这个设置在 `sm:` 断点以上是空操作，Quick Settings 那一行下面留了一句小字说明"只影响窄屏"——而不是在桌面端直接隐藏，隐藏会让人以为设置被删了。
+- **阅读字号**（Small/Medium/Large/X-Large → `prose-sm`/`prose-base`/`prose-lg`/`prose-xl`，默认 Small = 官方的 14px）：官方正文在大显示器上偏小，AskUserQuestion 更糟——它内嵌模式的选项**说明**只有 11px。档位只管**阅读文字**：Markdown 正文（消息、Plan、工具错误、工具返回的 markdown）和 AskUserQuestion 的问题/选项/说明。代码块、diff、工具卡片摘要行、时间戳和徽章一律不动——代码编辑器本来就有自己的 `codeEditorFontSize`。AskUserQuestion 已有的全屏尺寸（19/18/15px）保持固定不受档位影响，且每一档内嵌值都严格小于它，内嵌永远不会反超全屏。
+- **内容宽度**（标准/宽/更宽/撞满，默认标准 = 官方的 `max-w-[54.25rem]`）：侧边栏固定占 288px，868px 的内容列在 2560 屏上只用了 38%，3440 屏上只用了 28%。用户气泡最上面那个上限（`xl:max-w-xl`）也跟着档位走，免得 3000px 的列里孤零零一个 576px 气泡。只动最上面这一档：`xl` 以下列宽还没顶到自己的上限，`sm:max-w-[85%] md:max-w-md lg:max-w-lg` 这套阶梯比百分比更贴切——一刀切成 `max-w-[66%]` 反而会让 `md` 断点下的气泡**变窄**（那里列宽只有 448px，气泡本来是能占满的）。每一档的值约等于该档列宽的 66%，而这正是标准档下 `xl:max-w-xl` 算出来的比例，所以标准档和改动前一模一样。
+
+两个值得记住的设计点：`Markdown.tsx` 是 prose 档位的唯一入口（调用点只需删掉自己的 `prose-sm`，显式传入的尺寸——比如全屏那处的 `prose-lg`——仍然优先）；缩放机制没有用 CSS `zoom`，因为 `useComposerMenuAnchor.ts` 靠 `getBoundingClientRect()` + `window.innerWidth` 算 fixed 菜单坐标，祖先带 `zoom` 会把这套算法弄错。历次迭代都并进这一条。对应 issue：[#17](https://github.com/wltiger/my-cloudcli/issues/17)。
+
+**同步官方时怎么办：** 保留我的。纯 opt-in 设置项，加法改动。`QuickSettingsContent.tsx` 里 fork 的全部痕迹只有两行——一行 `ForkQuickSettings` 的 import，一行贴在面板 body 最末尾的 `<ForkQuickSettings />`。fork 自己加的快捷设置全部放在 `ForkQuickSettings.tsx`（官方没有这个文件）里，所以冲突后只要把那两行放回去就行，别再把新设置塞进官方自己的分组里。内容列的 `max-w` 在 `ChatMessagesPane.tsx`、`ChatComposer.tsx`（三处）、`QueuedMessageCard.tsx` 里是重复的——官方改了其中一处的话，几处必须一起同步，否则输入框会和消息列对不齐。
+
+⚠️ **i18n 策略在这里变了。** 这一条原来写的是：所有文案用 `t(key, '英文兜底')`、不动 `src/i18n/locales/**`，让翻译文件保持零冲突面。现在不再成立：`en` 和 `zh-CN` 的 `settings.json` 已经带上了 `appearanceSettings.chatSpacing` / `chatFontSize` / `chatWidth` 这些键，中文界面因此是完整的。曾经考虑过用"fork 专属 namespace"来保持零冲突，最后否决了——`src/i18n/config.js` 把每个 namespace 的 import、`resources` 条目、`ns` 条目全部写死，新增 namespace 的冲突面**比**直接加 JSON 键**更大**。这两个文件冲突时，两边的键都保留；其余九种语言仍然一行没动，走内联英文兜底。
 
 ## 4. 模型名智能提炼 + 选择器加宽
 

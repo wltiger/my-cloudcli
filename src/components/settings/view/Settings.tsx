@@ -45,6 +45,10 @@ function Settings({ isOpen, onClose, projects = [], initialTab = 'agents' }: Set
     updateCodeEditorSetting,
     chatSpacingLevel,
     setChatSpacingLevel,
+    chatFontLevel,
+    setChatFontLevel,
+    chatWidthLevel,
+    setChatWidthLevel,
     claudePermissions,
     setClaudePermissions,
     notificationPreferences,
@@ -174,6 +178,10 @@ function Settings({ isOpen, onClose, projects = [], initialTab = 'agents' }: Set
                   onCodeEditorFontSizeChange={(value) => updateCodeEditorSetting('fontSize', value)}
                   chatSpacingLevel={chatSpacingLevel}
                   onChatSpacingLevelChange={setChatSpacingLevel}
+                  chatFontLevel={chatFontLevel}
+                  onChatFontLevelChange={setChatFontLevel}
+                  chatWidthLevel={chatWidthLevel}
+                  onChatWidthLevelChange={setChatWidthLevel}
                 />
               )}
 

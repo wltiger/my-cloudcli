@@ -5,6 +5,7 @@ import { authenticatedFetch } from '../../../utils/api';
 import { setNotificationSoundEnabled } from '../../../utils/notificationSound';
 import { useProviderAuthStatus } from '../../provider-auth/hooks/useProviderAuthStatus';
 import { useChatSpacingLevel } from '../../chat/hooks/useChatSpacing';
+import { useChatFontLevel, useChatWidthLevel } from '../../chat/hooks/useChatTypography';
 import {
   DEFAULT_CODE_EDITOR_SETTINGS,
   DEFAULT_CURSOR_PERMISSIONS,
@@ -149,6 +150,8 @@ export function useSettingsController({ isOpen, initialTab }: UseSettingsControl
     readCodeEditorSettings()
   ));
   const [chatSpacingLevel, setChatSpacingLevel] = useChatSpacingLevel();
+  const [chatFontLevel, setChatFontLevel] = useChatFontLevel();
+  const [chatWidthLevel, setChatWidthLevel] = useChatWidthLevel();
 
   const [claudePermissions, setClaudePermissions] = useState<ClaudePermissionsState>(() => (
     createEmptyClaudePermissions()
@@ -397,6 +400,10 @@ export function useSettingsController({ isOpen, initialTab }: UseSettingsControl
     updateCodeEditorSetting,
     chatSpacingLevel,
     setChatSpacingLevel,
+    chatFontLevel,
+    setChatFontLevel,
+    chatWidthLevel,
+    setChatWidthLevel,
     claudePermissions,
     setClaudePermissions,
     cursorPermissions,

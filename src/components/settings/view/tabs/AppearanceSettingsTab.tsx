@@ -3,6 +3,8 @@ import { DarkModeToggle } from '../../../../shared/view/ui';
 import type { CodeEditorSettingsState, ProjectSortOrder } from '../../types/types';
 import { normalizeChatSpacingLevel } from '../../../chat/utils/chatSpacing';
 import type { ChatSpacingLevel } from '../../../chat/utils/chatSpacing';
+import { normalizeChatFontLevel, normalizeChatWidthLevel } from '../../../chat/utils/chatTypography';
+import type { ChatFontLevel, ChatWidthLevel } from '../../../chat/utils/chatTypography';
 import LanguageSelector from '../../../../shared/view/ui/LanguageSelector';
 import SettingsCard from '../SettingsCard';
 import SettingsRow from '../SettingsRow';
@@ -19,6 +21,10 @@ type AppearanceSettingsTabProps = {
   onCodeEditorFontSizeChange: (value: string) => void;
   chatSpacingLevel: ChatSpacingLevel;
   onChatSpacingLevelChange: (value: ChatSpacingLevel) => void;
+  chatFontLevel: ChatFontLevel;
+  onChatFontLevelChange: (value: ChatFontLevel) => void;
+  chatWidthLevel: ChatWidthLevel;
+  onChatWidthLevelChange: (value: ChatWidthLevel) => void;
 };
 
 export default function AppearanceSettingsTab({
@@ -31,6 +37,10 @@ export default function AppearanceSettingsTab({
   onCodeEditorFontSizeChange,
   chatSpacingLevel,
   onChatSpacingLevelChange,
+  chatFontLevel,
+  onChatFontLevelChange,
+  chatWidthLevel,
+  onChatWidthLevelChange,
 }: AppearanceSettingsTabProps) {
   const { t } = useTranslation('settings');
 
@@ -146,6 +156,44 @@ export default function AppearanceSettingsTab({
               <option value="spacious">{t('appearanceSettings.chatSpacing.spacious', 'Spacious')}</option>
               <option value="compact">{t('appearanceSettings.chatSpacing.compact', 'Compact')}</option>
               <option value="none">{t('appearanceSettings.chatSpacing.none', 'None')}</option>
+            </select>
+          </SettingsRow>
+
+          <SettingsRow
+            label={t('appearanceSettings.chatFontSize.label', 'Reading font size')}
+            description={t(
+              'appearanceSettings.chatFontSize.description',
+              'Size of the text you read in chat: message bodies and the questions an agent asks. Code, tool cards and timestamps keep their own sizes.',
+            )}
+          >
+            <select
+              value={chatFontLevel}
+              onChange={(event) => onChatFontLevelChange(normalizeChatFontLevel(event.target.value))}
+              className="w-full touch-manipulation rounded-lg border border-input bg-card p-2.5 text-sm text-foreground focus:border-primary focus:ring-1 focus:ring-primary sm:w-36"
+            >
+              <option value="small">{t('appearanceSettings.chatFontSize.small', 'Small')}</option>
+              <option value="medium">{t('appearanceSettings.chatFontSize.medium', 'Medium')}</option>
+              <option value="large">{t('appearanceSettings.chatFontSize.large', 'Large')}</option>
+              <option value="xlarge">{t('appearanceSettings.chatFontSize.xlarge', 'X-Large')}</option>
+            </select>
+          </SettingsRow>
+
+          <SettingsRow
+            label={t('appearanceSettings.chatWidth.label', 'Content width')}
+            description={t(
+              'appearanceSettings.chatWidth.description',
+              'How wide the message column runs on a large screen. No effect on narrow screens, which are already narrower than every level.',
+            )}
+          >
+            <select
+              value={chatWidthLevel}
+              onChange={(event) => onChatWidthLevelChange(normalizeChatWidthLevel(event.target.value))}
+              className="w-full touch-manipulation rounded-lg border border-input bg-card p-2.5 text-sm text-foreground focus:border-primary focus:ring-1 focus:ring-primary sm:w-36"
+            >
+              <option value="standard">{t('appearanceSettings.chatWidth.standard', 'Standard')}</option>
+              <option value="wide">{t('appearanceSettings.chatWidth.wide', 'Wide')}</option>
+              <option value="wider">{t('appearanceSettings.chatWidth.wider', 'Wider')}</option>
+              <option value="full">{t('appearanceSettings.chatWidth.full', 'Full')}</option>
             </select>
           </SettingsRow>
         </SettingsCard>

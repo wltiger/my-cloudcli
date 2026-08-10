@@ -179,6 +179,30 @@
         "label": "字体大小",
         "description": "编辑器字体大小（px）"
       }
+    },
+    "chatSpacing": {
+      "title": "聊天",
+      "label": "消息间距",
+      "description": "手机屏幕上聊天消息左右两侧的留白。",
+      "spacious": "宽松",
+      "compact": "紧凑",
+      "none": "无"
+    },
+    "chatFontSize": {
+      "label": "阅读字号",
+      "description": "聊天里需要逐字读的文字大小：消息正文，以及 agent 提出的问题。代码、工具卡片和时间戳保持各自的大小。",
+      "small": "小",
+      "medium": "中",
+      "large": "大",
+      "xlarge": "特大"
+    },
+    "chatWidth": {
+      "label": "内容宽度",
+      "description": "大屏幕上消息列的宽度。窄屏没有影响，因为它本来就比所有档位都窄。",
+      "standard": "标准",
+      "wide": "宽",
+      "wider": "更宽",
+      "full": "撑满"
     }
   },
   "mcpForm": {

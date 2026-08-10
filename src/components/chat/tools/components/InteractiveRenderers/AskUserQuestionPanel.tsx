@@ -1,6 +1,7 @@
 import React, { useState, useCallback, useRef, useEffect } from 'react';
 import type { PermissionPanelProps } from '../../configs/permissionPanelRegistry';
 import type { Question } from '../../../types/types';
+import { useChatFontClasses } from '../../../hooks/useChatTypography';
 import { FullscreenSurface, FullscreenToggleButton } from '../../../../../shared/view/ui';
 
 export const AskUserQuestionPanel: React.FC<PermissionPanelProps> = ({
@@ -10,6 +11,10 @@ export const AskUserQuestionPanel: React.FC<PermissionPanelProps> = ({
 }) => {
   const input = request.input as { questions?: Question[] } | undefined;
   const questions: Question[] = input?.questions || [];
+  // Only the inline sizes follow the reader's level. Fullscreen keeps its own,
+  // larger set — it has the room, and every inline level stays below it so
+  // inline can never end up bigger than fullscreen.
+  const fontClasses = useChatFontClasses();
 
   const [currentStep, setCurrentStep] = useState(0);
   const [selections, setSelections] = useState<Map<number, Set<string>>>(() => new Map());
@@ -290,7 +295,7 @@ export const AskUserQuestionPanel: React.FC<PermissionPanelProps> = ({
           )}
 
           {/* Question text */}
-          <p className={`font-medium leading-snug text-gray-900 dark:text-gray-100 ${isFullscreen ? 'text-[19px]' : 'text-[14px]'}`}>
+          <p className={`font-medium leading-snug text-gray-900 dark:text-gray-100 ${isFullscreen ? 'text-[19px]' : fontClasses.question}`}>
             {q.question}
           </p>
           {multi && (
@@ -327,7 +332,7 @@ export const AskUserQuestionPanel: React.FC<PermissionPanelProps> = ({
 
                   <div className="min-w-0 flex-1">
                     <div className={`leading-tight transition-colors duration-150 ${
-                      isFullscreen ? 'text-[18px]' : 'text-[13px]'
+                      isFullscreen ? 'text-[18px]' : fontClasses.optionLabel
                     } ${
                       isSelected
                         ? 'font-medium text-gray-900 dark:text-gray-100'
@@ -337,7 +342,7 @@ export const AskUserQuestionPanel: React.FC<PermissionPanelProps> = ({
                     </div>
                     {opt.description && (
                       <div className={`leading-snug transition-colors duration-150 ${
-                        isFullscreen ? 'mt-1 text-[15px]' : 'text-[11px]'
+                        isFullscreen ? 'mt-1 text-[15px]' : fontClasses.optionDescription
                       } ${
                         isSelected
                           ? 'text-blue-600/70 dark:text-blue-300/70'
@@ -410,7 +415,7 @@ export const AskUserQuestionPanel: React.FC<PermissionPanelProps> = ({
                       e.stopPropagation();
                     }}
                     placeholder="Type your answer..."
-                    className="w-full rounded-lg border-0 bg-gray-50 px-3 py-1.5 text-[13px] text-gray-900 outline-none ring-1 ring-gray-200 transition-shadow duration-200 placeholder:text-gray-400 focus:ring-2 focus:ring-blue-400 dark:bg-gray-900/60 dark:text-gray-100 dark:ring-gray-700 dark:placeholder:text-gray-600 dark:focus:ring-blue-500"
+                    className={`w-full rounded-lg border-0 bg-gray-50 px-3 py-1.5 ${fontClasses.optionLabel} text-gray-900 outline-none ring-1 ring-gray-200 transition-shadow duration-200 placeholder:text-gray-400 focus:ring-2 focus:ring-blue-400 dark:bg-gray-900/60 dark:text-gray-100 dark:ring-gray-700 dark:placeholder:text-gray-600 dark:focus:ring-blue-500`}
                   />
                   <kbd className="absolute right-2 top-1/2 -translate-y-1/2 rounded border border-gray-200 bg-gray-100 px-1 py-0.5 font-mono text-[9px] text-gray-300 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-600">
                     Enter

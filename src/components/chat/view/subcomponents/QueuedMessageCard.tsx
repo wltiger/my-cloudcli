@@ -1,6 +1,8 @@
 import { useTranslation } from 'react-i18next';
 import { PencilIcon, XIcon } from 'lucide-react';
 
+import { useChatWidthClasses } from '../../hooks/useChatTypography';
+
 interface QueuedMessageCardProps {
   content: string;
   attachmentCount?: number;
@@ -15,9 +17,10 @@ export default function QueuedMessageCard({
   onDelete,
 }: QueuedMessageCardProps) {
   const { t } = useTranslation('chat');
+  const widthClasses = useChatWidthClasses();
 
   return (
-    <div className="settings-content-enter mx-auto mb-2 max-w-[54.25rem] rounded-xl border border-dashed border-primary/25 bg-primary/[0.04] px-3 py-2">
+    <div className={`settings-content-enter mx-auto mb-2 ${widthClasses.column} rounded-xl border border-dashed border-primary/25 bg-primary/[0.04] px-3 py-2`}>
       <div className="flex items-start gap-2.5">
         <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-primary/60" aria-hidden />
 

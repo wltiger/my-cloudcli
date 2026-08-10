@@ -9,6 +9,7 @@ import type {
   Provider,
 } from '../../types/types';
 import { useChatSpacing } from '../../hooks/useChatSpacing';
+import { useChatWidthClasses } from '../../hooks/useChatTypography';
 import { formatUsageLimitText } from '../../utils/chatFormatting';
 import type { Project } from '../../../../types/app';
 import { ToolRenderer, ToolErrorDisplay, shouldHideToolResult } from '../../tools';
@@ -51,6 +52,7 @@ const COPY_HIDDEN_TOOL_NAMES = new Set(['Bash', 'Edit', 'Write', 'ApplyPatch']);
 const MessageComponent = memo(({ message, prevMessage, createDiff, onFileOpen, showRawParameters, showThinking, selectedProject, provider }: MessageComponentProps) => {
   const { t } = useTranslation('chat');
   const spacingClasses = useChatSpacing();
+  const widthClasses = useChatWidthClasses();
   const isGrouped = prevMessage && prevMessage.type === message.type &&
     ((prevMessage.type === 'assistant') ||
       (prevMessage.type === 'user') ||
@@ -90,7 +92,7 @@ const MessageComponent = memo(({ message, prevMessage, createDiff, onFileOpen, s
     >
       {message.type === 'user' ? (
         /* User turn on the right: claude.ai-style attachment cards above the bubble */
-        <div className="flex w-full items-end space-x-0 sm:w-auto sm:max-w-[85%] sm:space-x-3 md:max-w-md lg:max-w-lg xl:max-w-xl">
+        <div className={`flex w-full items-end space-x-0 sm:w-auto sm:max-w-[85%] sm:space-x-3 md:max-w-md lg:max-w-lg ${widthClasses.bubble}`}>
           <div className="flex min-w-0 flex-1 flex-col items-end gap-2 sm:flex-initial">
             {message.images && message.images.length > 0 && (
               <ChatMessageImages
@@ -106,7 +108,7 @@ const MessageComponent = memo(({ message, prevMessage, createDiff, onFileOpen, s
                 <div dir="auto" className="break-words font-serif text-sm">
                   <Markdown
                     breaks
-                    className="prose prose-sm prose-invert max-w-none font-serif [&_a]:text-blue-100 [&_a]:underline"
+                    className="prose prose-invert max-w-none font-serif [&_a]:text-blue-100 [&_a]:underline"
                   >
                     {message.content}
                   </Markdown>
@@ -179,7 +181,7 @@ const MessageComponent = memo(({ message, prevMessage, createDiff, onFileOpen, s
               <>
                 <div className="flex flex-col">
                   <div className="flex flex-col">
-                    <Markdown className="prose prose-sm max-w-none font-serif dark:prose-invert">
+                    <Markdown className="prose max-w-none font-serif dark:prose-invert">
                       {String(message.displayText || '')}
                     </Markdown>
                   </div>
@@ -315,7 +317,7 @@ const MessageComponent = memo(({ message, prevMessage, createDiff, onFileOpen, s
               <Reasoning defaultOpen={false}>
                 <ReasoningTrigger />
                 <ReasoningContent>
-                  <Markdown className="prose prose-sm prose-gray max-w-none font-serif dark:prose-invert">
+                  <Markdown className="prose prose-gray max-w-none font-serif dark:prose-invert">
                     {message.content}
                   </Markdown>
                   <div className="mt-3 flex items-center text-[11px]">
@@ -372,7 +374,7 @@ const MessageComponent = memo(({ message, prevMessage, createDiff, onFileOpen, s
 
                   // Normal rendering for non-JSON content
                   return message.type === 'assistant' ? (
-                    <Markdown className="prose prose-sm prose-gray max-w-none font-serif dark:prose-invert">
+                    <Markdown className="prose prose-gray max-w-none font-serif dark:prose-invert">
                       {content}
                     </Markdown>
                   ) : (
