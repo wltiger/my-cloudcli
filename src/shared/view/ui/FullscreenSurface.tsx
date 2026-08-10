@@ -12,6 +12,8 @@ interface FullscreenSurfaceProps {
   title?: React.ReactNode;
   /** Controls rendered in the header, before the close button. */
   headerActions?: React.ReactNode;
+  /** Pinned below the scrollable body — for actions that must stay reachable. */
+  footer?: React.ReactNode;
   /** Extra classes for the scrollable body. */
   className?: string;
   closeLabel?: string;
@@ -28,6 +30,7 @@ const FullscreenSurface: React.FC<FullscreenSurfaceProps> = ({
   onClose,
   title,
   headerActions,
+  footer,
   className,
   closeLabel = 'Close',
   children,
@@ -117,12 +120,22 @@ const FullscreenSurface: React.FC<FullscreenSurfaceProps> = ({
 
       <div
         ref={bodyRef}
-        className={cn('flex-1 overflow-y-auto overscroll-contain px-4 py-4 pb-safe-area-inset-bottom', className)}
+        className={cn(
+          'flex-1 overflow-y-auto overscroll-contain px-4 py-4',
+          !footer && 'pb-safe-area-inset-bottom',
+          className
+        )}
       >
         {/* Capped measure — on a wide desktop the full viewport width makes
             lines too long to scan. */}
         <div className="mx-auto w-full max-w-3xl">{children}</div>
       </div>
+
+      {footer && (
+        <div className="flex-shrink-0 border-t border-border bg-background pb-safe-area-inset-bottom">
+          <div className="mx-auto w-full max-w-3xl">{footer}</div>
+        </div>
+      )}
     </div>,
     document.body
   );
