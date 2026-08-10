@@ -90,7 +90,7 @@
 
 **涉及文件：** `src/shared/view/ui/FullscreenSurface.tsx`（新增）、`src/shared/view/ui/index.ts`、`src/components/chat/view/subcomponents/MessageFullscreenControl.tsx`（新增）、`src/components/chat/view/subcomponents/MessageComponent.tsx`、`src/components/chat/tools/components/InteractiveRenderers/AskUserQuestionPanel.tsx`、`src/i18n/locales/*/chat.json`
 
-**为什么改：** 手机上聊天区太窄，长回复读起来费劲；AskUserQuestion 的选项标题和说明被挤到根本分不出哪个是哪个——而在外面用手机回答这类提问，恰恰是这个面板最主要的使用场景。两处共用一个 `FullscreenSurface`（portal 到 body 的 `inset-0` 面板，Esc 关闭，锁 body 滚动，带安全区内边距）：消息复制按钮旁边加一个全屏按钮，AskUserQuestion 头部加一个（进全屏时同时放开选项列表的 `max-h-48` 并放大字号）。桌面端也显示，同一套代码，不做断点分支。答完自动退出全屏，状态不持久化。全屏容器还带了：标题栏里的复制按钮、下滑关闭手势（只在内容滚到顶部时才生效，不会跟滚动打架）、以及 `max-w-3xl` 的最大宽度，避免宽屏桌面上一行拉太长读不动。
+**为什么改：** 手机上聊天区太窄，长回复读起来费劲；AskUserQuestion 的选项标题和说明被挤到根本分不出哪个是哪个——而在外面用手机回答这类提问，恰恰是这个面板最主要的使用场景。两处共用一个 `FullscreenSurface`（portal 到 body 的 `inset-0` 面板，Esc 关闭，锁 body 滚动，带安全区内边距）：消息复制按钮旁边加一个全屏按钮，AskUserQuestion 头部加一个（进全屏时同时放开选项列表的 `max-h-48` 并放大字号）。桌面端也显示，同一套代码，不做断点分支。答完自动退出全屏，状态不持久化。全屏容器还带了：标题栏里的复制按钮、下滑关闭手势（只在内容滚到顶部时才生效，不会跟滚动打架）、以及 `max-w-3xl` 的最大宽度，避免宽屏桌面上一行拉太长读不动。AskUserQuestion 还额外把 Skip/Back/Submit 那条操作栏固定在视口底部（走全屏容器的 `footer` 插槽——用 `sticky` 会被卡片自己的 `overflow-hidden` 困住不生效），并且标题栏显示会话名，通过 `PermissionPanelProps` 上新增的可选字段 `sessionTitle` 一路传下来。
 
 **同步官方时怎么办：** 保留我的。`FullscreenSurface` 是全新文件，官方没有对应物；`MessageComponent.tsx`（一行 import + 控件行里一项）和 `AskUserQuestionPanel.tsx`（state、头部按钮、底部的 `panel` 变量和包装、几处 `isFullscreen ?` 三元 class）改动都很小，官方就算重写了这两个文件也容易重新应用。
 
@@ -101,3 +101,11 @@
 **为什么改：** 官方的文件树菜单只挂在 `onContextMenu` 上，触屏设备等于**整个菜单都打不开**——重命名、删除、下载、新建文件/文件夹、复制路径全没了。这里故意做了两个入口，方便真机上比一比再决定要不要砍掉一个：长按 500ms（手指移动超过 10px 就放弃，不影响滚动），以及每行末尾一个只在 `md:` 以下渲染的 `⋮` 按钮。两者共用同一份菜单状态；`FileContextMenu` 因此多支持了函数式 children，让每一行能自己渲染触发按钮而不用接管菜单状态。detailed 视图里手机上 `⋮` 占掉权限列——那一列本来就窄到放不下 `rw-rw-rw-` 加一个按钮。另外在官方的绝对路径"复制路径"旁边加了"复制相对路径"（两个平级菜单项，不做二级菜单），并且两个都改走项目自己的 `copyTextToClipboard`——官方直接调 `navigator.clipboard`，成功提示还是同步弹的，复制失败时会同时看到"复制路径失败"和"路径已复制到剪贴板"。
 
 **同步官方时怎么办：** 保留我的，但先看一眼入口：官方要是自己加了触屏入口，就用官方的，把重复的那个删掉。剪贴板兜底和重复 toast 属于纯 bug 修复、不是 fork 偏好，值得给官方提 PR。注意这条**动了** `src/i18n/locales/*/common.json`（在官方已有的 `fileTree.context` 块里加了两个 key），和第 3 条刻意只用 `t(key, '英文兜底')` 的做法不一样——那个块是官方的，这里大概率会冲突，重新把两个 key 加回去即可。
+
+## 13. 从聊天标题进入的跨项目会话快切
+
+**涉及文件：** `src/lib/commandPaletteEvents.ts`、`src/components/command-palette/ForkRecentSessions.tsx`、`CommandPalette.tsx`、`src/components/main-content/view/subcomponents/MainContentTitle.tsx`、`src/utils/api.js`、`server/modules/providers/provider.routes.ts`、`services/sessions.service.ts`、`server/modules/database/repositories/sessions.db.ts`
+
+**为什么改：** 官方的命令面板本来就能切会话，但唯一的触发方式是 Cmd/Ctrl+K——sidebar 里那个看着像按钮的东西其实是 `pointer-events-none` 的 `<kbd>` 徽章，而且 `md:` 以下根本不显示。于是手机上面板完全打不开，切会话只能开 sidebar。现在点聊天标题会直接把面板开在 Sessions 页，顺带也让面板的文件/commit/分支搜索在触屏上能用了。官方的 Sessions 分组只列当前项目（和 sidebar 是同一批），所以另加了一个 fork 自有的「Recent sessions (all projects)」分组来回答「我刚才在哪」，并且会和官方已经列出的行去重。切换本身就是 `navigate('/session/:id')`——已有的会话解析逻辑会自己找到所属项目，所以跨项目不需要额外的切项目代码。后端加了 `getRecentSessions(limit)`（`getAllSessions` 既没排序也没上限）和 `GET /api/providers/sessions/recent`；`sessions/running` 用不上，它是故意做成只返回状态的。
+
+**同步官方时怎么办：** 保留我的。上游改动刻意只有三处：`CommandPalette.tsx` 里一个监听 fork 自定义 `cloudcli:open-command-palette` window 事件的 `useEffect`、官方 Sessions 分组后面一个 `<ForkRecentSessions />`、以及 `MainContentTitle.tsx` 里标题变成按钮。列表、hook、事件全部在 fork 自有文件里，冲突后把这三处放回去即可。用 window 事件就是为了让面板不需要多一个 prop 或 context 句柄；官方以后要是自己做了外部打开的机制，就把监听删掉改调官方的。文案用 `t(key, '英文兜底')`，没动 `src/i18n/locales/**`（和第 3 条一致）。会话没有存名字时行标题会退化成 session id——那是 #9 记录的命名问题，不是这条引入的。
