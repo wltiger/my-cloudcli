@@ -3,10 +3,15 @@ import { createPortal } from 'react-dom';
 
 import { cn } from '../../../lib/utils';
 
+/** Downward drag (from the top of the content) that dismisses the surface. */
+const SWIPE_CLOSE_THRESHOLD_PX = 90;
+
 interface FullscreenSurfaceProps {
   open: boolean;
   onClose: () => void;
   title?: React.ReactNode;
+  /** Controls rendered in the header, before the close button. */
+  headerActions?: React.ReactNode;
   /** Extra classes for the scrollable body. */
   className?: string;
   closeLabel?: string;
@@ -22,10 +27,15 @@ const FullscreenSurface: React.FC<FullscreenSurfaceProps> = ({
   open,
   onClose,
   title,
+  headerActions,
   className,
   closeLabel = 'Close',
   children,
 }) => {
+  const bodyRef = React.useRef<HTMLDivElement | null>(null);
+  const dragStartRef = React.useRef<number | null>(null);
+  const [dragOffset, setDragOffset] = React.useState(0);
+
   React.useEffect(() => {
     if (!open) return;
 
@@ -45,8 +55,29 @@ const FullscreenSurface: React.FC<FullscreenSurfaceProps> = ({
     return () => {
       document.removeEventListener('keydown', handleKeyDown, true);
       document.body.style.overflow = previousOverflow;
+      dragStartRef.current = null;
+      setDragOffset(0);
     };
   }, [open, onClose]);
+
+  // Swipe down to dismiss — only starts when the body is scrolled to the top,
+  // so it never competes with reading a long message.
+  const handleTouchStart = (e: React.TouchEvent) => {
+    if ((bodyRef.current?.scrollTop ?? 0) > 0) return;
+    dragStartRef.current = e.touches[0].clientY;
+  };
+
+  const handleTouchMove = (e: React.TouchEvent) => {
+    if (dragStartRef.current === null) return;
+    setDragOffset(Math.max(0, e.touches[0].clientY - dragStartRef.current));
+  };
+
+  const handleTouchEnd = () => {
+    if (dragStartRef.current === null) return;
+    dragStartRef.current = null;
+    setDragOffset(0);
+    if (dragOffset > SWIPE_CLOSE_THRESHOLD_PX) onClose();
+  };
 
   if (!open) return null;
 
@@ -55,27 +86,42 @@ const FullscreenSurface: React.FC<FullscreenSurfaceProps> = ({
       role="dialog"
       aria-modal="true"
       className="fixed inset-0 z-50 flex flex-col bg-background"
+      style={dragOffset ? { transform: `translateY(${dragOffset}px)` } : undefined}
+      onTouchStart={handleTouchStart}
+      onTouchMove={handleTouchMove}
+      onTouchEnd={handleTouchEnd}
+      onTouchCancel={handleTouchEnd}
     >
       <div
-        className="flex flex-shrink-0 items-center justify-between gap-2 border-b border-border px-4 py-2"
+        className="flex-shrink-0 border-b border-border px-4 py-2"
         style={{ paddingTop: 'calc(0.5rem + env(safe-area-inset-top, 0px))' }}
       >
-        <span className="truncate text-sm font-medium text-foreground">{title}</span>
-        <button
-          type="button"
-          onClick={onClose}
-          title={closeLabel}
-          aria-label={closeLabel}
-          className="-mr-1 flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-        >
-          <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-          </svg>
-        </button>
+        <div className="mx-auto flex w-full max-w-3xl items-center justify-between gap-2">
+          <span className="truncate text-sm font-medium text-foreground">{title}</span>
+          <div className="flex flex-shrink-0 items-center gap-1">
+            {headerActions}
+            <button
+              type="button"
+              onClick={onClose}
+              title={closeLabel}
+              aria-label={closeLabel}
+              className="-mr-1 flex h-8 w-8 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+            >
+              <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
+        </div>
       </div>
 
-      <div className={cn('flex-1 overflow-y-auto overscroll-contain px-4 py-4 pb-safe-area-inset-bottom', className)}>
-        {children}
+      <div
+        ref={bodyRef}
+        className={cn('flex-1 overflow-y-auto overscroll-contain px-4 py-4 pb-safe-area-inset-bottom', className)}
+      >
+        {/* Capped measure — on a wide desktop the full viewport width makes
+            lines too long to scan. */}
+        <div className="mx-auto w-full max-w-3xl">{children}</div>
       </div>
     </div>,
     document.body

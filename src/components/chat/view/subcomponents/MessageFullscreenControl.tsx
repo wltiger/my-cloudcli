@@ -4,6 +4,7 @@ import { useTranslation } from 'react-i18next';
 import { FullscreenSurface, FullscreenToggleButton } from '../../../../shared/view/ui';
 
 import { Markdown } from './Markdown';
+import MessageCopyControl from './MessageCopyControl';
 
 /** Opens a long assistant message in a full-viewport reading surface. */
 const MessageFullscreenControl = ({ content }: { content: string }) => {
@@ -24,6 +25,11 @@ const MessageFullscreenControl = ({ content }: { content: string }) => {
         onClose={() => setIsFullscreen(false)}
         title={t('fullscreen.messageTitle', { defaultValue: 'Message' })}
         closeLabel={t('fullscreen.exit', { defaultValue: 'Exit fullscreen' })}
+        headerActions={
+          <span className="text-gray-400 dark:text-gray-500">
+            <MessageCopyControl content={content} messageType="assistant" />
+          </span>
+        }
       >
         <Markdown className="prose prose-gray max-w-none font-serif dark:prose-invert">
           {content}
