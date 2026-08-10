@@ -117,3 +117,11 @@
 **为什么改：** 官方的 `installRuntime()` 用 `cwd: process.cwd()` 跑 `npm install --no-save --no-package-lock playwright`，但 `getPlaywright()` 是从模块自身所在位置去 `require('playwright')`。全局安装的 CloudCLI 下这是两棵完全不同的树：包会装到用户当时启动 CLI 的那个目录（多半是用户主目录），而从 `<npm root -g>/@cloudcli-ai/cloudcli/dist-server/server/modules/browser-use/` 往上找 `node_modules` 永远走不到那里。结果就是装其实成功了，设置页却一直显示 `Playwright: missing`，"Install Runtime" 按钮点多少次都像没反应——每次只是往同一个够不着的地方重装一遍。现在固定装到 `~/.cloudcli/browser-use/runtime`（和已有的 `profiles/` 并列），并先写一个私有 `package.json`，免得 npm 往上找项目根、把上层目录当成自己的工程；`getPlaywright()` 则先按模块自身位置解析，找不到再从这个目录解析。`runCommand()` 为此多了一个 `cwd` 参数。manifest 既然是自己的，去掉 `--no-save --no-package-lock` 就没有副作用，留着 lockfile 重装还更快。
 
 **同步官方时怎么办：** 这属于纯 bug 修复而不是 fork 偏好，值得给官方提 PR，官方收了就把这条删掉。在那之前保留我的，但要把 `installRuntime()` 和 `getPlaywright()` 当成一对看：两边必须配套才成立，官方要是改了其中一个，就两半一起重新应用，别只合一边留另一边。如果官方改成把 playwright 作为正式依赖发布，那这条整条丢掉即可——第一级解析本来就覆盖那种情况。
+
+## 15. 移动端把标签切换栏收成一个菜单
+
+**涉及文件：** `src/components/main-content/view/subcomponents/MainContentTabMenu.tsx`、`MainContentTabSwitcher.tsx`、`MainContentHeader.tsx`、`src/shared/view/ui/ActionMenu.tsx`
+
+**为什么改：** 官方把标题和标签 pill 放在同一行。`lg:` 以下 pill 本来就只剩图标，但数量不固定——4 个内置，加可选的 Browser 和 Tasks，再加每个已启用插件一个——所以 375px 的手机上这排要占 148–220px，标题只剩不到 150px（6 个标签时实测 51px）。官方自己的缓解手段是给这排加横向滚动和左右渐变遮罩，能挡住溢出，但一点宽度都没还给标题。这在本 fork 里比在官方那边更亏，因为第 13 条把聊天标题变成了跨项目会话快切入口，挤窄标题等于同时挤掉一个导航入口。现在 768px 以下——用的就是 header 已经在给汉堡按钮用的那个 `isMobile`——整排收成一个约 48px 的 pill，里面是当前标签的图标加一个箭头；点开是下拉菜单，按原顺序列出全部标签，插件组前面加分隔线，当前项高亮并标 `aria-current`。标题实测宽度从 51px 变成 217px。桌面端一点没动，滚动和渐变遮罩都原样保留。
+
+**同步官方时怎么办：** 保留我的。上游足迹刻意做得极小且全是新增：`MainContentTabSwitcher.tsx` 里一个 prop 加一个提前 `return`、`MainContentHeader.tsx` 里一行 prop 透传、以及 `ActionMenu` 上四个可选 prop（`triggerIcon`、`showChevron`、菜单项的 `iconNode` 和 `isActive`）——它原有的两处调用一个都没用到。菜单代码全在 fork 自有的 `MainContentTabMenu.tsx` 里，冲突后把那几处放回去即可。那个提前 `return` 是**故意**放在标签列表构造完之后的：两种渲染共用同一份列表，官方以后加内置标签，移动端菜单自动就有了——重新应用时别改这个位置。下拉用的是 `ActionMenu` 的 `portal` 模式，也是故意的：header 那个标签槽是 `overflow-hidden`，绝对定位的菜单会被裁掉；官方要是重构了那个容器，先确认裁剪问题再考虑换掉 portal。文案用 `t(key, { defaultValue })`，没动 `src/i18n/locales/**`（和第 3、13 条一致）。官方哪天自己做了移动端标签方案，就用官方的，把这条删掉。

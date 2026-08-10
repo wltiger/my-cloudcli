@@ -26,3 +26,7 @@ _Avoid_: Model name — ambiguous with the friendly display label below
 **Prettified label**:
 A short, human-readable model label derived from a raw model id when it doesn't exactly match CloudCLI's own hardcoded model catalog. Only produced when the raw id matches a recognizable shape (known family + optional version); an unrecognized id falls back to displaying the raw id unchanged rather than a guessed label.
 _Avoid_: Friendly name — reserve that term for the hardcoded catalog's own `label` field (a separate, exact-match code path)
+
+**Tab** (main content):
+One of the views the selected Project is worked on through — Chat, Shell, Files, Git, plus Browser and Tasks when available and one per enabled plugin. Scope differs per tab and is easy to get wrong: only Chat and Shell follow the selected session; Files and Git are project-scoped and don't change when the session does.
+_Avoid_: Session tab — most tabs ignore the session entirely. Also distinct from the sidebar's Projects/Conversations tabs and the Settings dialog's tabs; when one of those is meant, name it explicitly

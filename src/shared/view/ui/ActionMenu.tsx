@@ -20,6 +20,10 @@ export type ActionMenuItem = {
   isDanger?: boolean;
   showDividerBefore?: boolean;
   closeOnSelect?: boolean;
+  /** Icon node rendered instead of `icon`, for icons that are not Lucide components. */
+  iconNode?: React.ReactNode;
+  /** Marks the row as the current selection. */
+  isActive?: boolean;
 };
 
 type ActionMenuProps = {
@@ -38,6 +42,10 @@ type ActionMenuProps = {
   portal?: boolean;
   header?: React.ReactNode;
   onOpenChange?: (open: boolean) => void;
+  /** Icon node rendered instead of `icon`, for icons that are not Lucide components. */
+  triggerIcon?: React.ReactNode;
+  /** Keeps the chevron visible when `iconOnly` hides the label. */
+  showChevron?: boolean;
 };
 
 export default function ActionMenu({
@@ -56,6 +64,8 @@ export default function ActionMenu({
   portal = false,
   header,
   onOpenChange,
+  triggerIcon,
+  showChevron = false,
 }: ActionMenuProps) {
   const [isOpen, setIsOpen] = React.useState(false);
   const [portalPosition, setPortalPosition] = React.useState<{ top: number; left: number } | null>(null);
@@ -202,6 +212,7 @@ export default function ActionMenu({
             <button
               type="button"
               role="menuitem"
+              aria-current={item.isActive ? 'true' : undefined}
               disabled={item.disabled || item.loading}
               onClick={() => runItem(item)}
               className={cn(
@@ -212,10 +223,15 @@ export default function ActionMenu({
                   : item.isDanger
                     ? 'text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-950'
                     : 'hover:bg-accent',
+                item.isActive && 'bg-accent text-accent-foreground',
               )}
             >
               {item.loading ? (
                 <Loader2 className="mt-0.5 h-4 w-4 flex-shrink-0 animate-spin" />
+              ) : item.iconNode ? (
+                <span className="mt-0.5 flex h-4 w-4 flex-shrink-0 items-center justify-center">
+                  {item.iconNode}
+                </span>
               ) : (
                 Icon && <Icon className="mt-0.5 h-4 w-4 flex-shrink-0" />
               )}
@@ -252,12 +268,15 @@ export default function ActionMenu({
           toggleMenu();
         }}
       >
-        {TriggerIcon && <TriggerIcon className="h-4 w-4" />}
+        {triggerIcon ?? (TriggerIcon && <TriggerIcon className="h-4 w-4" />)}
         {!iconOnly && (
           <>
             <span>{label}</span>
             <ChevronDown className={cn('h-4 w-4 transition-transform', isOpen && 'rotate-180')} />
           </>
+        )}
+        {iconOnly && showChevron && (
+          <ChevronDown className={cn('h-3 w-3 transition-transform', isOpen && 'rotate-180')} />
         )}
       </Button>
 

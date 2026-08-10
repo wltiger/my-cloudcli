@@ -7,11 +7,14 @@ import type { AppTab } from '../../../../types/app';
 import { usePlugins } from '../../../../contexts/PluginsContext';
 import PluginIcon from '../../../plugins/view/PluginIcon';
 
+import MainContentTabMenu from './MainContentTabMenu';
+
 type MainContentTabSwitcherProps = {
   activeTab: AppTab;
   setActiveTab: Dispatch<SetStateAction<AppTab>>;
   shouldShowTasksTab: boolean;
   shouldShowBrowserTab: boolean;
+  isMobile: boolean;
 };
 
 type BuiltInTab = {
@@ -29,7 +32,7 @@ type PluginTab = {
   iconFile: string;
 };
 
-type TabDefinition = BuiltInTab | PluginTab;
+export type TabDefinition = BuiltInTab | PluginTab;
 
 const BASE_TABS: BuiltInTab[] = [
   { kind: 'builtin', id: 'chat',  labelKey: 'tabs.chat',  icon: MessageSquare },
@@ -57,6 +60,7 @@ export default function MainContentTabSwitcher({
   setActiveTab,
   shouldShowTasksTab,
   shouldShowBrowserTab,
+  isMobile,
 }: MainContentTabSwitcherProps) {
   const { t } = useTranslation();
   const { plugins } = usePlugins();
@@ -78,6 +82,10 @@ export default function MainContentTabSwitcher({
     }));
 
   const tabs: TabDefinition[] = [...builtInTabs, ...pluginTabs];
+
+  if (isMobile) {
+    return <MainContentTabMenu tabs={tabs} activeTab={activeTab} setActiveTab={setActiveTab} />;
+  }
 
   return (
     <PillBar>

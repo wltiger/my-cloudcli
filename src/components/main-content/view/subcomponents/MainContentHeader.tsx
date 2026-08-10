@@ -61,6 +61,7 @@ export default function MainContentHeader({
               setActiveTab={setActiveTab}
               shouldShowTasksTab={shouldShowTasksTab}
               shouldShowBrowserTab={shouldShowBrowserTab}
+              isMobile={isMobile}
             />
           </div>
           {canScrollRight && (
