@@ -326,6 +326,28 @@ export const sessionsDb = {
   },
 
   /**
+   * The most recently touched sessions across every project, newest first.
+   *
+   * `getAllSessions` is unordered and unbounded because its callers want the
+   * whole set; a switcher only ever shows a handful, and sorting the full
+   * table in the client would mean shipping every row just to drop most.
+   */
+  getRecentSessions(limit: number): SessionRow[] {
+    const db = getConnection();
+    const rows = db
+      .prepare(
+        `SELECT ${SESSION_ROW_COLUMNS}
+         FROM sessions
+         WHERE isArchived = 0
+         ORDER BY datetime(COALESCE(updated_at, created_at)) DESC, session_id DESC
+         LIMIT ?`
+      )
+      .all(limit) as SessionRow[];
+
+    return normalizeSessionRows(rows);
+  },
+
+  /**
    * Archived rows are intentionally queried separately so the caller can render
    * them in a dedicated view without reintroducing them into active session lists.
    */

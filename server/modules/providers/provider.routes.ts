@@ -573,6 +573,20 @@ router.get(
   }),
 );
 
+/**
+ * Registered above `/sessions/:sessionId` so the literal path is not captured
+ * as a session id.
+ */
+router.get(
+  '/sessions/recent',
+  asyncHandler(async (req: Request, res: Response) => {
+    const requested = Number.parseInt(String(req.query.limit ?? ''), 10);
+    const limit = Number.isFinite(requested) ? Math.min(Math.max(requested, 1), 50) : 20;
+    const sessions = sessionsService.listRecentSessions(limit);
+    res.json(createApiSuccessResponse({ sessions }));
+  }),
+);
+
 router.get(
   '/sessions/:sessionId/provider-id',
   asyncHandler(async (req: Request, res: Response) => {

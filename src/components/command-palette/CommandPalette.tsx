@@ -29,8 +29,10 @@ import {
 import { useTheme } from '../../contexts/ThemeContext';
 import { usePaletteOps } from '../../contexts/PaletteOpsContext';
 import { SETTINGS_MAIN_TABS } from '../settings/constants/constants';
+import { OPEN_COMMAND_PALETTE_EVENT, type OpenCommandPaletteDetail } from '../../lib/commandPaletteEvents';
 import type { AppTab, Project } from '../../types/app';
 
+import ForkRecentSessions from './ForkRecentSessions';
 import { useSessionsSource } from './sources/useSessionsSource';
 import { useFilesSource } from './sources/useFilesSource';
 import { useCommitsSource } from './sources/useCommitsSource';
@@ -87,6 +89,16 @@ export default function CommandPalette({
     };
     document.addEventListener('keydown', handleKeyDown);
     return () => document.removeEventListener('keydown', handleKeyDown);
+  }, []);
+
+  React.useEffect(() => {
+    const handleOpenRequest = (event: Event) => {
+      const requestedPage = (event as CustomEvent<OpenCommandPaletteDetail>).detail?.page;
+      setPages(requestedPage ? [requestedPage] : []);
+      setOpen(true);
+    };
+    window.addEventListener(OPEN_COMMAND_PALETTE_EVENT, handleOpenRequest);
+    return () => window.removeEventListener(OPEN_COMMAND_PALETTE_EVENT, handleOpenRequest);
   }, []);
 
   React.useEffect(() => {
@@ -299,6 +311,13 @@ export default function CommandPalette({
                 )}
               </CommandGroup>
             )}
+
+            <ForkRecentSessions
+              enabled={open && showSessions}
+              expanded={page === 'sessions'}
+              excludeIds={sessionRows.map((s) => s.id)}
+              onSelect={(sessionId) => run(() => navigate(`/session/${sessionId}`))}
+            />
 
             {showFiles && projectId && filesShown.length > 0 && (
               <CommandGroup heading="Files">

@@ -120,6 +120,31 @@ export const sessionsService = {
   },
 
   /**
+   * Recent sessions across every project, newest first, shaped for a switcher.
+   *
+   * Neither existing read answers "what did I touch last, anywhere":
+   * `listRunningSessions` is status-only, and the sessions endpoint the
+   * sidebar and command palette use is scoped to a single project.
+   */
+  listRecentSessions(limit: number): Array<{
+    sessionId: string;
+    provider: LLMProvider;
+    name: string | null;
+    projectPath: string | null;
+    projectName: string | null;
+    updatedAt: string | null;
+  }> {
+    return sessionsDb.getRecentSessions(limit).map((session) => ({
+      sessionId: session.session_id,
+      provider: session.provider as LLMProvider,
+      name: session.custom_name,
+      projectPath: session.project_path,
+      projectName: session.project_path ? path.basename(session.project_path) : null,
+      updatedAt: session.updated_at ?? session.created_at ?? null,
+    }));
+  },
+
+  /**
    * Resolves the provider-native session id a runtime needs for resume.
    *
    * Callers hand provider runtimes the stable app session id; the provider
