@@ -2,8 +2,10 @@ import { useCallback, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import JSZip from 'jszip';
 import { api } from '../../../utils/api';
+import { copyTextToClipboard } from '../../../utils/clipboard';
 import type { FileTreeNode } from '../types/types';
 import type { Project } from '../../../types/app';
+import { toProjectRelativePath } from '../utils/fileTreeUtils';
 
 // Invalid filename characters
 const INVALID_FILENAME_CHARS = /[<>:"/\\|?*\x00-\x1f]/;
@@ -52,6 +54,7 @@ export type UseFileTreeOperationsResult = {
 
   // Other operations
   handleCopyPath: (item: FileTreeNode) => void;
+  handleCopyRelativePath: (item: FileTreeNode) => void;
   handleDownload: (item: FileTreeNode) => Promise<void>;
 
   // Loading state
@@ -238,15 +241,28 @@ export function useFileTreeOperations({
     }
   }, [selectedProject, newItemParent, newItemType, newItemName, validateFilename, showToast, t, onRefresh, handleCancelCreate]);
 
-  // Copy path to clipboard
-  const handleCopyPath = useCallback((item: FileTreeNode) => {
-    navigator.clipboard.writeText(item.path).catch(() => {
-      // Clipboard API may fail in some contexts (e.g., non-HTTPS)
+  // copyTextToClipboard falls back to execCommand when the Clipboard API is
+  // unavailable (e.g. non-HTTPS), and the toast waits for the real outcome.
+  const copyPathToClipboard = useCallback(async (path: string) => {
+    const didCopy = await copyTextToClipboard(path);
+
+    if (didCopy) {
+      showToast(t('fileTree.toast.pathCopied', 'Path copied to clipboard'), 'success');
+    } else {
       showToast(t('fileTree.toast.copyFailed', 'Failed to copy path'), 'error');
-      return;
-    });
-    showToast(t('fileTree.toast.pathCopied', 'Path copied to clipboard'), 'success');
+    }
   }, [showToast, t]);
+
+  // Copy absolute path to clipboard
+  const handleCopyPath = useCallback((item: FileTreeNode) => {
+    void copyPathToClipboard(item.path);
+  }, [copyPathToClipboard]);
+
+  // Copy path relative to the project root
+  const handleCopyRelativePath = useCallback((item: FileTreeNode) => {
+    const projectRoot = selectedProject?.fullPath || selectedProject?.path;
+    void copyPathToClipboard(toProjectRelativePath(item.path, projectRoot));
+  }, [copyPathToClipboard, selectedProject]);
 
   const triggerBrowserDownload = useCallback((blob: Blob, fileName: string) => {
     const url = URL.createObjectURL(blob);
@@ -365,6 +381,7 @@ export function useFileTreeOperations({
 
     // Other operations
     handleCopyPath,
+    handleCopyRelativePath,
     handleDownload,
 
     // Loading state

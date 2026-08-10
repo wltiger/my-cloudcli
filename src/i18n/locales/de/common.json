@@ -125,11 +125,13 @@
       "rename": "Umbenennen",
       "delete": "Löschen",
       "copyPath": "Pfad kopieren",
+      "copyRelativePath": "Relativen Pfad kopieren",
       "download": "Herunterladen",
       "newFile": "Neue Datei",
       "newFolder": "Neuer Ordner",
       "refresh": "Aktualisieren",
       "menuLabel": "Datei-Kontextmenü",
+      "openMenuFor": "Menü für {{name}} öffnen",
       "loading": "Lädt..."
     }
   },

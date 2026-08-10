@@ -20,6 +20,7 @@ type FileTreeBodyProps = {
   onNewFile?: (path: string) => void;
   onNewFolder?: (path: string) => void;
   onCopyPath?: (item: FileTreeNode) => void;
+  onCopyRelativePath?: (item: FileTreeNode) => void;
   onDownload?: (item: FileTreeNode) => void;
   onRefresh?: () => void;
   // Rename state for inline editing
@@ -47,6 +48,7 @@ export default function FileTreeBody({
   onNewFile,
   onNewFolder,
   onCopyPath,
+  onCopyRelativePath,
   onDownload,
   onRefresh,
   renamingItem,
@@ -87,6 +89,7 @@ export default function FileTreeBody({
           onNewFile={onNewFile}
           onNewFolder={onNewFolder}
           onCopyPath={onCopyPath}
+          onCopyRelativePath={onCopyRelativePath}
           onDownload={onDownload}
           onRefresh={onRefresh}
           renamingItem={renamingItem}

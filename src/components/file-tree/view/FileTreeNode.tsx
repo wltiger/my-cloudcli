@@ -1,9 +1,10 @@
 import type { ReactNode, RefObject } from 'react';
-import { ChevronRight, Folder, FolderOpen } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
+import { ChevronRight, Folder, FolderOpen, MoreVertical } from 'lucide-react';
 import { cn } from '../../../lib/utils';
 import type { FileTreeNode as FileTreeNodeType, FileTreeViewMode } from '../types/types';
 import { Input } from '../../../shared/view/ui';
-import FileContextMenu from './FileContextMenu';
+import FileContextMenu, { type FileContextMenuTrigger } from './FileContextMenu';
 
 type FileTreeNodeProps = {
   item: FileTreeNodeType;
@@ -19,6 +20,7 @@ type FileTreeNodeProps = {
   onNewFile?: (path: string) => void;
   onNewFolder?: (path: string) => void;
   onCopyPath?: (item: FileTreeNodeType) => void;
+  onCopyRelativePath?: (item: FileTreeNodeType) => void;
   onDownload?: (item: FileTreeNodeType) => void;
   onRefresh?: () => void;
   // Rename state for inline editing
@@ -59,6 +61,25 @@ function TreeItemIcon({ item, isOpen, renderFileIcon }: TreeItemIconProps) {
   return <span className="ml-[18px] flex flex-shrink-0 items-center">{renderFileIcon(item.name)}</span>;
 }
 
+// Touch devices have no right-click, so every row carries its own menu button there.
+function RowMenuButton({ trigger, label }: { trigger: FileContextMenuTrigger; label: string }) {
+  return (
+    <button
+      type="button"
+      aria-label={label}
+      className="-mr-1 flex h-7 w-7 flex-shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-accent md:hidden"
+      // Keep the row's long-press and click handlers out of the button's own gesture.
+      onTouchStart={(event) => event.stopPropagation()}
+      onClick={(event) => {
+        event.stopPropagation();
+        trigger.openMenuNearElement(event.currentTarget);
+      }}
+    >
+      <MoreVertical className="h-4 w-4" />
+    </button>
+  );
+}
+
 export default function FileTreeNode({
   item,
   level,
@@ -73,6 +94,7 @@ export default function FileTreeNode({
   onNewFile,
   onNewFolder,
   onCopyPath,
+  onCopyRelativePath,
   onDownload,
   onRefresh,
   renamingItem,
@@ -83,6 +105,7 @@ export default function FileTreeNode({
   renameInputRef,
   operationLoading,
 }: FileTreeNodeProps) {
+  const { t } = useTranslation();
   const isDirectory = item.type === 'directory';
   const isOpen = isDirectory && expandedDirs.has(item.path);
   const hasChildren = Boolean(isDirectory && item.children && item.children.length > 0);
@@ -135,50 +158,68 @@ export default function FileTreeNode({
     );
   }
 
-  const rowContent = (
-    <div
-      className={rowClassName}
-      style={{ paddingLeft: `${level * 16 + 4}px` }}
-      onClick={() => onItemClick(item)}
-    >
-      {viewMode === 'detailed' ? (
-        <>
-          <div className="col-span-5 flex min-w-0 items-center gap-1.5">
+  const renderRowContent = (trigger?: FileContextMenuTrigger) => {
+    const menuButton = trigger ? (
+      <RowMenuButton
+        trigger={trigger}
+        label={t('fileTree.context.openMenuFor', 'Open menu for {{name}}', { name: item.name })}
+      />
+    ) : null;
+
+    return (
+      <div
+        className={rowClassName}
+        style={{ paddingLeft: `${level * 16 + 4}px` }}
+        onClick={() => onItemClick(item)}
+      >
+        {viewMode === 'detailed' ? (
+          <>
+            <div className="col-span-5 flex min-w-0 items-center gap-1.5">
+              <TreeItemIcon item={item} isOpen={isOpen} renderFileIcon={renderFileIcon} />
+              <span className={nameClassName}>{item.name}</span>
+            </div>
+            <div className="col-span-2 text-sm tabular-nums text-muted-foreground">
+              {item.type === 'file' ? formatFileSize(item.size) : ''}
+            </div>
+            <div className="col-span-3 text-sm text-muted-foreground">{formatRelativeTime(item.modified)}</div>
+            <div className="col-span-2 flex items-center justify-end gap-1 font-mono text-sm text-muted-foreground">
+              {/* This column is too narrow on a phone to show permissions next to the menu button. */}
+              <span className={cn('mr-auto truncate', menuButton && 'hidden md:inline')}>
+                {item.permissionsRwx || ''}
+              </span>
+              {menuButton}
+            </div>
+          </>
+        ) : viewMode === 'compact' ? (
+          <>
+            <div className="flex min-w-0 items-center gap-1.5">
+              <TreeItemIcon item={item} isOpen={isOpen} renderFileIcon={renderFileIcon} />
+              <span className={nameClassName}>{item.name}</span>
+            </div>
+            <div className="ml-2 flex flex-shrink-0 items-center gap-3 text-sm text-muted-foreground">
+              {item.type === 'file' && (
+                <>
+                  <span className="tabular-nums">{formatFileSize(item.size)}</span>
+                  <span className="font-mono">{item.permissionsRwx}</span>
+                </>
+              )}
+              {menuButton}
+            </div>
+          </>
+        ) : (
+          <>
             <TreeItemIcon item={item} isOpen={isOpen} renderFileIcon={renderFileIcon} />
             <span className={nameClassName}>{item.name}</span>
-          </div>
-          <div className="col-span-2 text-sm tabular-nums text-muted-foreground">
-            {item.type === 'file' ? formatFileSize(item.size) : ''}
-          </div>
-          <div className="col-span-3 text-sm text-muted-foreground">{formatRelativeTime(item.modified)}</div>
-          <div className="col-span-2 font-mono text-sm text-muted-foreground">{item.permissionsRwx || ''}</div>
-        </>
-      ) : viewMode === 'compact' ? (
-        <>
-          <div className="flex min-w-0 items-center gap-1.5">
-            <TreeItemIcon item={item} isOpen={isOpen} renderFileIcon={renderFileIcon} />
-            <span className={nameClassName}>{item.name}</span>
-          </div>
-          <div className="ml-2 flex flex-shrink-0 items-center gap-3 text-sm text-muted-foreground">
-            {item.type === 'file' && (
-              <>
-                <span className="tabular-nums">{formatFileSize(item.size)}</span>
-                <span className="font-mono">{item.permissionsRwx}</span>
-              </>
-            )}
-          </div>
-        </>
-      ) : (
-        <>
-          <TreeItemIcon item={item} isOpen={isOpen} renderFileIcon={renderFileIcon} />
-          <span className={nameClassName}>{item.name}</span>
-        </>
-      )}
-    </div>
-  );
+            {menuButton && <span className="ml-auto flex items-center">{menuButton}</span>}
+          </>
+        )}
+      </div>
+    );
+  };
 
   // Check if context menu callbacks are provided
-  const hasContextMenu = onRename || onDelete || onNewFile || onNewFolder || onCopyPath || onDownload || onRefresh;
+  const hasContextMenu =
+    onRename || onDelete || onNewFile || onNewFolder || onCopyPath || onCopyRelativePath || onDownload || onRefresh;
 
   return (
     <div className="select-none">
@@ -190,13 +231,14 @@ export default function FileTreeNode({
           onNewFile={onNewFile}
           onNewFolder={onNewFolder}
           onCopyPath={onCopyPath}
+          onCopyRelativePath={onCopyRelativePath}
           onDownload={onDownload}
           onRefresh={onRefresh}
         >
-          {rowContent}
+          {(trigger) => renderRowContent(trigger)}
         </FileContextMenu>
       ) : (
-        rowContent
+        renderRowContent()
       )}
 
       {isDirectory && isOpen && hasChildren && (
@@ -222,6 +264,7 @@ export default function FileTreeNode({
               onNewFile={onNewFile}
               onNewFolder={onNewFolder}
               onCopyPath={onCopyPath}
+              onCopyRelativePath={onCopyRelativePath}
               onDownload={onDownload}
               onRefresh={onRefresh}
               renamingItem={renamingItem}

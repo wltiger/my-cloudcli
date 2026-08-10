@@ -125,11 +125,13 @@
       "rename": "Renombrar",
       "delete": "Eliminar",
       "copyPath": "Copiar ruta",
+      "copyRelativePath": "Copiar ruta relativa",
       "download": "Descargar",
       "newFile": "Archivo nuevo",
       "newFolder": "Carpeta nueva",
       "refresh": "Actualizar",
       "menuLabel": "Menú contextual de archivo",
+      "openMenuFor": "Abrir menú de {{name}}",
       "loading": "Cargando..."
     }
   },

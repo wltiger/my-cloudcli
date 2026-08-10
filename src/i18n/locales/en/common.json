@@ -125,11 +125,13 @@
       "rename": "Rename",
       "delete": "Delete",
       "copyPath": "Copy Path",
+      "copyRelativePath": "Copy Relative Path",
       "download": "Download",
       "newFile": "New File",
       "newFolder": "New Folder",
       "refresh": "Refresh",
       "menuLabel": "File context menu",
+      "openMenuFor": "Open menu for {{name}}",
       "loading": "Loading..."
     }
   },

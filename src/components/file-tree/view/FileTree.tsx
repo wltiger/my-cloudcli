@@ -213,6 +213,7 @@ export default function FileTree({ selectedProject, onFileOpen }: FileTreeProps)
           onNewFile={(path) => operations.handleStartCreate(path, 'file')}
           onNewFolder={(path) => operations.handleStartCreate(path, 'directory')}
           onCopyPath={operations.handleCopyPath}
+          onCopyRelativePath={operations.handleCopyRelativePath}
           onDownload={operations.handleDownload}
           onRefresh={refreshFiles}
           // Pass rename state and handlers for inline editing

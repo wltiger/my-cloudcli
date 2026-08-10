@@ -15,6 +15,7 @@ type FileTreeListProps = {
   onNewFile?: (path: string) => void;
   onNewFolder?: (path: string) => void;
   onCopyPath?: (item: FileTreeNodeType) => void;
+  onCopyRelativePath?: (item: FileTreeNodeType) => void;
   onDownload?: (item: FileTreeNodeType) => void;
   onRefresh?: () => void;
   // Rename state for inline editing
@@ -40,6 +41,7 @@ export default function FileTreeList({
   onNewFile,
   onNewFolder,
   onCopyPath,
+  onCopyRelativePath,
   onDownload,
   onRefresh,
   renamingItem,
@@ -68,6 +70,7 @@ export default function FileTreeList({
           onNewFile={onNewFile}
           onNewFolder={onNewFolder}
           onCopyPath={onCopyPath}
+          onCopyRelativePath={onCopyRelativePath}
           onDownload={onDownload}
           onRefresh={onRefresh}
           renamingItem={renamingItem}

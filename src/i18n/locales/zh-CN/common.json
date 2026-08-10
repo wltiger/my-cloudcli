@@ -125,11 +125,13 @@
       "rename": "重命名",
       "delete": "删除",
       "copyPath": "复制路径",
+      "copyRelativePath": "复制相对路径",
       "download": "下载",
       "newFile": "新建文件",
       "newFolder": "新建文件夹",
       "refresh": "刷新",
       "menuLabel": "文件上下文菜单",
+      "openMenuFor": "打开 {{name}} 的菜单",
       "loading": "加载中..."
     }
   },

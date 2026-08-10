@@ -1,6 +1,6 @@
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react';
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type ReactNode, type TouchEvent as ReactTouchEvent } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Copy, Download, FileText, FolderPlus, Pencil, RefreshCw, Trash2, type LucideIcon } from 'lucide-react';
+import { Copy, CornerUpLeft, Download, FileText, FolderPlus, Pencil, RefreshCw, Trash2, type LucideIcon } from 'lucide-react';
 import { cn } from '../../../lib/utils';
 
 type FileContextItem = {
@@ -28,6 +28,14 @@ type ContextMenuAction = {
 const CONTEXT_MENU_WIDTH = 200;
 const CONTEXT_MENU_HEIGHT = 300;
 const VIEWPORT_PADDING = 10;
+const LONG_PRESS_DURATION_MS = 500;
+// A press that drifts further than this is a scroll, not a long press.
+const LONG_PRESS_MOVE_TOLERANCE_PX = 10;
+
+// Lets a row render its own trigger (the mobile overflow button) without owning menu state.
+export type FileContextMenuTrigger = {
+  openMenuNearElement: (element: HTMLElement) => void;
+};
 
 function calculateViewportSafePosition(clientX: number, clientY: number) {
   // Keep the context menu inside the visible viewport.
@@ -52,11 +60,12 @@ export default function FileContextMenu({
   onNewFolder,
   onRefresh,
   onCopyPath,
+  onCopyRelativePath,
   onDownload,
   isLoading = false,
   className = '',
 }: {
-  children: ReactNode;
+  children: ReactNode | ((trigger: FileContextMenuTrigger) => ReactNode);
   item?: FileContextItem | null;
   onRename?: (item: FileContextItem) => void;
   onDelete?: (item: FileContextItem) => void;
@@ -64,6 +73,7 @@ export default function FileContextMenu({
   onNewFolder?: (path: string) => void;
   onRefresh?: () => void;
   onCopyPath?: (item: FileContextItem) => void;
+  onCopyRelativePath?: (item: FileContextItem) => void;
   onDownload?: (item: FileContextItem) => void;
   isLoading?: boolean;
   className?: string;
@@ -72,18 +82,88 @@ export default function FileContextMenu({
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [menuPosition, setMenuPosition] = useState({ x: 0, y: 0 });
   const menuRef = useRef<HTMLDivElement>(null);
+  const longPressTimerRef = useRef<number | null>(null);
+  const touchStartPointRef = useRef<{ x: number; y: number } | null>(null);
+  const didLongPressRef = useRef(false);
 
   const closeContextMenu = useCallback(() => {
     setIsMenuOpen(false);
+  }, []);
+
+  const openMenuAtPoint = useCallback((clientX: number, clientY: number) => {
+    setMenuPosition(calculateViewportSafePosition(clientX, clientY));
+    setIsMenuOpen(true);
   }, []);
 
   const openContextMenuAtCursor = useCallback((event: ReactMouseEvent<HTMLDivElement>) => {
     event.preventDefault();
     event.stopPropagation();
 
-    setMenuPosition(calculateViewportSafePosition(event.clientX, event.clientY));
-    setIsMenuOpen(true);
+    // Android fires a native contextmenu after our own long-press timer already opened the menu.
+    if (didLongPressRef.current) {
+      return;
+    }
+
+    openMenuAtPoint(event.clientX, event.clientY);
+  }, [openMenuAtPoint]);
+
+  const cancelLongPress = useCallback(() => {
+    if (longPressTimerRef.current !== null) {
+      window.clearTimeout(longPressTimerRef.current);
+      longPressTimerRef.current = null;
+    }
+    touchStartPointRef.current = null;
   }, []);
+
+  const handleTouchStart = useCallback((event: ReactTouchEvent<HTMLDivElement>) => {
+    cancelLongPress();
+    didLongPressRef.current = false;
+
+    if (event.touches.length !== 1) {
+      return;
+    }
+
+    const { clientX, clientY } = event.touches[0];
+    touchStartPointRef.current = { x: clientX, y: clientY };
+    longPressTimerRef.current = window.setTimeout(() => {
+      longPressTimerRef.current = null;
+      didLongPressRef.current = true;
+      openMenuAtPoint(clientX, clientY);
+    }, LONG_PRESS_DURATION_MS);
+  }, [cancelLongPress, openMenuAtPoint]);
+
+  const handleTouchMove = useCallback((event: ReactTouchEvent<HTMLDivElement>) => {
+    const startPoint = touchStartPointRef.current;
+    if (!startPoint || event.touches.length === 0) {
+      return;
+    }
+
+    const { clientX, clientY } = event.touches[0];
+    if (
+      Math.abs(clientX - startPoint.x) > LONG_PRESS_MOVE_TOLERANCE_PX ||
+      Math.abs(clientY - startPoint.y) > LONG_PRESS_MOVE_TOLERANCE_PX
+    ) {
+      cancelLongPress();
+    }
+  }, [cancelLongPress]);
+
+  // A long press must not also open the file it was pressing.
+  const handleClickCapture = useCallback((event: ReactMouseEvent<HTMLDivElement>) => {
+    if (didLongPressRef.current) {
+      didLongPressRef.current = false;
+      event.preventDefault();
+      event.stopPropagation();
+    }
+  }, []);
+
+  const menuTrigger = useMemo<FileContextMenuTrigger>(() => ({
+    openMenuNearElement: (element) => {
+      const rect = element.getBoundingClientRect();
+      openMenuAtPoint(rect.right, rect.bottom);
+    },
+  }), [openMenuAtPoint]);
+
+  useEffect(() => cancelLongPress, [cancelLongPress]);
 
   const runMenuActionAndClose = useCallback((action?: () => void) => {
     closeContextMenu();
@@ -112,6 +192,12 @@ export default function FileContextMenu({
           label: t('fileTree.context.copyPath', 'Copy Path'),
           onSelect: () => onCopyPath?.(item),
           showDividerBefore: true,
+        },
+        {
+          key: 'copyRelativePath',
+          icon: CornerUpLeft,
+          label: t('fileTree.context.copyRelativePath', 'Copy Relative Path'),
+          onSelect: () => onCopyRelativePath?.(item),
         },
         {
           key: 'download',
@@ -158,6 +244,12 @@ export default function FileContextMenu({
           showDividerBefore: true,
         },
         {
+          key: 'copyRelativePath',
+          icon: CornerUpLeft,
+          label: t('fileTree.context.copyRelativePath', 'Copy Relative Path'),
+          onSelect: () => onCopyRelativePath?.(item),
+        },
+        {
           key: 'download',
           icon: Download,
           label: t('fileTree.context.download', 'Download'),
@@ -187,14 +279,14 @@ export default function FileContextMenu({
         showDividerBefore: true,
       },
     ];
-  }, [item, onCopyPath, onDelete, onDownload, onNewFile, onNewFolder, onRefresh, onRename, t]);
+  }, [item, onCopyPath, onCopyRelativePath, onDelete, onDownload, onNewFile, onNewFolder, onRefresh, onRename, t]);
 
   useEffect(() => {
     if (!isMenuOpen) {
       return;
     }
 
-    const handleOutsideMouseDown = (event: MouseEvent) => {
+    const handleOutsidePointerDown = (event: Event) => {
       const menuElement = menuRef.current;
       if (menuElement && !menuElement.contains(event.target as Node)) {
         closeContextMenu();
@@ -207,11 +299,13 @@ export default function FileContextMenu({
       }
     };
 
-    document.addEventListener('mousedown', handleOutsideMouseDown);
+    document.addEventListener('mousedown', handleOutsidePointerDown);
+    document.addEventListener('touchstart', handleOutsidePointerDown);
     document.addEventListener('keydown', handleEscapeKeyDown);
 
     return () => {
-      document.removeEventListener('mousedown', handleOutsideMouseDown);
+      document.removeEventListener('mousedown', handleOutsidePointerDown);
+      document.removeEventListener('touchstart', handleOutsidePointerDown);
       document.removeEventListener('keydown', handleEscapeKeyDown);
     };
   }, [closeContextMenu, isMenuOpen]);
@@ -256,8 +350,18 @@ export default function FileContextMenu({
 
   return (
     <>
-      <div onContextMenu={openContextMenuAtCursor} className={cn('contents', className)}>
-        {children}
+      <div
+        onContextMenu={openContextMenuAtCursor}
+        onTouchStart={handleTouchStart}
+        onTouchMove={handleTouchMove}
+        onTouchEnd={cancelLongPress}
+        onTouchCancel={cancelLongPress}
+        onClickCapture={handleClickCapture}
+        // Stops iOS from showing its own selection/callout bubble during the long press.
+        style={{ WebkitTouchCallout: 'none' }}
+        className={cn('contents', className)}
+      >
+        {typeof children === 'function' ? children(menuTrigger) : children}
       </div>
 
       {isMenuOpen && (

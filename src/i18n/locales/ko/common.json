@@ -125,11 +125,13 @@
       "rename": "이름 변경",
       "delete": "삭제",
       "copyPath": "경로 복사",
+      "copyRelativePath": "상대 경로 복사",
       "download": "다운로드",
       "newFile": "새 파일",
       "newFolder": "새 폴더",
       "refresh": "새로 고침",
       "menuLabel": "파일 컨텍스트 메뉴",
+      "openMenuFor": "{{name}} 메뉴 열기",
       "loading": "로딩 중..."
     }
   },

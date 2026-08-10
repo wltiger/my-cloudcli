@@ -81,3 +81,24 @@ export function isImageFile(filename: string): boolean {
   return Boolean(extension && IMAGE_FILE_EXTENSIONS.has(extension));
 }
 
+function toPosixPath(value: string): string {
+  return value.replace(/\\/g, '/').replace(/\/+$/, '');
+}
+
+// Tree nodes carry absolute OS paths; strip the project root so the result can be
+// pasted into a prompt or a command that already runs inside the project.
+export function toProjectRelativePath(absolutePath: string, projectRoot?: string): string {
+  const normalizedPath = toPosixPath(absolutePath);
+  const normalizedRoot = projectRoot ? toPosixPath(projectRoot) : '';
+
+  if (!normalizedRoot) {
+    return normalizedPath;
+  }
+
+  // Windows paths are case-insensitive, so compare folded but slice the original.
+  const prefix = `${normalizedRoot}/`;
+  return normalizedPath.toLowerCase().startsWith(prefix.toLowerCase())
+    ? normalizedPath.slice(prefix.length)
+    : normalizedPath;
+}
+

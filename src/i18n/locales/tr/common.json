@@ -125,11 +125,13 @@
       "rename": "Yeniden Adlandır",
       "delete": "Sil",
       "copyPath": "Yolu Kopyala",
+      "copyRelativePath": "Göreli Yolu Kopyala",
       "download": "İndir",
       "newFile": "Yeni Dosya",
       "newFolder": "Yeni Klasör",
       "refresh": "Yenile",
       "menuLabel": "Dosya bağlam menüsü",
+      "openMenuFor": "{{name}} menüsünü aç",
       "loading": "Yükleniyor..."
     }
   },
