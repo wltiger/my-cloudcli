@@ -226,7 +226,7 @@ export const AskUserQuestionPanel: React.FC<PermissionPanelProps> = ({
           )}
 
           {/* Question text */}
-          <p className={`font-medium leading-snug text-gray-900 dark:text-gray-100 ${isFullscreen ? 'text-lg' : 'text-[14px]'}`}>
+          <p className={`font-medium leading-snug text-gray-900 dark:text-gray-100 ${isFullscreen ? 'text-xl' : 'text-[14px]'}`}>
             {q.question}
           </p>
           {multi && (
@@ -263,7 +263,7 @@ export const AskUserQuestionPanel: React.FC<PermissionPanelProps> = ({
 
                   <div className="min-w-0 flex-1">
                     <div className={`leading-tight transition-colors duration-150 ${
-                      isFullscreen ? 'text-[17px]' : 'text-[13px]'
+                      isFullscreen ? 'text-[19px]' : 'text-[13px]'
                     } ${
                       isSelected
                         ? 'font-medium text-gray-900 dark:text-gray-100'
@@ -273,7 +273,7 @@ export const AskUserQuestionPanel: React.FC<PermissionPanelProps> = ({
                     </div>
                     {opt.description && (
                       <div className={`leading-snug transition-colors duration-150 ${
-                        isFullscreen ? 'mt-0.5 text-[15px]' : 'text-[11px]'
+                        isFullscreen ? 'mt-1 text-[17px]' : 'text-[11px]'
                       } ${
                         isSelected
                           ? 'text-blue-600/70 dark:text-blue-300/70'
@@ -312,7 +312,7 @@ export const AskUserQuestionPanel: React.FC<PermissionPanelProps> = ({
                 0
               </kbd>
               <span className={`leading-tight transition-colors ${
-                isFullscreen ? 'text-[17px]' : 'text-[13px]'
+                isFullscreen ? 'text-[19px]' : 'text-[13px]'
               } ${
                 isOtherOn
                   ? 'font-medium text-gray-900 dark:text-gray-100'

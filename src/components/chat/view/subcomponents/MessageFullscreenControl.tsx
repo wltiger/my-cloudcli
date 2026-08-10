@@ -31,7 +31,7 @@ const MessageFullscreenControl = ({ content }: { content: string }) => {
           </span>
         }
       >
-        <Markdown className="prose prose-gray max-w-none font-serif dark:prose-invert">
+        <Markdown className="prose prose-lg prose-gray max-w-none font-serif dark:prose-invert">
           {content}
         </Markdown>
       </FullscreenSurface>
