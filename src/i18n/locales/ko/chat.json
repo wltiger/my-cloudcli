@@ -11,6 +11,11 @@
     "copyAsMarkdown": "마크다운으로 복사",
     "copyAsText": "텍스트로 복사"
   },
+  "fullscreen": {
+    "expand": "전체 화면",
+    "exit": "전체 화면 종료",
+    "messageTitle": "메시지"
+  },
   "messageTypes": {
     "user": "U",
     "error": "오류",

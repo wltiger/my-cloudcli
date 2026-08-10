@@ -18,6 +18,7 @@ import ChatMessageImages from './ChatMessageImages';
 import ChatMessageFiles from './ChatMessageFiles';
 import { Markdown } from './Markdown';
 import MessageCopyControl from './MessageCopyControl';
+import MessageFullscreenControl from './MessageFullscreenControl';
 import MessageSpeakControl from './MessageSpeakControl';
 
 type DiffLine = {
@@ -390,6 +391,9 @@ const MessageComponent = memo(({ message, prevMessage, createDiff, onFileOpen, s
                 )}
                 {shouldShowAssistantCopyControl && (
                   <MessageSpeakControl content={assistantCopyContent} />
+                )}
+                {shouldShowAssistantCopyControl && (
+                  <MessageFullscreenControl content={assistantCopyContent} />
                 )}
                 {!isGrouped && <span>{formattedTime}</span>}
               </div>

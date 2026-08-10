@@ -11,6 +11,11 @@
     "copyAsMarkdown": "复制为 Markdown",
     "copyAsText": "复制为纯文本"
   },
+  "fullscreen": {
+    "expand": "全屏",
+    "exit": "退出全屏",
+    "messageTitle": "消息"
+  },
   "messageTypes": {
     "user": "U",
     "error": "错误",

@@ -11,6 +11,11 @@
     "copyAsMarkdown": "Копировать как Markdown",
     "copyAsText": "Копировать как текст"
   },
+  "fullscreen": {
+    "expand": "Полный экран",
+    "exit": "Выйти из полноэкранного режима",
+    "messageTitle": "Сообщение"
+  },
   "messageTypes": {
     "user": "П",
     "error": "Ошибка",

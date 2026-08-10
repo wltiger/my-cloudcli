@@ -11,6 +11,11 @@
     "copyAsMarkdown": "Markdownとしてコピー",
     "copyAsText": "テキストとしてコピー"
   },
+  "fullscreen": {
+    "expand": "全画面",
+    "exit": "全画面を終了",
+    "messageTitle": "メッセージ"
+  },
   "messageTypes": {
     "user": "U",
     "error": "エラー",

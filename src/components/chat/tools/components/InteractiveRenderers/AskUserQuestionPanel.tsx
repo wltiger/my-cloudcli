@@ -1,6 +1,7 @@
 import React, { useState, useCallback, useRef, useEffect } from 'react';
 import type { PermissionPanelProps } from '../../configs/permissionPanelRegistry';
 import type { Question } from '../../../types/types';
+import { FullscreenSurface, FullscreenToggleButton } from '../../../../../shared/view/ui';
 
 export const AskUserQuestionPanel: React.FC<PermissionPanelProps> = ({
   request,
@@ -14,6 +15,7 @@ export const AskUserQuestionPanel: React.FC<PermissionPanelProps> = ({
   const [otherTexts, setOtherTexts] = useState<Map<number, string>>(() => new Map());
   const [otherActive, setOtherActive] = useState<Map<number, boolean>>(() => new Map());
   const [mounted, setMounted] = useState(false);
+  const [isFullscreen, setIsFullscreen] = useState(false);
 
   const containerRef = useRef<HTMLDivElement>(null);
   const otherInputRef = useRef<HTMLInputElement>(null);
@@ -22,12 +24,14 @@ export const AskUserQuestionPanel: React.FC<PermissionPanelProps> = ({
     requestAnimationFrame(() => setMounted(true));
   }, []);
 
-  // Focus the container for keyboard events when step changes
+  // Focus the container for keyboard events when step changes. Toggling
+  // fullscreen re-parents the panel, so re-focus then too or the number-key
+  // shortcuts go dead.
   useEffect(() => {
     if (!otherActive.get(currentStep)) {
       containerRef.current?.focus();
     }
-  }, [currentStep, otherActive]);
+  }, [currentStep, otherActive, isFullscreen]);
 
   useEffect(() => {
     if (otherActive.get(currentStep)) {
@@ -80,11 +84,15 @@ export const AskUserQuestionPanel: React.FC<PermissionPanelProps> = ({
     return answers;
   }, [questions, selections, otherActive, otherTexts]);
 
+  // Answering ends the panel's job, so drop out of fullscreen to reveal the
+  // chat stream (and whatever the agent replies next).
   const handleSubmit = useCallback(() => {
+    setIsFullscreen(false);
     onDecision(request.requestId, { allow: true, updatedInput: { ...input, answers: buildAnswers() } });
   }, [onDecision, request.requestId, input, buildAnswers]);
 
   const handleSkip = useCallback(() => {
+    setIsFullscreen(false);
     onDecision(request.requestId, { allow: true, updatedInput: { ...input, answers: {} } });
   }, [onDecision, request.requestId, input]);
 
@@ -142,7 +150,7 @@ export const AskUserQuestionPanel: React.FC<PermissionPanelProps> = ({
   const isFirst = currentStep === 0;
   const hasCurrentSelection = selected.size > 0 || (isOtherOn && (otherTexts.get(currentStep) || '').trim().length > 0);
 
-  return (
+  const panel = (
     <div
       ref={containerRef}
       tabIndex={-1}
@@ -185,6 +193,16 @@ export const AskUserQuestionPanel: React.FC<PermissionPanelProps> = ({
                 {currentStep + 1}/{total}
               </span>
             )}
+
+            {/* Fullscreen — the surface has its own close button, so the
+                toggle only needs to offer the way in */}
+            {!isFullscreen && (
+              <FullscreenToggleButton
+                label="Fullscreen"
+                onClick={() => setIsFullscreen(true)}
+                className="-mr-1 flex-shrink-0 text-gray-400 hover:text-gray-600 dark:text-gray-500 dark:hover:text-gray-300"
+              />
+            )}
           </div>
 
           {/* Progress dots (multi-question) */}
@@ -208,7 +226,7 @@ export const AskUserQuestionPanel: React.FC<PermissionPanelProps> = ({
           )}
 
           {/* Question text */}
-          <p className="text-[14px] font-medium leading-snug text-gray-900 dark:text-gray-100">
+          <p className={`font-medium leading-snug text-gray-900 dark:text-gray-100 ${isFullscreen ? 'text-base' : 'text-[14px]'}`}>
             {q.question}
           </p>
           {multi && (
@@ -217,7 +235,7 @@ export const AskUserQuestionPanel: React.FC<PermissionPanelProps> = ({
         </div>
 
         {/* Options — tight spacing */}
-        <div className="scrollbar-thin max-h-48 overflow-y-auto px-4 pb-2" role={multi ? 'group' : 'radiogroup'} aria-label={q.question}>
+        <div className={`scrollbar-thin px-4 pb-2 ${isFullscreen ? '' : 'max-h-48 overflow-y-auto'}`} role={multi ? 'group' : 'radiogroup'} aria-label={q.question}>
           <div className="space-y-1">
             {q.options.map((opt, optIdx) => {
               const isSelected = selected.has(opt.label);
@@ -226,7 +244,9 @@ export const AskUserQuestionPanel: React.FC<PermissionPanelProps> = ({
                   key={opt.label}
                   type="button"
                   onClick={() => toggleOption(currentStep, opt.label, multi)}
-                  className={`group flex w-full items-center gap-2.5 rounded-lg border px-3 py-2 text-left transition-all duration-150 ${
+                  className={`group flex w-full items-center gap-2.5 rounded-lg border text-left transition-all duration-150 ${
+                    isFullscreen ? 'px-3.5 py-3' : 'px-3 py-2'
+                  } ${
                     isSelected
                       ? 'border-blue-300 bg-blue-50/80 ring-1 ring-blue-200/50 dark:border-blue-600 dark:bg-blue-900/25 dark:ring-blue-700/30'
                       : 'border-gray-200 hover:border-gray-300 hover:bg-gray-50/60 dark:border-gray-700/60 dark:hover:border-gray-600 dark:hover:bg-gray-700/40'
@@ -242,7 +262,9 @@ export const AskUserQuestionPanel: React.FC<PermissionPanelProps> = ({
                   </kbd>
 
                   <div className="min-w-0 flex-1">
-                    <div className={`text-[13px] leading-tight transition-colors duration-150 ${
+                    <div className={`leading-tight transition-colors duration-150 ${
+                      isFullscreen ? 'text-[15px]' : 'text-[13px]'
+                    } ${
                       isSelected
                         ? 'font-medium text-gray-900 dark:text-gray-100'
                         : 'text-gray-700 dark:text-gray-300'
@@ -250,7 +272,9 @@ export const AskUserQuestionPanel: React.FC<PermissionPanelProps> = ({
                       {opt.label}
                     </div>
                     {opt.description && (
-                      <div className={`text-[11px] leading-snug transition-colors duration-150 ${
+                      <div className={`leading-snug transition-colors duration-150 ${
+                        isFullscreen ? 'mt-0.5 text-[13px]' : 'text-[11px]'
+                      } ${
                         isSelected
                           ? 'text-blue-600/70 dark:text-blue-300/70'
                           : 'text-gray-400 dark:text-gray-500'
@@ -287,7 +311,9 @@ export const AskUserQuestionPanel: React.FC<PermissionPanelProps> = ({
               }`}>
                 0
               </kbd>
-              <span className={`text-[13px] leading-tight transition-colors ${
+              <span className={`leading-tight transition-colors ${
+                isFullscreen ? 'text-[15px]' : 'text-[13px]'
+              } ${
                 isOtherOn
                   ? 'font-medium text-gray-900 dark:text-gray-100'
                   : 'text-gray-500 dark:text-gray-400'
@@ -380,5 +406,18 @@ export const AskUserQuestionPanel: React.FC<PermissionPanelProps> = ({
         </div>
       </div>
     </div>
+  );
+
+  if (!isFullscreen) return panel;
+
+  return (
+    <FullscreenSurface
+      open
+      onClose={() => setIsFullscreen(false)}
+      title="Claude needs your input"
+      closeLabel="Exit fullscreen"
+    >
+      {panel}
+    </FullscreenSurface>
   );
 };

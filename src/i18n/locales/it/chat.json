@@ -11,6 +11,11 @@
     "copyAsMarkdown": "Copia come markdown",
     "copyAsText": "Copia come testo"
   },
+  "fullscreen": {
+    "expand": "Schermo intero",
+    "exit": "Esci da schermo intero",
+    "messageTitle": "Messaggio"
+  },
   "messageTypes": {
     "user": "U",
     "error": "Errore",

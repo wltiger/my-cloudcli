@@ -11,6 +11,11 @@
     "copyAsMarkdown": "Markdown olarak kopyala",
     "copyAsText": "Metin olarak kopyala"
   },
+  "fullscreen": {
+    "expand": "Tam ekran",
+    "exit": "Tam ekrandan çık",
+    "messageTitle": "Mesaj"
+  },
   "messageTypes": {
     "user": "S",
     "error": "Hata",
