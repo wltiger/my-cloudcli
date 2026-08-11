@@ -9,6 +9,9 @@ export {
   notifyRunFailed,
   // Used by provider runtimes to report stopped or completed agent runs.
   notifyRunStopped,
+  // Used by provider runtimes to clear a resolved permission request's push
+  // notification on every device, not just the one that answered it.
+  notifyPermissionResolved,
 } from '@/modules/notifications/services/notification-orchestrator.service.js';
 export {
   registerDesktopNotificationClient,

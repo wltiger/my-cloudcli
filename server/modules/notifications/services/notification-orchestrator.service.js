@@ -157,6 +157,9 @@ function buildNotificationPayload(event) {
     'run.stopped': normalizedEvent.meta?.stopReason || 'Run Stopped: The run has stopped',
     'run.failed': normalizedEvent.meta?.error ? `Run Failed: ${normalizedEvent.meta.error}` : 'Run Failed: The run encountered an error',
     'agent.notification': normalizedEvent.meta?.message ? String(normalizedEvent.meta.message) : 'You have a new notification',
+    'permission.resolved': 'Already handled on another device — no action needed',
+    'scheduled_trigger.fired': 'Scheduled retry sent',
+    'scheduled_trigger.failed': normalizedEvent.meta?.error ? `Scheduled retry failed: ${normalizedEvent.meta.error}` : 'Scheduled retry failed',
     'push.enabled': 'Push notifications are now enabled!'
   };
   const providerLabel = PROVIDER_LABELS[normalizedEvent.provider] || 'Assistant';
@@ -280,10 +283,26 @@ function notifyRunFailed({ userId, provider, sessionId = null, error, sessionNam
   });
 }
 
+function notifyPermissionResolved({ userId, provider, sessionId = null, requestId, sessionName = null }) {
+  notifyUserIfEnabled({
+    userId,
+    event: createNotificationEvent({
+      provider,
+      sessionId,
+      kind: 'action_required',
+      code: 'permission.resolved',
+      meta: { sessionName },
+      severity: 'info',
+      dedupeKey: `${provider}:permission:resolved:${sessionId || 'none'}:${requestId || 'none'}`
+    })
+  });
+}
+
 export {
   buildNotificationPayload,
   createNotificationEvent,
   notifyUserIfEnabled,
   notifyRunStopped,
-  notifyRunFailed
+  notifyRunFailed,
+  notifyPermissionResolved
 };

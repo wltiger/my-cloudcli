@@ -28,6 +28,7 @@ import { CLAUDE_FALLBACK_MODELS } from '@/modules/providers/list/claude/claude-m
 import { resolveClaudeCodeExecutablePath } from '@/shared/claude-cli-path.js';
 import {
   createNotificationEvent,
+  notifyPermissionResolved,
   notifyRunFailed,
   notifyRunStopped,
   notifyUserIfEnabled
@@ -120,6 +121,13 @@ function waitForToolApproval(requestId, options = {}) {
 function resolveToolApproval(requestId, decision) {
   const resolver = pendingToolApprovals.get(requestId);
   if (resolver) {
+    notifyPermissionResolved({
+      userId: resolver._userId,
+      provider: 'claude',
+      sessionId: resolver._sessionId,
+      requestId,
+      sessionName: resolver._sessionName
+    });
     resolver(decision);
   }
 }
@@ -582,6 +590,10 @@ async function queryClaudeSDK(command, options = {}, ws, context) {
           _toolName: toolName,
           _input: input,
           _receivedAt: new Date(),
+          // Read back in resolveToolApproval() to clear this request's push
+          // notification on every device once it's answered on any of them.
+          _userId: ws?.userId || null,
+          _sessionName: sessionSummary || null,
         },
         onCancel: (reason) => {
           ws.send(createNormalizedMessage({ kind: 'permission_cancelled', requestId, reason, sessionId: capturedSessionId || sessionId || null, provider: 'claude' }));
