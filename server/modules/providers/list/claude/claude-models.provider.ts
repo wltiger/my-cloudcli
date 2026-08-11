@@ -1,6 +1,10 @@
 import { readFile } from 'node:fs/promises';
 
+import { query } from '@anthropic-ai/claude-agent-sdk';
+import type { ModelInfo } from '@anthropic-ai/claude-agent-sdk';
+
 import { sessionsDb } from '@/modules/database/index.js';
+import { resolveClaudeCodeExecutablePath } from '@/shared/claude-cli-path.js';
 import type { IProviderModels } from '@/shared/interfaces.js';
 import type {
   ProviderCurrentActiveModel,
@@ -224,19 +228,68 @@ const readClaudeSessionModelFromJsonl = async (
   return null;
 };
 
+const CLAUDE_SUPPORTED_MODELS_TIMEOUT_MS = 8000;
+
+const mapClaudeModel = (model: ModelInfo): ProviderModelOption => ({
+  value: model.value,
+  label: model.displayName,
+  description: model.description,
+  effort: model.supportsEffort && model.supportedEffortLevels?.length
+    ? { values: model.supportedEffortLevels.map((value) => ({ value })) }
+    : undefined,
+});
+
+const buildClaudeModelsDefinition = (models: ModelInfo[]): ProviderModelsDefinition => {
+  const options = models.map(mapClaudeModel);
+  if (options.length === 0) {
+    return CLAUDE_FALLBACK_MODELS;
+  }
+
+  return {
+    OPTIONS: options,
+    DEFAULT: options[0]?.value ?? CLAUDE_FALLBACK_MODELS.DEFAULT,
+  };
+};
+
+// A plain `query()` call persists a session jsonl under ~/.claude/projects/,
+// which the sidebar's project discovery then picks up as a stray workspace.
+// `persistSession: false` (SDK ≥0.3.16x) skips that disk write entirely, so
+// this never shows up as a session — verified by diffing ~/.claude/projects/
+// before and after. The prompt/generator is never iterated; only the
+// control-channel `supportedModels()` call is used.
+const fetchLiveClaudeModels = async (): Promise<ModelInfo[] | null> => {
+  const abortController = new AbortController();
+  const timer = setTimeout(() => abortController.abort(), CLAUDE_SUPPORTED_MODELS_TIMEOUT_MS);
+
+  try {
+    const queryInstance = query({
+      prompt: 'Get supported models',
+      options: {
+        persistSession: false,
+        cwd: process.cwd(),
+        pathToClaudeCodeExecutable: resolveClaudeCodeExecutablePath(process.env.CLAUDE_CLI_PATH),
+        env: { ...process.env },
+        abortController,
+      },
+    });
+
+    const models = await queryInstance.supportedModels();
+    queryInstance.close();
+    return models.length > 0 ? models : null;
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+};
+
 export class ClaudeProviderModels implements IProviderModels {
   async getSupportedModels(): Promise<ProviderModelsDefinition> {
-    // claude creates a new jsonl file as a separate session for this request.
-    // As a result, it lists the workspace where this is invoked when it shouldn't.
-    //
-    // Disabled for now:
-    // const queryInstance = query({
-    //   prompt: 'Get supported models',
-    //   options: buildClaudeQueryOptions(),
-    // });
-    // const supportedModels = await queryInstance.supportedModels();
-    // queryInstance.close();
-    // return buildClaudeModelsDefinition(supportedModels);
+    const liveModels = await fetchLiveClaudeModels();
+    if (liveModels) {
+      return buildClaudeModelsDefinition(liveModels);
+    }
+
     return CLAUDE_FALLBACK_MODELS;
   }
 
