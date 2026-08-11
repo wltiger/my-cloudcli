@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { Check, ChevronDown } from "lucide-react";
 import { Trans, useTranslation } from "react-i18next";
 
@@ -8,6 +8,7 @@ import type {
   ProviderModelsDefinition,
 } from "../../../../types/app";
 import SessionProviderLogo from "../../../llm-logo-provider/SessionProviderLogo";
+import { useProviderAuthStatus } from "../../../provider-auth/hooks/useProviderAuthStatus";
 import { NextTaskBanner } from "../../../task-master";
 import {
   Dialog,
@@ -124,14 +125,28 @@ export default function ProviderSelectionEmptyState({
 }: ProviderSelectionEmptyStateProps) {
   const { t } = useTranslation("chat");
   const [dialogOpen, setDialogOpen] = useState(false);
+  const { providerAuthStatus, refreshProviderAuthStatuses } = useProviderAuthStatus();
+
+  useEffect(() => {
+    void refreshProviderAuthStatuses();
+  }, [refreshProviderAuthStatuses]);
+
+  const connectedProviders = useMemo(
+    () => PROVIDER_META.filter((p) => providerAuthStatus[p.id]?.authenticated),
+    [providerAuthStatus],
+  );
+  const isCheckingConnections = PROVIDER_META.some((p) => providerAuthStatus[p.id]?.loading);
 
   const visibleProviderGroups = useMemo<ProviderGroup[]>(() => {
-    return PROVIDER_META.map((p) => ({
+    // Show every provider while the connection check is still in flight so the
+    // list doesn't flash all four, then narrow — that reads as a bug.
+    const relevantProviders = isCheckingConnections ? PROVIDER_META : connectedProviders;
+    return relevantProviders.map((p) => ({
       id: p.id,
       name: p.name,
       models: providerModelCatalog[p.id]?.OPTIONS ?? [],
     }));
-  }, [providerModelCatalog]);
+  }, [providerModelCatalog, connectedProviders, isCheckingConnections]);
 
   const nextTaskPrompt = t("tasks.nextTaskPrompt", {
     defaultValue: "Start the next task",
