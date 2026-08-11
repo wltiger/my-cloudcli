@@ -209,7 +209,7 @@ export const ToolRenderer: React.FC<ToolRendererProps> = memo(({
 
   if (displayConfig.type === 'collapsible') {
     const title = typeof displayConfig.title === 'function'
-      ? displayConfig.title(parsedData)
+      ? displayConfig.title(parsedData, { toolResult })
       : displayConfig.title || 'Details';
 
     const defaultOpen = displayConfig.defaultOpen !== undefined
@@ -219,7 +219,8 @@ export const ToolRenderer: React.FC<ToolRendererProps> = memo(({
     const contentProps = displayConfig.getContentProps?.(parsedData, {
       selectedProject,
       createDiff,
-      onFileOpen
+      onFileOpen,
+      toolResult
     }) || {};
 
     let contentComponent: React.ReactNode = null;

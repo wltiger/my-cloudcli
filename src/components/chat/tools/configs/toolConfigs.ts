@@ -467,9 +467,15 @@ export const TOOL_CONFIGS: Record<string, ToolDisplayConfig> = {
   AskUserQuestion: {
     input: {
       type: 'collapsible',
-      title: (input: any) => {
+      // The model's original tool_use input never carries the user's answer —
+      // the SDK records it separately, on the paired tool_result's
+      // `toolUseResult.answers` (see claude-sessions.provider.ts). Fall back
+      // to it so history reflects what was actually answered instead of
+      // always reading as unanswered once the live optimistic state is gone.
+      title: (input: any, context?: { toolResult?: any }) => {
+        const answers = input.answers || context?.toolResult?.toolUseResult?.answers;
         const count = input.questions?.length || 0;
-        const hasAnswers = input.answers && Object.keys(input.answers).length > 0;
+        const hasAnswers = answers && Object.keys(answers).length > 0;
         if (count === 1) {
           const header = input.questions[0]?.header || 'Question';
           return hasAnswers ? `${header} — answered` : header;
@@ -478,9 +484,9 @@ export const TOOL_CONFIGS: Record<string, ToolDisplayConfig> = {
       },
       defaultOpen: true,
       contentType: 'question-answer',
-      getContentProps: (input: any) => ({
+      getContentProps: (input: any, context?: { toolResult?: any }) => ({
         questions: input.questions || [],
-        answers: input.answers || {}
+        answers: input.answers || context?.toolResult?.toolUseResult?.answers || {}
       }),
     },
     result: {
