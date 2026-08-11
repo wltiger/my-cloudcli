@@ -149,7 +149,17 @@
     "effortDefault": "Default",
     "loadingModels": "Loading models…",
     "modelMenu": "Select model and reasoning effort",
-    "permissionHeading": "How should {{provider}} actions be approved?"
+    "permissionHeading": "How should {{provider}} actions be approved?",
+    "scheduleButton": "Schedule a trigger",
+    "scheduleHeading": "Send a message later",
+    "scheduleTimeLabel": "Send at",
+    "presetInMinutes": "+{{minutes}}min",
+    "presetTomorrow": "Tomorrow",
+    "scheduleMessageLabel": "Message",
+    "scheduleConfirm": "Schedule",
+    "scheduleCancel": "Cancel",
+    "schedulePendingLabel": "Scheduled for {{time}}",
+    "schedulePendingCancel": "Cancel scheduled trigger"
   },
   "providerSelection": {
     "title": "Choose Your AI Assistant",

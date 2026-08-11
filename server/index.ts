@@ -35,6 +35,7 @@ import { createAgentModule } from './modules/agent/index.js';
 import projectModuleRoutes from './modules/projects/projects.routes.js';
 import notificationRoutes from './modules/notifications/notifications.routes.js';
 import { userRoutes } from './modules/user/index.js';
+import { scheduledTriggersRoutes, startScheduledTriggerPoller } from './modules/scheduled-triggers/index.js';
 import {
     getPluginPort,
     pluginsRoutes,
@@ -210,6 +211,7 @@ app.use('/api/notifications', authenticateToken, notificationRoutes);
 
 // User API Routes (protected)
 app.use('/api/user', authenticateToken, userRoutes);
+app.use('/api/scheduled-triggers', authenticateToken, scheduledTriggersRoutes);
 
 // Plugins API Routes (protected)
 app.use('/api/plugins', authenticateToken, pluginsRoutes);
@@ -400,6 +402,10 @@ async function startServer() {
             startEnabledPluginServers().catch(err => {
                 console.error('[Plugins] Error during startup:', err.message);
             });
+
+            // Start polling for due scheduled triggers (fires once immediately
+            // to catch up on anything missed while the server was down).
+            startScheduledTriggerPoller();
         });
 
         await closeSessionsWatcher();

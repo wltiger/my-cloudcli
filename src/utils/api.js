@@ -169,6 +169,17 @@ export const api = {
     const queryString = params.toString();
     return authenticatedFetch(`/api/providers/sessions/${encodeURIComponent(sessionId)}/messages${queryString ? `?${queryString}` : ''}`);
   },
+  // Scheduled triggers: a one-shot future message queued for a session
+  // (e.g. "resend continue at 15:00" once a rate-limit window resets).
+  createScheduledTrigger: (sessionId, triggerAt, messageContent) =>
+    authenticatedFetch('/api/scheduled-triggers', {
+      method: 'POST',
+      body: JSON.stringify({ sessionId, triggerAt, messageContent }),
+    }),
+  listScheduledTriggers: (sessionId) =>
+    authenticatedFetch(`/api/scheduled-triggers?sessionId=${encodeURIComponent(sessionId)}`),
+  cancelScheduledTrigger: (id) =>
+    authenticatedFetch(`/api/scheduled-triggers/${encodeURIComponent(id)}`, { method: 'DELETE' }),
   renameProject: (projectId, displayName) =>
     authenticatedFetch(`/api/projects/${projectId}/rename`, {
       method: 'PUT',

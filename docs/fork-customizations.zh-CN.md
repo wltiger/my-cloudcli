@@ -165,3 +165,17 @@
 **为什么改：** 官方的 New Session 模型选择器不管 claude/cursor/codex/opencode 这四个 provider 有没有真正安装/登录，一律全部列出来——选了个没连接的，只会在真正跑会话的时候才报错。这个 fork 接入了已有的 `useProviderAuthStatus` hook（Settings → Agents 页面已经在用），把选择器过滤成只显示 `/auth/status` 返回 `authenticated` 的 provider。检查还没跑完之前先四个都显示，避免"先显示四个、突然收窄成两个"这种闪烁感。
 
 **同步官方时怎么办：** 保留我的——这是个实打实的体验偏好，不是修 bug（官方可能就是故意让未连接的 provider 也可见/可发现，比如方便引导新用户）。如果官方重写了这个文件，把 `useProviderAuthStatus()` 调用、挂载时触发 `refreshProviderAuthStatuses()` 的那个 `useEffect`，还有喂给 `visibleProviderGroups` 的 `connectedProviders`/`isCheckingConnections` 过滤逻辑重新套回去。
+
+## 20. 定时触发（延后发送一条消息）
+
+**涉及文件：** `server/modules/database/schema.ts`、`server/modules/database/index.ts`、`server/modules/database/repositories/scheduled-triggers.db.ts`、`server/modules/scheduled-triggers/`（新模块：`index.ts`、`scheduled-triggers.routes.ts`、`services/scheduled-trigger.service.ts`、`services/scheduler-poller.service.ts`、`tests/`）、`server/index.ts`、`server/modules/notifications/services/notification-orchestrator.service.js`、`.env.example`、`src/utils/api.js`、`src/components/chat/hooks/useScheduledTrigger.ts`、`src/components/chat/view/subcomponents/ComposerScheduleMenu.tsx`、`ChatComposer.tsx`、`src/components/chat/view/ChatInterface.tsx`、`src/i18n/locales/en/chat.json`
+
+**为什么改：** 部分 Codex/Claude 中转站（第三方 API 转售服务）有自己的限流窗口，报错时给的是一句纯文本、里面点名了具体几点几分可以重试（比如"请在 今天 15:00 后再试"），而不是标准的 `retry-after` 字段。官方完全没有"等一等再重发"这个概念——session 被限流后就一直晾在那，得用户自己想起来回来手动重打字。这次加的是一个通用的、不区分 provider 的"定时发送消息"能力：任意 session 都能通过输入框旁新加的时钟图标菜单，排一条一次性的未来消息（默认内容 `continue`，可编辑）；后端每 30 秒轮询一次，到点后走的是 `chat.send` 和无浏览器的 `/api/agent` 接口本来就共用的同一个 `providerRuntimeService.run()` 入口，不需要给任何 provider 单独开后门。
+
+轮询在真正调用 provider **之前**先把这条记录从 `pending` 抢占为 `firing`——第一版是等 provider 调用成功之后才标记，结果 provider 调用比一个轮询周期还慢的话，下一轮轮询会把它当成"还没触发过"又发一次（实测踩过：处理慢了之后，同一句 `"continue"` 被反复发进同一个正在用的 session）。因为进程崩溃卡在 `firing` 状态的记录，下次启动时会被复位成 `pending`，不会永久卡死，只是会被重新尝试。
+
+输入框那边现在完全不做日期选择——只有一个时间框。裸的 `HH:mm` 永远表示"这个钟点接下来最近一次出现"：还没到就是今天，已经过了就是明天（最多推 24 小时），而且这个判断是**每次渲染都重新算的**，不是算一次存起来。早期版本是在 `onChange` 里算好存起来的，但原生时间输入框按段（先时、后分）多次触发 `onChange`，不是等你输完才触发一次——输到一半的中间值只要恰好判成"过了"，就会永久锁定成明天，哪怕你后面输完的时间其实还是今天。现在旁边只会有一个纯展示、不能点的"Tomorrow"文字提示，故意不留任何选具体日期的入口。5 个快捷预设覆盖常见场景：`+10min`/`+60min`（可以连续点——每次都是在当前草稿基础上累加，不是从"现在"重新算）、下一个整点、下一个 `{0,3,6,9,12,15,18,21}` 间隔点，以及固定的 `00:05`"明天一早"快捷方式。每次重新打开这个弹层，都会回到一个全新的默认值，不会停留在上一次打开/已提交/已取消时的状态上。
+
+这一版刻意只做手工、一次性的基础能力——"自动识别中转站限流文案、自动建一条定时"是明确留到后面做的扩展，这次不实现。触发是无头(headless)执行的（没有真实 WebSocket 客户端连着），所以如果凑巧开着这个 session 的页面，看不到回复实时流式进来——页面只会通过一条 `session_upserted` 广播感知到"这个 session 变了"，而前端现在把这条事件当成只更新侧边栏用，没有处理成"刷新当前打开的会话"；把无头触发的结果真正实时推进已打开的页面，这次没做。定时时间到了但服务当时没在跑（比如电脑关机）：只在一个可配置的宽限窗口内（`SCHEDULED_TRIGGER_GRACE_WINDOW_MINUTES`，默认 60 分钟）补发，超过宽限窗口就标记为 `expired`，不会悄悄丢掉，也不会不管多久之前的都硬发一条出去。
+
+**同步官方时怎么办：** 保留我的。新增一张表 + 一个独立模块，本身冲突面很小；唯一会碰到官方也在维护的文件的地方都是纯增量式的（`schema.ts` 里 `INIT_SCHEMA_SQL` 末尾追加一段 `CREATE TABLE IF NOT EXISTS` + 两条索引，`database/index.ts` 里加一行 repository 导出，`server/index.ts` 里加一个 import + 两行路由挂载/轮询启动，`ChatComposer.tsx` 里在已有的 `ComposerPermissionMenu` 旁边加一个 `ComposerScheduleMenu` 位置，`ChatInterface.tsx` 里多传一个 `sessionId` prop，通知模块的 orchestrator 里加两条 `CODE_MAP` 文案)。如果官方改了 `chat-websocket.service.ts` 里 `runtimeOptions` 的拼法（从 session 行取 `cwd`/`projectPath`），要同步改一下 `scheduled-trigger.service.ts` 的 `fireTrigger()`——这段是特意从那边抄过来的，没有抽成共用函数。如果官方以后做了真正的"无头触发结果推进已打开页面"机制，这里应该改用官方的，而不是继续用现在这个只更新侧边栏的 `session_upserted` 广播。

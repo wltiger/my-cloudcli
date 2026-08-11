@@ -138,6 +138,28 @@ CREATE TABLE IF NOT EXISTS app_config (
 );
 `;
 
+// One pending row per session (enforced by the repository, not by a unique
+// index) queues a one-shot message to resend later. `status` progresses
+// pending -> firing -> sent | failed, or pending -> expired | cancelled.
+// The pending -> firing claim (repository `claim()`) is what makes firing
+// idempotent: without it, a provider call slower than the poll interval
+// would get re-picked-up and fired again by the next poll tick.
+export const SCHEDULED_TRIGGERS_TABLE_SCHEMA_SQL = `
+CREATE TABLE IF NOT EXISTS scheduled_triggers (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id TEXT NOT NULL,
+    user_id INTEGER,
+    trigger_at DATETIME NOT NULL,
+    message_content TEXT NOT NULL DEFAULT 'continue',
+    status TEXT NOT NULL DEFAULT 'pending',
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    fired_at DATETIME,
+    error TEXT,
+    FOREIGN KEY (session_id) REFERENCES sessions(session_id)
+    ON DELETE CASCADE
+);
+`;
+
 export const INIT_SCHEMA_SQL = `
 -- Initialize authentication database
 PRAGMA foreign_keys = ON;
@@ -181,4 +203,8 @@ CREATE INDEX IF NOT EXISTS idx_session_ids_lookup ON sessions(session_id);
 ${LAST_SCANNED_AT_SQL}
 
 ${APP_CONFIG_TABLE_SCHEMA_SQL}
+
+${SCHEDULED_TRIGGERS_TABLE_SCHEMA_SQL}
+CREATE INDEX IF NOT EXISTS idx_scheduled_triggers_status_time ON scheduled_triggers(status, trigger_at);
+CREATE INDEX IF NOT EXISTS idx_scheduled_triggers_session ON scheduled_triggers(session_id);
 `;

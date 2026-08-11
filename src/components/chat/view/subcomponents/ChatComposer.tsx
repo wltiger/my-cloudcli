@@ -13,6 +13,7 @@ import type {
 import { PaperclipIcon, MessageSquareIcon, XIcon, Loader2, ArrowUpIcon } from 'lucide-react';
 
 import { useChatWidthClasses } from '../../hooks/useChatTypography';
+import { useScheduledTrigger } from '../../hooks/useScheduledTrigger';
 import { useVoiceInput } from '../../hooks/useVoiceInput';
 import { useVoiceAvailable } from '../../hooks/useVoiceAvailable';
 import type { QueuedDraft } from '../../hooks/useChatComposerState';
@@ -39,6 +40,7 @@ import TokenUsageSummary from './TokenUsageSummary';
 import QueuedMessageCard from './QueuedMessageCard';
 import ComposerModelMenu from './ComposerModelMenu';
 import ComposerPermissionMenu from './ComposerPermissionMenu';
+import ComposerScheduleMenu from './ComposerScheduleMenu';
 
 interface MentionableFile {
   name: string;
@@ -63,6 +65,7 @@ interface ChatComposerProps {
   ) => void;
   handleGrantToolPermission: (suggestion: { entry: string; toolName: string }) => { success: boolean };
   sessionTitle?: string;
+  sessionId: string | null;
   activity: SessionActivity | null;
   isLoading: boolean;
   onAbortSession: () => void;
@@ -128,6 +131,7 @@ export default function ChatComposer({
   handlePermissionDecision,
   handleGrantToolPermission,
   sessionTitle,
+  sessionId,
   activity,
   isLoading,
   onAbortSession,
@@ -190,6 +194,12 @@ export default function ChatComposer({
   const { t } = useTranslation('chat');
   // Has to match the message list above, or the composer stops lining up with it.
   const widthClasses = useChatWidthClasses();
+  const {
+    pendingTrigger: pendingScheduledTrigger,
+    isLoading: isScheduledTriggerLoading,
+    schedule: scheduleTrigger,
+    cancel: cancelScheduledTrigger,
+  } = useScheduledTrigger(sessionId);
   const commandMenuPosition = useMemo(() => {
     if (!isCommandMenuOpen) {
       return { top: 0, left: 16, bottom: 90 };
@@ -453,6 +463,15 @@ export default function ChatComposer({
               onSelectPermissionMode={onSelectPermissionMode}
               providerLabel={providerLabel}
             />
+
+            {sessionId && (
+              <ComposerScheduleMenu
+                pendingTrigger={pendingScheduledTrigger}
+                isLoading={isScheduledTriggerLoading}
+                onSchedule={scheduleTrigger}
+                onCancel={cancelScheduledTrigger}
+              />
+            )}
 
             <PromptInputSubmit
               onClick={
