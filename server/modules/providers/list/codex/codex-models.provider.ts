@@ -76,12 +76,13 @@ const CODEX_CONFIG_PATH = path.join(os.homedir(), '.codex', 'config.toml');
 // `models_cache.json` is a point-in-time snapshot that nothing here ever
 // refreshes. The bundled `codex` binary can report its actual current model
 // list (custom model providers included) via `debug models`, but only
-// through this CLI subcommand — the SDK's JS API doesn't expose it.
+// through this CLI subcommand — the SDK's JS API doesn't expose it. Codex is
+// listed in provider-models.service.ts's UNCACHED_PROVIDERS, so this runs at
+// most once per server process — cached here for the rest of its lifetime.
 const CODEX_DEBUG_MODELS_TIMEOUT_MS = 8000;
-const CODEX_LIVE_MODELS_CACHE_TTL_MS = 5 * 60 * 1000;
 
 const require = createRequire(import.meta.url);
-let cachedLiveModels: { models: CodexCachedModel[]; fetchedAt: number } | null = null;
+let cachedLiveModels: CodexCachedModel[] | null = null;
 
 const isCodexCachedModel = (value: unknown): value is CodexCachedModel => {
   const record = readObjectRecord(value);
@@ -100,8 +101,8 @@ const resolveCodexBinPath = async (): Promise<string | null> => {
 };
 
 const fetchLiveCodexModels = async (): Promise<CodexCachedModel[] | null> => {
-  if (cachedLiveModels && Date.now() - cachedLiveModels.fetchedAt < CODEX_LIVE_MODELS_CACHE_TTL_MS) {
-    return cachedLiveModels.models;
+  if (cachedLiveModels) {
+    return cachedLiveModels;
   }
 
   const binPath = await resolveCodexBinPath();
@@ -143,7 +144,7 @@ const fetchLiveCodexModels = async (): Promise<CodexCachedModel[] | null> => {
       return null;
     }
 
-    cachedLiveModels = { models, fetchedAt: Date.now() };
+    cachedLiveModels = models;
     return models;
   } catch {
     return null;

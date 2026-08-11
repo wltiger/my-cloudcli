@@ -107,20 +107,20 @@ test('provider models are cached for the three-day ttl', async () => {
       }),
     });
 
-    const first = await service.getProviderModels('codex');
-    const cached = await service.getProviderModels('codex');
+    const first = await service.getProviderModels('cursor');
+    const cached = await service.getProviderModels('cursor');
     assert.equal(loadCount, 1);
     assert.equal(cached.models.DEFAULT, first.models.DEFAULT);
     assert.equal(cached.cache.source, 'memory');
 
     currentTime += PROVIDER_MODELS_CACHE_TTL_MS - 1;
-    await service.getProviderModels('codex');
+    await service.getProviderModels('cursor');
     assert.equal(loadCount, 1);
 
     currentTime += 2;
-    const refreshed = await service.getProviderModels('codex');
+    const refreshed = await service.getProviderModels('cursor');
     assert.equal(loadCount, 2);
-    assert.equal(refreshed.models.DEFAULT, 'codex-2');
+    assert.equal(refreshed.models.DEFAULT, 'cursor-2');
   } finally {
     await rm(tempRoot, { recursive: true, force: true });
   }
@@ -150,6 +150,36 @@ test('claude provider models are always loaded directly from the provider', asyn
     assert.equal(loadCount, 2);
     assert.equal(first.models.DEFAULT, 'claude-1');
     assert.equal(second.models.DEFAULT, 'claude-2');
+    assert.equal(second.cache.source, 'fresh');
+  } finally {
+    await rm(tempRoot, { recursive: true, force: true });
+  }
+});
+
+test('codex provider models are always loaded directly from the provider', async () => {
+  const tempRoot = await mkdtemp(path.join(os.tmpdir(), 'provider-model-cache-codex-direct-'));
+  let loadCount = 0;
+
+  try {
+    const service = createProviderModelsService({
+      cachePath: path.join(tempRoot, 'models-cache.json'),
+      resolveProvider: (provider) => ({
+        models: {
+          getSupportedModels: async () => {
+            loadCount += 1;
+            return createModels(`${provider}-${loadCount}`);
+          },
+          getCurrentActiveModel: async () => createCurrentActiveModel(`${provider}-active`),
+        },
+      }),
+    });
+
+    const first = await service.getProviderModels('codex');
+    const second = await service.getProviderModels('codex');
+
+    assert.equal(loadCount, 2);
+    assert.equal(first.models.DEFAULT, 'codex-1');
+    assert.equal(second.models.DEFAULT, 'codex-2');
     assert.equal(second.cache.source, 'fresh');
   } finally {
     await rm(tempRoot, { recursive: true, force: true });
