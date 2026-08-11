@@ -133,3 +133,35 @@
 **为什么改：** 官方把标题和标签 pill 放在同一行。`lg:` 以下 pill 本来就只剩图标，但数量不固定——4 个内置，加可选的 Browser 和 Tasks，再加每个已启用插件一个——所以 375px 的手机上这排要占 148–220px，标题只剩不到 150px（6 个标签时实测 51px）。官方自己的缓解手段是给这排加横向滚动和左右渐变遮罩，能挡住溢出，但一点宽度都没还给标题。这在本 fork 里比在官方那边更亏，因为第 13 条把聊天标题变成了跨项目会话快切入口，挤窄标题等于同时挤掉一个导航入口。现在 768px 以下——用的就是 header 已经在给汉堡按钮用的那个 `isMobile`——整排收成一个约 48px 的 pill，里面是当前标签的图标加一个箭头；点开是下拉菜单，按原顺序列出全部标签，插件组前面加分隔线，当前项高亮并标 `aria-current`。标题实测宽度从 51px 变成 217px。桌面端一点没动，滚动和渐变遮罩都原样保留。
 
 **同步官方时怎么办：** 保留我的。上游足迹刻意做得极小且全是新增：`MainContentTabSwitcher.tsx` 里一个 prop 加一个提前 `return`、`MainContentHeader.tsx` 里一行 prop 透传、以及 `ActionMenu` 上四个可选 prop（`triggerIcon`、`showChevron`、菜单项的 `iconNode` 和 `isActive`）——它原有的两处调用一个都没用到。菜单代码全在 fork 自有的 `MainContentTabMenu.tsx` 里，冲突后把那几处放回去即可。那个提前 `return` 是**故意**放在标签列表构造完之后的：两种渲染共用同一份列表，官方以后加内置标签，移动端菜单自动就有了——重新应用时别改这个位置。下拉用的是 `ActionMenu` 的 `portal` 模式，也是故意的：header 那个标签槽是 `overflow-hidden`，绝对定位的菜单会被裁掉；官方要是重构了那个容器，先确认裁剪问题再考虑换掉 portal。文案用 `t(key, { defaultValue })`，没动 `src/i18n/locales/**`（和第 3、13 条一致）。官方哪天自己做了移动端标签方案，就用官方的，把这条删掉。
+
+## 16. 推送通知按 session 收敛成一条，打开会话时清掉
+
+**涉及文件：** `server/modules/notifications/services/notification-orchestrator.service.js`、`public/sw.js`、`src/components/app/AppContent.tsx`
+
+**为什么改：** 官方给每条推送打的 tag 是 `provider:sessionId:code`，所以一个 session 只要依次触发权限请求、stop、error 三种事件，手机通知中心就会永久堆着三条通知——包括你已经在 APP 里处理过的那些，谁都不会自动消失。这个 fork 在有 `sessionId` 时把 `code` 从 tag 里去掉（变成 `provider:sessionId`），这样系统原生的同 tag 替换机制（`renotify: true` 本来就开着）就会让新推送到达时自动顶掉同一 session 的旧通知，永远只留最新一条。在 APP 里打开该 session 时，另外会给 Service Worker 发一条 `{ type: 'CLEAR_SESSION_NOTIFICATIONS', sessionId }` 消息，把所有 `data.sessionId` 匹配的已显示通知关掉——这是给 tag 替换机制失效场景（比如推送到达时 SW 处于休眠状态、又赶上 tag 方案变更）兜底的。没有 session 的事件（比如 `push.enabled`）保留 `provider:global:code` 这种 tag，避免互相顶掉。
+
+**同步官方时怎么办：** 保留我的。改动很小很独立：orchestrator 里一处 tag 表达式、`sw.js` 里一个新的 `message` 分支（挨着已有的 `REFRESH_CACHE` 处理）、`AppContent.tsx` 里一个按路由 `sessionId` 触发的 `useEffect`。如果官方重做了推送 payload 或 tag 方案，保留"每个 session 只留一条通知、打开即清"这个行为，照着官方的新结构重新推导 tag/清理逻辑，别把这个功能整个丢掉。
+
+## 17. Codex 模型列表改成实时拉取，不再读一份不会刷新的快照
+
+**涉及文件：** `server/modules/providers/list/codex/codex-models.provider.ts`、`server/modules/providers/services/provider-models.service.ts`
+
+**为什么改：** 官方的 `getSupportedModels()` 只读 `~/.codex/models_cache.json`——这是个不会自己刷新的时间点快照。如果用户把 Codex 走自定义 `model_provider`/中转站（通过 `~/.codex/config.toml` 里的 `model_catalog_json1` 声明），或者干脆缓存本来就旧了，就永远看不到官方新发布的模型——实测验证过：GPT-5.6 Sol/Terra/Luna 是 2026-07-09 正式发布的官方模型，而一份 2026-06-21 抓的缓存里完全没有。`@openai/codex-sdk` 的 JS API 没有对应方法能拿到这个，等价能力只存在于随包分发的 `codex` 二进制自己的 `debug models` 子命令里。这个 fork 现在会去起这个子命令的子进程（复用 `codex-runtime.provider.js` 已经在用的同一个 `@openai/codex` 二进制，通过它 `package.json` 的 `bin` 字段解析路径，保证两边版本一致），解析它的 JSON 输出；失败就退回旧的读缓存文件逻辑，再失败就退回写死的 `CODEX_FALLBACK_MODELS` 列表。同时把 `codex` 加进了 `provider-models.service.ts` 的 `UNCACHED_PROVIDERS`——不然外层那层 3 天磁盘持久化缓存会一直挡住这次刚拿到的新鲜结果，因为一次成功的缓存会被记住远超一个新模型发布的时间跨度。
+
+**同步官方时怎么办：** 这是个纯粹的功能缺口修复，不是 fork 偏好——值得往官方提 PR，官方要是上了等价方案就把这条删掉，最好是官方自己在 SDK 里加一个正经方法，而不是像这个 fork 一样调一个没有文档的 `debug` 子命令（已知风险：未来 `@openai/codex` 版本可能不打招呼就改名或删掉这个子命令）。在那之前保留我的。如果官方因为别的原因（比如他们自己升级 SDK 版本）改了 `codex-models.provider.ts`，把 `fetchLiveCodexModels()` 这段子进程逻辑重新套上去，`UNCACHED_PROVIDERS` 里的 `codex` 也留着。
+
+## 18. Claude 模型列表改成走 SDK 实时拉取，不再是写死的列表
+
+**涉及文件：** `server/modules/providers/list/claude/claude-models.provider.ts`
+
+**为什么改：** `getSupportedModels()` 里本来就写好了一段真正调 SDK 的代码，但被注释掉了：调 `query()` 拿到的 `Query` 实例会往 `~/.claude/projects/` 下面落一份会话 jsonl，然后被侧边栏自己的项目发现机制捡到，变成一个多余的工作区。`@anthropic-ai/claude-agent-sdk`（装的已经是最新的 0.3.227）后来加了个 `persistSession: false`，官方文档写的就是给"不需要保留历史的临时/自动化调用"用的。实测验证了两次——先测原始 SDK 调用，再测真正的 `ClaudeProviderModels` 类——每次都对比 `~/.claude/projects/` 改动前后的目录列表：两次都没多出新会话，耗时大概 2.4–3.3 秒。实时拿到的列表跟写死的兜底列表不只是新旧的区别，内容也真不一样：少了旧列表里单独的 "Opus" 和 "Sonnet[1m]"，多了 `resolvedModel` 字段和更细的 effort 档位。
+
+**同步官方时怎么办：** 同样是把之前写好但被禁用的代码修好，不是 fork 偏好——值得往官方提 PR，官方修了就把这条删掉。在那之前保留我的。`CLAUDE_FALLBACK_MODELS` 还留着当最后一道兜底（没登录/调用出错的情况），官方如果改这份列表的内容，跟实时拉取这条逻辑互不相关，正常合并就行。
+
+## 19. New Session 选择器只列出已连接的 provider
+
+**涉及文件：** `src/components/chat/view/subcomponents/ProviderSelectionEmptyState.tsx`
+
+**为什么改：** 官方的 New Session 模型选择器不管 claude/cursor/codex/opencode 这四个 provider 有没有真正安装/登录，一律全部列出来——选了个没连接的，只会在真正跑会话的时候才报错。这个 fork 接入了已有的 `useProviderAuthStatus` hook（Settings → Agents 页面已经在用），把选择器过滤成只显示 `/auth/status` 返回 `authenticated` 的 provider。检查还没跑完之前先四个都显示，避免"先显示四个、突然收窄成两个"这种闪烁感。
+
+**同步官方时怎么办：** 保留我的——这是个实打实的体验偏好，不是修 bug（官方可能就是故意让未连接的 provider 也可见/可发现，比如方便引导新用户）。如果官方重写了这个文件，把 `useProviderAuthStatus()` 调用、挂载时触发 `refreshProviderAuthStatuses()` 的那个 `useEffect`，还有喂给 `visibleProviderGroups` 的 `connectedProviders`/`isCheckingConnections` 过滤逻辑重新套回去。
