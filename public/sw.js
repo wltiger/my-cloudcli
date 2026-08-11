@@ -118,18 +118,24 @@ self.addEventListener('message', event => {
   // Opening a session in the app clears its stacked-up push notifications
   // from the phone's notification center.
   if (event.data?.type === 'CLEAR_SESSION_NOTIFICATIONS') {
-    const { sessionId } = event.data;
-    if (!sessionId) return;
-
-    event.waitUntil(
-      self.registration.getNotifications().then(notifications =>
-        notifications
-          .filter(notification => notification.data?.sessionId === sessionId)
-          .forEach(notification => notification.close())
-      )
-    );
+    event.waitUntil(closeSessionNotifications(event.data.sessionId));
   }
 });
+
+// iOS does not replace same-tag notifications (WebKit bug 258922) — `tag` +
+// `renotify` only auto-collapses on Chrome/Android. Closing matches by hand
+// keeps "one notification per session" true on iOS too.
+function closeSessionNotifications(sessionId) {
+  if (!sessionId) return Promise.resolve();
+
+  return self.registration.getNotifications().then(notifications =>
+    Promise.all(
+      notifications
+        .filter(notification => notification.data?.sessionId === sessionId)
+        .map(notification => notification.close())
+    )
+  );
+}
 
 // Push notification event
 self.addEventListener('push', event => {
@@ -152,7 +158,9 @@ self.addEventListener('push', event => {
   };
 
   event.waitUntil(
-    self.registration.showNotification(payload.title || 'CloudCLI', options)
+    closeSessionNotifications(payload.data?.sessionId).then(() =>
+      self.registration.showNotification(payload.title || 'CloudCLI', options)
+    )
   );
 });
 
