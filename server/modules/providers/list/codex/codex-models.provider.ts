@@ -1,4 +1,6 @@
+import { spawn } from 'node:child_process';
 import { readFile } from 'node:fs/promises';
+import { createRequire } from 'node:module';
 import os from 'node:os';
 import path from 'node:path';
 
@@ -19,6 +21,30 @@ import {
 export const CODEX_FALLBACK_MODELS: ProviderModelsDefinition = {
   OPTIONS: [
     {
+      value: 'gpt-5.6-sol',
+      label: 'gpt-5.6-sol',
+      effort: {
+        default: 'medium',
+        values: [{ value: 'low' }, { value: 'medium' }, { value: 'high' }, { value: 'xhigh' }],
+      },
+    },
+    {
+      value: 'gpt-5.6-terra',
+      label: 'gpt-5.6-terra',
+      effort: {
+        default: 'medium',
+        values: [{ value: 'low' }, { value: 'medium' }, { value: 'high' }, { value: 'xhigh' }],
+      },
+    },
+    {
+      value: 'gpt-5.6-luna',
+      label: 'gpt-5.6-luna',
+      effort: {
+        default: 'medium',
+        values: [{ value: 'low' }, { value: 'medium' }, { value: 'high' }, { value: 'xhigh' }],
+      },
+    },
+    {
       value: 'gpt-5.5',
       label: 'gpt-5.5',
       effort: {
@@ -26,24 +52,8 @@ export const CODEX_FALLBACK_MODELS: ProviderModelsDefinition = {
         values: [{ value: 'low' }, { value: 'medium' }, { value: 'high' }, { value: 'xhigh' }],
       },
     },
-    {
-      value: 'gpt-5.4',
-      label: 'gpt-5.4',
-      effort: {
-        default: 'medium',
-        values: [{ value: 'low' }, { value: 'medium' }, { value: 'high' }, { value: 'xhigh' }],
-      },
-    },
-    {
-      value: 'gpt-5.4-mini',
-      label: 'gpt-5.4-mini',
-      effort: {
-        default: 'medium',
-        values: [{ value: 'low' }, { value: 'medium' }, { value: 'high' }, { value: 'xhigh' }],
-      },
-    },
   ],
-  DEFAULT: 'gpt-5.4',
+  DEFAULT: 'gpt-5.6-sol',
 };
 
 type CodexCachedModel = {
@@ -63,9 +73,81 @@ type CodexCachedModel = {
 const CODEX_MODELS_CACHE_PATH = path.join(os.homedir(), '.codex', 'models_cache.json');
 const CODEX_CONFIG_PATH = path.join(os.homedir(), '.codex', 'config.toml');
 
+// `models_cache.json` is a point-in-time snapshot that nothing here ever
+// refreshes. The bundled `codex` binary can report its actual current model
+// list (custom model providers included) via `debug models`, but only
+// through this CLI subcommand — the SDK's JS API doesn't expose it.
+const CODEX_DEBUG_MODELS_TIMEOUT_MS = 8000;
+const CODEX_LIVE_MODELS_CACHE_TTL_MS = 5 * 60 * 1000;
+
+const require = createRequire(import.meta.url);
+let cachedLiveModels: { models: CodexCachedModel[]; fetchedAt: number } | null = null;
+
 const isCodexCachedModel = (value: unknown): value is CodexCachedModel => {
   const record = readObjectRecord(value);
   return Boolean(record && readOptionalString(record.slug));
+};
+
+const resolveCodexBinPath = async (): Promise<string | null> => {
+  try {
+    const packageJsonPath = require.resolve('@openai/codex/package.json');
+    const packageJson = readObjectRecord(JSON.parse(await readFile(packageJsonPath, 'utf8')));
+    const binEntry = readOptionalString(readObjectRecord(packageJson?.bin)?.codex);
+    return binEntry ? path.join(path.dirname(packageJsonPath), binEntry) : null;
+  } catch {
+    return null;
+  }
+};
+
+const fetchLiveCodexModels = async (): Promise<CodexCachedModel[] | null> => {
+  if (cachedLiveModels && Date.now() - cachedLiveModels.fetchedAt < CODEX_LIVE_MODELS_CACHE_TTL_MS) {
+    return cachedLiveModels.models;
+  }
+
+  const binPath = await resolveCodexBinPath();
+  if (!binPath) {
+    return null;
+  }
+
+  try {
+    const stdout = await new Promise<string>((resolve, reject) => {
+      const child = spawn(process.execPath, [binPath, 'debug', 'models'], {
+        stdio: ['ignore', 'pipe', 'pipe'],
+      });
+      let output = '';
+      let errorOutput = '';
+      const timer = setTimeout(() => {
+        child.kill();
+        reject(new Error('codex debug models timed out'));
+      }, CODEX_DEBUG_MODELS_TIMEOUT_MS);
+
+      child.stdout.on('data', (chunk) => { output += chunk; });
+      child.stderr.on('data', (chunk) => { errorOutput += chunk; });
+      child.on('error', (error) => {
+        clearTimeout(timer);
+        reject(error);
+      });
+      child.on('close', (code) => {
+        clearTimeout(timer);
+        if (code === 0) {
+          resolve(output);
+        } else {
+          reject(new Error(errorOutput || `codex debug models exited with code ${code}`));
+        }
+      });
+    });
+
+    const parsed = readObjectRecord(JSON.parse(stdout));
+    const models = Array.isArray(parsed?.models) ? parsed.models.filter(isCodexCachedModel) : [];
+    if (models.length === 0) {
+      return null;
+    }
+
+    cachedLiveModels = { models, fetchedAt: Date.now() };
+    return models;
+  } catch {
+    return null;
+  }
 };
 
 const readCodexPriority = (value: unknown): number => (
@@ -132,6 +214,11 @@ const buildCodexModelsDefinition = (models: CodexCachedModel[]): ProviderModelsD
 
 export class CodexProviderModels implements IProviderModels {
   async getSupportedModels(): Promise<ProviderModelsDefinition> {
+    const liveModels = await fetchLiveCodexModels();
+    if (liveModels) {
+      return buildCodexModelsDefinition(liveModels);
+    }
+
     try {
       const raw = await readFile(CODEX_MODELS_CACHE_PATH, 'utf8');
       const parsed = readObjectRecord(JSON.parse(raw));
