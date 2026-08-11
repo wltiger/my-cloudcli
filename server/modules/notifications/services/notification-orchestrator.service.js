@@ -171,7 +171,9 @@ function buildNotificationPayload(event) {
       code: normalizedEvent.code,
       provider: normalizedEvent.provider || null,
       sessionName,
-      tag: `${normalizedEvent.provider || 'assistant'}:${normalizedEvent.sessionId || 'none'}:${normalizedEvent.code}`
+      tag: normalizedEvent.sessionId
+        ? `${normalizedEvent.provider || 'assistant'}:${normalizedEvent.sessionId}`
+        : `${normalizedEvent.provider || 'assistant'}:global:${normalizedEvent.code}`
     }
   };
 }

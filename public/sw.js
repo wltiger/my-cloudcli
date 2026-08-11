@@ -104,15 +104,31 @@ self.addEventListener('activate', event => {
 // Manual "Refresh offline cache" from Settings — drop everything we cached
 // (shell + hashed assets) and re-fetch the shell, then tell the client to reload.
 self.addEventListener('message', event => {
-  if (event.data?.type !== 'REFRESH_CACHE') return;
+  if (event.data?.type === 'REFRESH_CACHE') {
+    event.waitUntil(
+      caches.delete(CACHE_NAME)
+        .then(() => cacheFreshCopies())
+        .then(() => {
+          event.source?.postMessage({ type: 'REFRESH_CACHE_DONE' });
+        })
+    );
+    return;
+  }
 
-  event.waitUntil(
-    caches.delete(CACHE_NAME)
-      .then(() => cacheFreshCopies())
-      .then(() => {
-        event.source?.postMessage({ type: 'REFRESH_CACHE_DONE' });
-      })
-  );
+  // Opening a session in the app clears its stacked-up push notifications
+  // from the phone's notification center.
+  if (event.data?.type === 'CLEAR_SESSION_NOTIFICATIONS') {
+    const { sessionId } = event.data;
+    if (!sessionId) return;
+
+    event.waitUntil(
+      self.registration.getNotifications().then(notifications =>
+        notifications
+          .filter(notification => notification.data?.sessionId === sessionId)
+          .forEach(notification => notification.close())
+      )
+    );
+  }
 });
 
 // Push notification event

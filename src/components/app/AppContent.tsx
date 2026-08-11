@@ -133,6 +133,13 @@ function AppContentInner() {
     void refreshRunningSessions();
   }, [refreshRunningSessions]);
 
+  // Opening a session clears its stacked-up push notifications from the
+  // phone's notification center.
+  useEffect(() => {
+    if (!sessionId || !('serviceWorker' in navigator)) return;
+    navigator.serviceWorker.controller?.postMessage({ type: 'CLEAR_SESSION_NOTIFICATIONS', sessionId });
+  }, [sessionId]);
+
   useEffect(() => {
     const interval = window.setInterval(() => {
       void refreshRunningSessions();
