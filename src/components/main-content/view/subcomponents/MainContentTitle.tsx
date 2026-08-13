@@ -3,7 +3,6 @@ import { useTranslation } from 'react-i18next';
 import SessionProviderLogo from '../../../llm-logo-provider/SessionProviderLogo';
 import type { AppTab, Project, ProjectSession } from '../../../../types/app';
 import { usePlugins } from '../../../../contexts/PluginsContext';
-import { openCommandPalette } from '../../../../lib/commandPaletteEvents';
 
 type MainContentTitleProps = {
   activeTab: AppTab;
@@ -70,17 +69,12 @@ export default function MainContentTitle({
 
       <div className="min-w-0 flex-1">
         {activeTab === 'chat' && selectedSession ? (
-          <button
-            type="button"
-            onClick={() => openCommandPalette('sessions')}
-            aria-label={t('mainContent.switchSession', { defaultValue: 'Switch session' })}
-            className="block w-full min-w-0 rounded-md text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-primary"
-          >
+          <div className="min-w-0">
             <h2 title={getSessionTitle(selectedSession)} className="truncate text-sm font-semibold leading-tight text-foreground">
               {getSessionTitle(selectedSession)}
             </h2>
             <div className="truncate text-[11px] leading-tight text-muted-foreground">{selectedProject.displayName}</div>
-          </button>
+          </div>
         ) : showChatNewSession ? (
           <div className="min-w-0">
             <h2 className="text-base font-semibold leading-tight text-foreground">{t('mainContent.newSession')}</h2>
