@@ -158,7 +158,7 @@
 
 **为什么改：** `getSupportedModels()` 里本来就写好了一段真正调 SDK 的代码，但被注释掉了：调 `query()` 拿到的 `Query` 实例会往 `~/.claude/projects/` 下面落一份会话 jsonl，然后被侧边栏自己的项目发现机制捡到，变成一个多余的工作区。`@anthropic-ai/claude-agent-sdk`（装的已经是最新的 0.3.227）后来加了个 `persistSession: false`，官方文档写的就是给"不需要保留历史的临时/自动化调用"用的。实测验证了两次——先测原始 SDK 调用，再测真正的 `ClaudeProviderModels` 类——每次都对比 `~/.claude/projects/` 改动前后的目录列表：两次都没多出新会话，耗时大概 2.4–3.3 秒。实时拿到的列表跟写死的兜底列表不只是新旧的区别，内容也真不一样：少了旧列表里单独的 "Opus" 和 "Sonnet[1m]"，多了 `resolvedModel` 字段和更细的 effort 档位。
 
-**已废弃（v1.37.1）：** 理由和 #17 一样。官方那份写死的列表多了实时拉取拿不到的选项——`best`、`opusplan`，以及 `xhigh` 这一档 effort——留着实时拉取等于把用户现在能选的模型砍掉。v1.37.1 同步时的处理：`claude-models.provider.ts` 整份取官方版本，`fetchLiveClaudeModels()`、`mapClaudeModel()`、`buildClaudeModelsDefinition()` 和那个 `persistSession: false` 的 SDK 调用都没了；`CLAUDE_FALLBACK_MODELS` 这个名字也彻底不存在了，官方把那份静态列表改名成了 `CLAUDE_PREDEFINED_MODELS`。`persistSession: false` 那个结论以后要捡回来还是成立的——但捡回来的版本必须和官方列表合并，不能替换。
+**已废弃（v1.37.1）：** 理由和 #17 一样。官方那份写死的列表多了实时拉取拿不到的选项——`best`、`opusplan`，以及 `xhigh` 这一档 effort——留着实时拉取等于把用户现在能选的模型砍掉。v1.37.1 同步时的处理：`claude-models.provider.ts` 整份取官方版本，`fetchLiveClaudeModels()`、`mapClaudeModel()`、`buildClaudeModelsDefinition()` 和那个 `persistSession: false` 的 SDK 调用都没了；`CLAUDE_FALLBACK_MODELS` 这个名字也彻底不存在了，官方把那份静态列表改名成了 `CLAUDE_PREDEFINED_MODELS`。别再想着把 `persistSession: false` 这条路捡回来了。在这个 fork 独立发现它之前，已经有人在 upstream 提过一模一样的方案（`persistSession: false`、同样的 `pathToClaudeCodeExecutable` 解析、失败兜底、别名保留），见 [siteboon/claudecodeui#1132](https://github.com/siteboon/claudecodeui/pull/1132)，被维护者一句"this is intentional"关闭、没有合并。结合同一个版本里 Cursor、OpenCode 的 model provider 也被砍成同样的静态目录模式来看，这是官方对"运行时/provider 端动态发现模型"这整条路线的统一否决，不是嫌某一个 PR 写得不够好。尊重这个决定——不要再向官方提同样的机制，这个 fork 里也不要重建它。
 
 ## 19. New Session 选择器只列出已连接的 provider
 
