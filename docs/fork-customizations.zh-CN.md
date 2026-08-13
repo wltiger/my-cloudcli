@@ -6,6 +6,8 @@
 
 这不是待办清单——未完成的后续工作看仓库的 issue tracker（`docs/agents/issue-tracker.md`）。这份文件只负责记录"这里有个偏离点，以及为什么"。
 
+标了 ❌ 已废弃 的条目，代码里已经没有了。条目本身保留、编号也不重排，是为了让以后的人知道曾经有过这个偏离、以及它为什么消失——通常是官方自己解决了同一个问题。想把某条捡回来之前，先读它的废弃说明。
+
 ## 1. 移动端紧凑侧边栏
 
 **涉及文件：** `src/constants/config.ts`、`src/components/sidebar/view/subcomponents/SidebarFooter.tsx`、`SidebarHeader.tsx`、`SidebarContent.tsx`
@@ -110,13 +112,13 @@
 
 **同步官方时怎么办：** 保留我的，但先看一眼入口：官方要是自己加了触屏入口，就用官方的，把重复的那个删掉。剪贴板兜底和重复 toast 属于纯 bug 修复、不是 fork 偏好，值得给官方提 PR。注意这条**动了** `src/i18n/locales/*/common.json`（在官方已有的 `fileTree.context` 块里加了两个 key），和第 3 条刻意只用 `t(key, '英文兜底')` 的做法不一样——那个块是官方的，这里大概率会冲突，重新把两个 key 加回去即可。
 
-## 13. 从聊天标题进入的跨项目会话快切
+## 13. 从聊天标题进入的跨项目会话快切 ❌ 已废弃（v1.37.1）
 
 **涉及文件：** `src/lib/commandPaletteEvents.ts`、`src/components/command-palette/ForkRecentSessions.tsx`、`CommandPalette.tsx`、`src/components/main-content/view/subcomponents/MainContentTitle.tsx`、`src/utils/api.js`、`server/modules/providers/provider.routes.ts`、`services/sessions.service.ts`、`server/modules/database/repositories/sessions.db.ts`
 
 **为什么改：** 官方的命令面板本来就能切会话，但唯一的触发方式是 Cmd/Ctrl+K——sidebar 里那个看着像按钮的东西其实是 `pointer-events-none` 的 `<kbd>` 徽章，而且 `md:` 以下根本不显示。于是手机上面板完全打不开，切会话只能开 sidebar。现在点聊天标题会直接把面板开在 Sessions 页，顺带也让面板的文件/commit/分支搜索在触屏上能用了。官方的 Sessions 分组只列当前项目（和 sidebar 是同一批），所以另加了一个 fork 自有的「Recent sessions (all projects)」分组来回答「我刚才在哪」，并且会和官方已经列出的行去重。切换本身就是 `navigate('/session/:id')`——已有的会话解析逻辑会自己找到所属项目，所以跨项目不需要额外的切项目代码。后端加了 `getRecentSessions(limit)`（`getAllSessions` 既没排序也没上限）和 `GET /api/providers/sessions/recent`；`sessions/running` 用不上，它是故意做成只返回状态的。
 
-**同步官方时怎么办：** 保留我的。上游改动刻意只有三处：`CommandPalette.tsx` 里一个监听 fork 自定义 `cloudcli:open-command-palette` window 事件的 `useEffect`、官方 Sessions 分组后面一个 `<ForkRecentSessions />`、以及 `MainContentTitle.tsx` 里标题变成按钮。列表、hook、事件全部在 fork 自有文件里，冲突后把这三处放回去即可。用 window 事件就是为了让面板不需要多一个 prop 或 context 句柄；官方以后要是自己做了外部打开的机制，就把监听删掉改调官方的。文案用 `t(key, '英文兜底')`，没动 `src/i18n/locales/**`（和第 3 条一致）。会话没有存名字时行标题会退化成 session id——那是 #9 记录的命名问题，不是这条引入的。
+**已废弃（v1.37.1）：** 官方自己在侧边栏做了原生的跨项目最近会话列表（PR #1041），连分页版的 `GET /api/providers/sessions/recent` 都有了。这条的后端大约 70% 和它重复，而且重复得并不无害：合并后两个路由注册落在同一个路径上，Express 只匹配第一个，官方那个把这条的悄悄挡掉了。真正还算独有的只剩移动端入口——点聊天标题打开面板——就这一点不值得继续背着一份偏离，所以整条直接废弃，没有去适配官方的新列表。v1.37.1 同步时删掉的东西：`src/lib/commandPaletteEvents.ts` 和 `src/components/command-palette/ForkRecentSessions.tsx` 两个文件、面板里的事件监听和多出来的那个分组，聊天标题也改回纯文本。以后要是真觉得手机上少了入口难受，只把那个入口捡回来——给官方面板加个触发方式，而不是再做一份会话列表——并且作为新条目记录。
 
 ## 14. Browser 运行时装到自己管理的目录
 
@@ -142,21 +144,21 @@
 
 **同步官方时怎么办：** 保留我的。改动都很小很独立：orchestrator/`sw.js` 里一处 tag 表达式 + 一个 `closeSessionNotifications()` 辅助函数 + 一个 `permission.resolved` 通知函数，`claude-runtime.provider.js` 的 `resolveToolApproval()` 里加了几个 resolver metadata 字段和一次 `notifyPermissionResolved()` 调用，`AppContent.tsx` 里一个按路由 `sessionId` 触发的 `useEffect`。如果官方重做了推送 payload、tag 方案或权限批准流程，保留"每个 session 只留一条通知、打开即清、在别处处理完也会清"这个行为，照着官方的新结构重新推导 tag/清理/resolve 逻辑，别把这个功能整个丢掉。如果官方以后给别的 provider 也加上交互式审批，那个 provider 自己的 `resolveToolApproval` 等价物也需要同样的 `_userId`/`_sessionName` metadata 和 `notifyPermissionResolved()` 调用——现在只接到 Claude 上是因为目前只有它实现了 `permissions.resolve`。
 
-## 17. Codex 模型列表改成实时拉取，不再读一份不会刷新的快照
+## 17. Codex 模型列表改成实时拉取，不再读一份不会刷新的快照 ❌ 已废弃（v1.37.1）
 
 **涉及文件：** `server/modules/providers/list/codex/codex-models.provider.ts`、`server/modules/providers/services/provider-models.service.ts`
 
 **为什么改：** 官方的 `getSupportedModels()` 只读 `~/.codex/models_cache.json`——这是个不会自己刷新的时间点快照。如果用户把 Codex 走自定义 `model_provider`/中转站（通过 `~/.codex/config.toml` 里的 `model_catalog_json1` 声明），或者干脆缓存本来就旧了，就永远看不到官方新发布的模型——实测验证过：GPT-5.6 Sol/Terra/Luna 是 2026-07-09 正式发布的官方模型，而一份 2026-06-21 抓的缓存里完全没有。`@openai/codex-sdk` 的 JS API 没有对应方法能拿到这个，等价能力只存在于随包分发的 `codex` 二进制自己的 `debug models` 子命令里。这个 fork 现在会去起这个子命令的子进程（复用 `codex-runtime.provider.js` 已经在用的同一个 `@openai/codex` 二进制，通过它 `package.json` 的 `bin` 字段解析路径，保证两边版本一致），解析它的 JSON 输出；失败就退回旧的读缓存文件逻辑，再失败就退回写死的 `CODEX_FALLBACK_MODELS` 列表。同时把 `codex` 加进了 `provider-models.service.ts` 的 `UNCACHED_PROVIDERS`——不然外层那层 3 天磁盘持久化缓存会一直挡住这次刚拿到的新鲜结果，因为一次成功的缓存会被记住远超一个新模型发布的时间跨度。
 
-**同步官方时怎么办：** 这是个纯粹的功能缺口修复，不是 fork 偏好——值得往官方提 PR，官方要是上了等价方案就把这条删掉，最好是官方自己在 SDK 里加一个正经方法，而不是像这个 fork 一样调一个没有文档的 `debug` 子命令（已知风险：未来 `@openai/codex` 版本可能不打招呼就改名或删掉这个子命令）。在那之前保留我的。如果官方因为别的原因（比如他们自己升级 SDK 版本）改了 `codex-models.provider.ts`，把 `fetchLiveCodexModels()` 这段子进程逻辑重新套上去，`UNCACHED_PROVIDERS` 里的 `codex` 也留着。
+**已废弃（v1.37.1）：** 当初的缺口自己没了——官方在同一个版本里刷新了他们那份写死的 Codex 列表，这条想让用户看到的新模型现在官方自带。这时候再留着实时拉取就是亏的：它是**整份替换**列表而不是合并进去，官方新加、而 `codex debug models` 又不返回的选项会从选择器里悄悄消失——正好是这条本来要防的那种问题，方向反了。v1.37.1 同步时的处理：`codex-models.provider.ts` 和 `provider-models.service.ts` 整份取官方版本，`fetchLiveCodexModels()`、`codex debug models` 子进程、`UNCACHED_PROVIDERS` 一并没了。以后列表要是又过期了，替代方案必须是**和官方列表合并**而不是替换，而且优先用正经的 SDK 方法，别再依赖没有文档的 `debug` 子命令。
 
-## 18. Claude 模型列表改成走 SDK 实时拉取，不再是写死的列表
+## 18. Claude 模型列表改成走 SDK 实时拉取，不再是写死的列表 ❌ 已废弃（v1.37.1）
 
 **涉及文件：** `server/modules/providers/list/claude/claude-models.provider.ts`
 
 **为什么改：** `getSupportedModels()` 里本来就写好了一段真正调 SDK 的代码，但被注释掉了：调 `query()` 拿到的 `Query` 实例会往 `~/.claude/projects/` 下面落一份会话 jsonl，然后被侧边栏自己的项目发现机制捡到，变成一个多余的工作区。`@anthropic-ai/claude-agent-sdk`（装的已经是最新的 0.3.227）后来加了个 `persistSession: false`，官方文档写的就是给"不需要保留历史的临时/自动化调用"用的。实测验证了两次——先测原始 SDK 调用，再测真正的 `ClaudeProviderModels` 类——每次都对比 `~/.claude/projects/` 改动前后的目录列表：两次都没多出新会话，耗时大概 2.4–3.3 秒。实时拿到的列表跟写死的兜底列表不只是新旧的区别，内容也真不一样：少了旧列表里单独的 "Opus" 和 "Sonnet[1m]"，多了 `resolvedModel` 字段和更细的 effort 档位。
 
-**同步官方时怎么办：** 同样是把之前写好但被禁用的代码修好，不是 fork 偏好——值得往官方提 PR，官方修了就把这条删掉。在那之前保留我的。`CLAUDE_FALLBACK_MODELS` 还留着当最后一道兜底（没登录/调用出错的情况），官方如果改这份列表的内容，跟实时拉取这条逻辑互不相关，正常合并就行。
+**已废弃（v1.37.1）：** 理由和 #17 一样。官方那份写死的列表多了实时拉取拿不到的选项——`best`、`opusplan`，以及 `xhigh` 这一档 effort——留着实时拉取等于把用户现在能选的模型砍掉。v1.37.1 同步时的处理：`claude-models.provider.ts` 整份取官方版本，`fetchLiveClaudeModels()`、`mapClaudeModel()`、`buildClaudeModelsDefinition()` 和那个 `persistSession: false` 的 SDK 调用都没了；`CLAUDE_FALLBACK_MODELS` 这个名字也彻底不存在了，官方把那份静态列表改名成了 `CLAUDE_PREDEFINED_MODELS`。`persistSession: false` 那个结论以后要捡回来还是成立的——但捡回来的版本必须和官方列表合并，不能替换。
 
 ## 19. New Session 选择器只列出已连接的 provider
 
