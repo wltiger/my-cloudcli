@@ -17,6 +17,7 @@ type CreateAppSessionResult = {
   sessionId: string;
   provider: LLMProvider;
   projectPath: string;
+  sessionName: string;
 };
 
 type ArchivedSessionListItem = {
@@ -30,6 +31,17 @@ type ArchivedSessionListItem = {
   updatedAt: string | null;
   lastActivity: string | null;
   isProjectArchived: boolean;
+};
+
+type RecentSessionListItem = Pick<
+  ArchivedSessionListItem,
+  'sessionId' | 'provider' | 'projectId' | 'projectDisplayName' | 'sessionTitle' | 'lastActivity'
+>;
+
+type RecentSessionsPage = {
+  conversations: RecentSessionListItem[];
+  total: number;
+  hasMore: boolean;
 };
 
 type SessionDetails = {
@@ -50,6 +62,13 @@ type SessionDetails = {
     isArchived: boolean;
   } | null;
 };
+
+const MAX_CLOUDCLI_SESSION_NAME_WORDS = 4;
+
+function buildCloudCliSessionName(initialMessage: string): string {
+  const words = initialMessage.trim().split(/\s+/).filter(Boolean);
+  return words.slice(0, MAX_CLOUDCLI_SESSION_NAME_WORDS).join(' ') || 'Untitled Session';
+}
 
 /**
  * Removes one file if it exists.
@@ -120,28 +139,37 @@ export const sessionsService = {
   },
 
   /**
-   * Recent sessions across every project, newest first, shaped for a switcher.
-   *
-   * Neither existing read answers "what did I touch last, anywhere":
-   * `listRunningSessions` is status-only, and the sessions endpoint the
-   * sidebar and command palette use is scoped to a single project.
+   * Returns the active conversation feed in true global activity order.
    */
-  listRecentSessions(limit: number): Array<{
-    sessionId: string;
-    provider: LLMProvider;
-    name: string | null;
-    projectPath: string | null;
-    projectName: string | null;
-    updatedAt: string | null;
-  }> {
-    return sessionsDb.getRecentSessions(limit).map((session) => ({
-      sessionId: session.session_id,
-      provider: session.provider as LLMProvider,
-      name: session.custom_name,
-      projectPath: session.project_path,
-      projectName: session.project_path ? path.basename(session.project_path) : null,
-      updatedAt: session.updated_at ?? session.created_at ?? null,
-    }));
+  listRecentSessions(limit: number, offset: number): RecentSessionsPage {
+    const page = sessionsDb.getRecentSessionsPage(limit, offset);
+    const projectCache = new Map<string, ReturnType<typeof projectsDb.getProjectPath>>();
+    const conversations = page.sessions.map((session) => {
+      const projectPath = session.project_path?.trim() ? session.project_path : null;
+      let project = null;
+
+      if (projectPath) {
+        if (!projectCache.has(projectPath)) {
+          projectCache.set(projectPath, projectsDb.getProjectPath(projectPath));
+        }
+        project = projectCache.get(projectPath) ?? null;
+      }
+
+      return {
+        sessionId: session.session_id,
+        provider: session.provider as LLMProvider,
+        projectId: project?.project_id ?? null,
+        projectDisplayName: resolveProjectDisplayName(projectPath, project?.custom_project_name),
+        sessionTitle: session.custom_name?.trim() || session.session_id,
+        lastActivity: session.updated_at ?? session.created_at ?? null,
+      };
+    });
+
+    return {
+      conversations,
+      total: page.total,
+      hasMore: offset + conversations.length < page.total,
+    };
   },
 
   /**
@@ -179,9 +207,15 @@ export const sessionsService = {
    * (via `POST /api/providers/sessions`) when the user starts a brand-new
    * chat, navigates to the returned id immediately, and the id never changes
    * for the lifetime of the conversation. The provider-native id is mapped to
-   * this row later, when the provider runtime announces it mid-run.
+   * this row later, when the provider runtime announces it mid-run. Its title
+   * comes directly from the first visible CloudCLI message and is limited to
+   * four whole words before any provider-owned storage exists.
    */
-  createAppSession(provider: LLMProvider, projectPath: string): CreateAppSessionResult {
+  createAppSession(
+    provider: LLMProvider,
+    projectPath: string,
+    initialMessage: string,
+  ): CreateAppSessionResult {
     const normalizedProjectPath = projectPath.trim();
     if (!normalizedProjectPath) {
       throw new AppError('projectPath is required.', {
@@ -191,12 +225,14 @@ export const sessionsService = {
     }
 
     const sessionId = randomUUID();
-    sessionsDb.createAppSession(sessionId, provider, normalizedProjectPath);
+    const sessionName = buildCloudCliSessionName(initialMessage);
+    sessionsDb.createAppSession(sessionId, provider, normalizedProjectPath, sessionName);
 
     return {
       sessionId,
       provider,
       projectPath: normalizedProjectPath,
+      sessionName,
     };
   },
 

@@ -1,10 +1,6 @@
 import { readFile } from 'node:fs/promises';
 
-import { query } from '@anthropic-ai/claude-agent-sdk';
-import type { ModelInfo } from '@anthropic-ai/claude-agent-sdk';
-
 import { sessionsDb } from '@/modules/database/index.js';
-import { resolveClaudeCodeExecutablePath } from '@/shared/claude-cli-path.js';
 import type { IProviderModels } from '@/shared/interfaces.js';
 import type {
   ProviderCurrentActiveModel,
@@ -13,12 +9,12 @@ import type {
 } from '@/shared/types.js';
 import { buildDefaultProviderCurrentActiveModel } from '@/shared/utils.js';
 
-export const CLAUDE_FALLBACK_MODELS: ProviderModelsDefinition = {
+export const CLAUDE_PREDEFINED_MODELS: ProviderModelsDefinition = {
   OPTIONS: [
     {
       value: 'default',
       label: 'Default (recommended)',
-      description: 'Use the Claude Code default model (currently Sonnet 5)',
+      description: 'Use the recommended model for your Claude account and deployment.',
       effort: {
         default: 'high',
         values: [
@@ -30,9 +26,9 @@ export const CLAUDE_FALLBACK_MODELS: ProviderModelsDefinition = {
       },
     },
     {
-      value: 'fable',
-      label: 'Fable',
-      description: 'Fable 5 · Most capable for your hardest and longest-running tasks · Uses your limits ~2× faster than Opus',
+      value: 'best',
+      label: 'Best available',
+      description: 'Use Fable 5 when available, otherwise the latest Opus model.',
       effort: {
         default: 'high',
         values: [
@@ -45,15 +41,31 @@ export const CLAUDE_FALLBACK_MODELS: ProviderModelsDefinition = {
       },
     },
     {
-      value: "sonnet",
-      label: "Sonnet",
-      description: "Sonnet 5 · Best for everyday tasks · $3/$15 per Mtok",
+      value: 'fable',
+      label: 'Fable 5',
+      description: 'Most capable Claude model for the hardest, longest-running tasks.',
       effort: {
         default: 'high',
         values: [
           { value: 'low' },
           { value: 'medium' },
           { value: 'high' },
+          { value: 'xhigh' },
+          { value: 'max' },
+        ],
+      },
+    },
+    {
+      value: 'sonnet',
+      label: 'Sonnet',
+      description: 'Latest Sonnet model for everyday coding tasks.',
+      effort: {
+        default: 'high',
+        values: [
+          { value: 'low' },
+          { value: 'medium' },
+          { value: 'high' },
+          { value: 'xhigh' },
           { value: 'max' },
         ],
       },
@@ -61,13 +73,14 @@ export const CLAUDE_FALLBACK_MODELS: ProviderModelsDefinition = {
     {
       value: 'sonnet[1m]',
       label: 'Sonnet (1M context)',
-      description: 'Sonnet 5 for long sessions · $3/$15 per Mtok',
+      description: 'Latest Sonnet model with a 1M context window.',
       effort: {
         default: 'high',
         values: [
           { value: 'low' },
           { value: 'medium' },
           { value: 'high' },
+          { value: 'xhigh' },
           { value: 'max' },
         ],
       },
@@ -75,7 +88,7 @@ export const CLAUDE_FALLBACK_MODELS: ProviderModelsDefinition = {
     {
       value: 'opus',
       label: 'Opus',
-      description: 'Opus 4.8 · Best for everyday, complex tasks · ~2× usage vs Sonnet',
+      description: 'Latest Opus model for complex reasoning and coding tasks.',
       effort: {
         default: 'high',
         values: [
@@ -89,8 +102,8 @@ export const CLAUDE_FALLBACK_MODELS: ProviderModelsDefinition = {
     },
     {
       value: 'opus[1m]',
-      label: 'Opus 4.8 (1M context)',
-      description: 'Opus 4.8 with 1M context · Most capable for complex work · $5/$25 per Mtok',
+      label: 'Opus (1M context)',
+      description: 'Latest Opus model with a 1M context window.',
       effort: {
         default: 'high',
         values: [
@@ -105,7 +118,22 @@ export const CLAUDE_FALLBACK_MODELS: ProviderModelsDefinition = {
     {
       value: 'haiku',
       label: 'Haiku',
-      description: 'Haiku 4.5 · Fastest for quick answers · $1/$5 per Mtok',
+      description: 'Fast and efficient Claude model for simple tasks.',
+    },
+    {
+      value: 'opusplan',
+      label: 'Opus Plan',
+      description: 'Use Opus while planning, then switch to Sonnet for execution.',
+      effort: {
+        default: 'high',
+        values: [
+          { value: 'low' },
+          { value: 'medium' },
+          { value: 'high' },
+          { value: 'xhigh' },
+          { value: 'max' },
+        ],
+      },
     },
   ],
   DEFAULT: 'default',
@@ -117,7 +145,7 @@ export const findClaudeModelOption = (model: string | undefined | null): Provide
     return null;
   }
 
-  return CLAUDE_FALLBACK_MODELS.OPTIONS.find((option) => option.value === normalizedModel) ?? null;
+  return CLAUDE_PREDEFINED_MODELS.OPTIONS.find((option) => option.value === normalizedModel) ?? null;
 };
 type ClaudeInitEvent = {
   sessionId?: string;
@@ -228,69 +256,20 @@ const readClaudeSessionModelFromJsonl = async (
   return null;
 };
 
-const CLAUDE_SUPPORTED_MODELS_TIMEOUT_MS = 8000;
-
-const mapClaudeModel = (model: ModelInfo): ProviderModelOption => ({
-  value: model.value,
-  label: model.displayName,
-  description: model.description,
-  effort: model.supportsEffort && model.supportedEffortLevels?.length
-    ? { values: model.supportedEffortLevels.map((value) => ({ value })) }
-    : undefined,
-});
-
-const buildClaudeModelsDefinition = (models: ModelInfo[]): ProviderModelsDefinition => {
-  const options = models.map(mapClaudeModel);
-  if (options.length === 0) {
-    return CLAUDE_FALLBACK_MODELS;
-  }
-
-  return {
-    OPTIONS: options,
-    DEFAULT: options[0]?.value ?? CLAUDE_FALLBACK_MODELS.DEFAULT,
-  };
-};
-
-// A plain `query()` call persists a session jsonl under ~/.claude/projects/,
-// which the sidebar's project discovery then picks up as a stray workspace.
-// `persistSession: false` (SDK ≥0.3.16x) skips that disk write entirely, so
-// this never shows up as a session — verified by diffing ~/.claude/projects/
-// before and after. The prompt/generator is never iterated; only the
-// control-channel `supportedModels()` call is used.
-const fetchLiveClaudeModels = async (): Promise<ModelInfo[] | null> => {
-  const abortController = new AbortController();
-  const timer = setTimeout(() => abortController.abort(), CLAUDE_SUPPORTED_MODELS_TIMEOUT_MS);
-
-  try {
-    const queryInstance = query({
-      prompt: 'Get supported models',
-      options: {
-        persistSession: false,
-        cwd: process.cwd(),
-        pathToClaudeCodeExecutable: resolveClaudeCodeExecutablePath(process.env.CLAUDE_CLI_PATH),
-        env: { ...process.env },
-        abortController,
-      },
-    });
-
-    const models = await queryInstance.supportedModels();
-    queryInstance.close();
-    return models.length > 0 ? models : null;
-  } catch {
-    return null;
-  } finally {
-    clearTimeout(timer);
-  }
-};
-
 export class ClaudeProviderModels implements IProviderModels {
   async getSupportedModels(): Promise<ProviderModelsDefinition> {
-    const liveModels = await fetchLiveClaudeModels();
-    if (liveModels) {
-      return buildClaudeModelsDefinition(liveModels);
-    }
-
-    return CLAUDE_FALLBACK_MODELS;
+    // claude creates a new jsonl file as a separate session for this request.
+    // As a result, it lists the workspace where this is invoked when it shouldn't.
+    //
+    // Disabled for now:
+    // const queryInstance = query({
+    //   prompt: 'Get supported models',
+    //   options: buildClaudeQueryOptions(),
+    // });
+    // const supportedModels = await queryInstance.supportedModels();
+    // queryInstance.close();
+    // return buildClaudeModelsDefinition(supportedModels);
+    return CLAUDE_PREDEFINED_MODELS;
   }
 
   async getCurrentActiveModel(sessionId?: string): Promise<ProviderCurrentActiveModel> {

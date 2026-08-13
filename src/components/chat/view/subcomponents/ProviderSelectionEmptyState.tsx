@@ -1,10 +1,12 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { Check, ChevronDown } from "lucide-react";
+import { Check, ChevronDown, Plus } from "lucide-react";
 import { Trans, useTranslation } from "react-i18next";
 
 import type {
   ProjectSession,
   LLMProvider,
+  ProviderModelActions,
+  ProviderModelOption,
   ProviderModelsDefinition,
 } from "../../../../types/app";
 import SessionProviderLogo from "../../../llm-logo-provider/SessionProviderLogo";
@@ -22,7 +24,11 @@ import {
   CommandGroup,
   CommandItem,
   Card,
+  Badge,
+  Button,
 } from "../../../../shared/view/ui";
+
+import ModelLibraryPanel from "./ModelLibraryPanel";
 
 const PROVIDER_META: { id: LLMProvider; name: string }[] = [
   { id: "claude", name: "Anthropic" },
@@ -60,6 +66,7 @@ type ProviderSelectionEmptyStateProps = {
   opencodeModel: string;
   setOpenCodeModel: (model: string) => void;
   providerModelCatalog: Partial<Record<LLMProvider, ProviderModelsDefinition>>;
+  providerModelActions: ProviderModelActions;
   providerModelsLoading: boolean;
   tasksEnabled: boolean;
   isTaskMasterInstalled: boolean | null;
@@ -70,7 +77,7 @@ type ProviderSelectionEmptyStateProps = {
 type ProviderGroup = {
   id: LLMProvider;
   name: string;
-  models: { value: string; label: string; description?: string }[];
+  models: ProviderModelOption[];
 };
 
 function getModelConfig(
@@ -117,6 +124,7 @@ export default function ProviderSelectionEmptyState({
   opencodeModel,
   setOpenCodeModel,
   providerModelCatalog,
+  providerModelActions,
   providerModelsLoading,
   tasksEnabled,
   isTaskMasterInstalled,
@@ -125,6 +133,7 @@ export default function ProviderSelectionEmptyState({
 }: ProviderSelectionEmptyStateProps) {
   const { t } = useTranslation("chat");
   const [dialogOpen, setDialogOpen] = useState(false);
+  const [modelLibraryOpen, setModelLibraryOpen] = useState(false);
   const { providerAuthStatus, refreshProviderAuthStatuses } = useProviderAuthStatus();
 
   useEffect(() => {
@@ -198,6 +207,16 @@ export default function ProviderSelectionEmptyState({
     [setProvider, setModelForProvider, textareaRef],
   );
 
+  const openModelLibrary = () => {
+    setDialogOpen(false);
+    setModelLibraryOpen(true);
+  };
+
+  const closeModelLibrary = () => {
+    setModelLibraryOpen(false);
+    setDialogOpen(true);
+  };
+
   if (!selectedSession && !currentSessionId) {
     return (
       <div className="flex h-full items-center justify-center px-4">
@@ -246,8 +265,29 @@ export default function ProviderSelectionEmptyState({
 
             <DialogContent className="max-w-md overflow-hidden p-0">
               <DialogTitle>Model Selector</DialogTitle>
-              <div className="border-b border-border/60 bg-muted/20 px-4 py-3">
-                <p className="text-sm font-semibold text-foreground">Choose a model</p>
+              <div className="flex items-center justify-between gap-3 border-b border-border/60 bg-muted/20 px-4 py-3">
+                <div>
+                  <p className="text-sm font-semibold text-foreground">
+                    {t("providerSelection.chooseModel", {
+                      defaultValue: "Choose a model",
+                    })}
+                  </p>
+                  <p className="mt-0.5 text-[11px] text-muted-foreground">
+                    {t("providerSelection.chooseModelDescription", {
+                      defaultValue: "Built-in and custom models in one list",
+                    })}
+                  </p>
+                </div>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  onClick={openModelLibrary}
+                  className="h-8 shrink-0 rounded-lg px-2.5 text-xs"
+                >
+                  <Plus className="h-3.5 w-3.5" />
+                  {t("providerSelection.addModel", { defaultValue: "Add model" })}
+                </Button>
               </div>
               <Command filter={modelSearchFilter}>
                 <CommandInput
@@ -291,16 +331,17 @@ export default function ProviderSelectionEmptyState({
                             className="ml-4 border-l border-border/40 pl-4"
                           >
                             <div className="min-w-0 flex-1">
-                              <div className="truncate">{model.label}</div>
-                              {/* 
-                              // * Temporarly commented out because the description of models from claude 
-                              // * was a bit inconsistent.  Will return it back when it becomes more consistent.
-                              */}
-                              {/* {model.description && (
-                                <div className="truncate text-xs text-muted-foreground">
-                                  {model.description}
+                              <div className="flex min-w-0 items-center gap-2">
+                                <span className="truncate">{model.label}</span>
+                                {model.isCustom && (
+                                  <Badge className="h-4 shrink-0 rounded-full px-1.5 text-[8px]">Custom</Badge>
+                                )}
+                              </div>
+                              {model.label !== model.value && (
+                                <div className="truncate font-mono text-[10px] text-muted-foreground">
+                                  {model.value}
                                 </div>
-                              )} */}
+                              )}
                             </div>
                             {isSelected && (
                               <Check className="ml-auto h-4 w-4 shrink-0 text-primary" />
@@ -312,6 +353,31 @@ export default function ProviderSelectionEmptyState({
                   ))}
                 </CommandList>
               </Command>
+            </DialogContent>
+          </Dialog>
+
+          <Dialog
+            open={modelLibraryOpen}
+            onOpenChange={(open) => {
+              if (open) {
+                setModelLibraryOpen(true);
+              } else {
+                closeModelLibrary();
+              }
+            }}
+          >
+            <DialogContent className="flex h-[min(90dvh,46rem)] w-[calc(100vw-1rem)] max-w-4xl flex-col overflow-hidden rounded-3xl p-4 sm:p-5">
+              <DialogTitle>
+                {t("providerSelection.manageModels", {
+                  defaultValue: "Manage models",
+                })}
+              </DialogTitle>
+              <ModelLibraryPanel
+                initialProvider={provider}
+                providerModelCatalog={providerModelCatalog}
+                actions={providerModelActions}
+                onDone={closeModelLibrary}
+              />
             </DialogContent>
           </Dialog>
 
