@@ -122,6 +122,10 @@ Whenever asked to sync/merge/pull in the latest official source (`upstream/main`
 
 **Keep `docs/fork-customizations.md` (+ its `.zh-CN.md` twin) current going forward.** Whenever a piece of work adds, extends, or removes a fork-specific customization (an opt-in setting, a behavior that deviates from upstream, anything that could conflict with a future upstream merge) — not routine bug fixes or upstream-aligned work — add or update its numbered entry as part of that same task, not as a separate followup. Merge multiple iterations of the same feature into one entry rather than appending a new one each time (see `docs/fork-customizations.md`'s own note on the chat-spacing entry for the pattern). Skip entries for things that don't actually diverge from upstream's own direction.
 
+### Reporting to upstream
+
+Whenever a bug, a design gap, or a validated technical finding surfaces that's worth reporting back to upstream (`siteboon/claudecodeui`) — including at the end of an upstream sync — follow `docs/upstream-pr.md` (duplicate-check, evidence, draft, maintainer review, then submit) rather than drafting an issue/PR from scratch. Chinese translation: `docs/upstream-pr.zh-CN.md`. Run this interactively; never submit via `gh` without the maintainer's explicit sign-off on the drafted content.
+
 ### Triage labels
 
 Default 5-role vocabulary (`needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix`), unmodified. See `docs/agents/triage-labels.md`.

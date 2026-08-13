@@ -84,7 +84,7 @@ Design notes worth keeping: `Markdown.tsx` is the single funnel for the prose le
 
 **Files:** `.gitignore`
 
-**Why:** Upstream ignores `.claude/` entirely. This fork carves out exceptions for `.claude/CLAUDE.md` (this repo's Claude Code guidance — see this file's own intro for why it lives there instead of a root `CLAUDE.md`, which upstream's `.gitignore` also excludes) and `.claude/skills/` (project-scoped Claude Code skills, e.g. `sync-upstream`), so both travel with the fork instead of being local-only. Everything else under `.claude/` (`settings.local.json`, etc.) stays ignored — genuinely personal/local state.
+**Why:** Upstream ignores `.claude/` entirely. This fork carves out exceptions for `.claude/CLAUDE.md` (this repo's Claude Code guidance — see this file's own intro for why it lives there instead of a root `CLAUDE.md`, which upstream's `.gitignore` also excludes) and `.claude/skills/` (project-scoped Claude Code skills, e.g. `upstream-sync`, `upstream-pr`), so both travel with the fork instead of being local-only. Everything else under `.claude/` (`settings.local.json`, etc.) stays ignored — genuinely personal/local state.
 
 **On upstream conflict:** Keep mine. If upstream adds new patterns to the same `# AI specific` block, reapply the two negation lines (`!.claude/CLAUDE.md`, `!.claude/skills/` + `!.claude/skills/**`) *after* every pattern that could match those paths — gitignore re-inclusion only wins over rules earlier in the file, and the existing bare `CLAUDE.md` rule matches `.claude/CLAUDE.md` too if the negation isn't placed after it.
 

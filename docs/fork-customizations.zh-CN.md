@@ -84,7 +84,7 @@
 
 **涉及文件：** `.gitignore`
 
-**为什么改：** 官方把整个 `.claude/` 目录都忽略掉了。这个 fork 专门开了两个例外：`.claude/CLAUDE.md`（本仓库给 Claude Code 用的项目说明，为什么放在这个位置而不是根目录的 `CLAUDE.md`——因为官方 `.gitignore` 里根目录的 `CLAUDE.md` 也被忽略了——见这份文件开头的说明）和 `.claude/skills/`（项目级 Claude Code 技能，比如 `sync-upstream` 这个）。这两个例外让它们能跟着 fork 走，而不是只存在于本地。`.claude/` 下面别的东西（`settings.local.json` 等）继续忽略——那些是真正的个人本地状态。
+**为什么改：** 官方把整个 `.claude/` 目录都忽略掉了。这个 fork 专门开了两个例外：`.claude/CLAUDE.md`（本仓库给 Claude Code 用的项目说明，为什么放在这个位置而不是根目录的 `CLAUDE.md`——因为官方 `.gitignore` 里根目录的 `CLAUDE.md` 也被忽略了——见这份文件开头的说明）和 `.claude/skills/`（项目级 Claude Code 技能，比如 `upstream-sync`、`upstream-pr` 这两个）。这两个例外让它们能跟着 fork 走，而不是只存在于本地。`.claude/` 下面别的东西（`settings.local.json` 等）继续忽略——那些是真正的个人本地状态。
 
 **同步官方时怎么办：** 保留我的。如果官方在同一个 `# AI specific` 区块里加了新的忽略规则，要把那两行"取消忽略"规则（`!.claude/CLAUDE.md`、`!.claude/skills/` + `!.claude/skills/**`）重新放到**所有**可能匹配到这两个路径的规则**后面**——gitignore 的"取消忽略"规则只有排在更前面的规则之后才会生效，现有的那条裸 `CLAUDE.md` 规则如果排在取消忽略规则前面，也会把 `.claude/CLAUDE.md` 重新忽略掉。
 
