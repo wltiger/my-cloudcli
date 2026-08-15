@@ -199,6 +199,13 @@ function AppContentInner() {
   useEffect(() => {
     const vv = window.visualViewport;
     if (!vv) return;
+    // window.innerHeight and vv.height aren't guaranteed to match with the
+    // keyboard closed — on standalone iOS PWAs they can differ by a constant,
+    // non-keyboard amount (e.g. disagreement over whether the home-indicator
+    // area counts). Track the smallest delta ever observed as the "no
+    // keyboard" baseline and only report the amount beyond it, so that
+    // constant offset doesn't read as a permanent phantom keyboard height.
+    let baseline = window.innerHeight - vv.height;
     let rafId: number | null = null;
     const update = () => {
       // Only resize matters — keyboard open/close changes vv.height.
@@ -216,7 +223,9 @@ function AppContentInner() {
       rafId = requestAnimationFrame(() => {
         rafId = requestAnimationFrame(() => {
           rafId = null;
-          const kb = Math.max(0, window.innerHeight - vv.height);
+          const delta = window.innerHeight - vv.height;
+          baseline = Math.min(baseline, delta);
+          const kb = Math.max(0, delta - baseline);
           document.documentElement.style.setProperty('--keyboard-height', `${kb}px`);
         });
       });
