@@ -199,16 +199,33 @@ function AppContentInner() {
   useEffect(() => {
     const vv = window.visualViewport;
     if (!vv) return;
+    let rafId: number | null = null;
     const update = () => {
       // Only resize matters — keyboard open/close changes vv.height.
       // Do NOT listen to scroll: on iOS Safari, scrolling content changes
       // vv.offsetTop which would make --keyboard-height fluctuate during
       // normal scrolling, causing the container to bounce up and down.
-      const kb = Math.max(0, window.innerHeight - vv.height);
-      document.documentElement.style.setProperty('--keyboard-height', `${kb}px`);
+      //
+      // Wait two frames before reading: the viewport meta's
+      // interactive-widget=resizes-content already shrinks window.innerHeight
+      // natively for the keyboard, but on standalone iOS PWAs it doesn't always
+      // settle in the same tick as this resize event. A same-tick read can catch
+      // window.innerHeight mid-transition and stack a second shift on top of the
+      // native one, so the container gets pushed up twice.
+      if (rafId !== null) cancelAnimationFrame(rafId);
+      rafId = requestAnimationFrame(() => {
+        rafId = requestAnimationFrame(() => {
+          rafId = null;
+          const kb = Math.max(0, window.innerHeight - vv.height);
+          document.documentElement.style.setProperty('--keyboard-height', `${kb}px`);
+        });
+      });
     };
     vv.addEventListener('resize', update);
-    return () => vv.removeEventListener('resize', update);
+    return () => {
+      vv.removeEventListener('resize', update);
+      if (rafId !== null) cancelAnimationFrame(rafId);
+    };
   }, []);
 
   return (
