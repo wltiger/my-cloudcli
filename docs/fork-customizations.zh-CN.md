@@ -10,11 +10,11 @@
 
 ## 1. 移动端紧凑侧边栏
 
-**涉及文件：** `src/constants/config.ts`、`src/components/sidebar/view/subcomponents/SidebarFooter.tsx`、`SidebarHeader.tsx`、`SidebarContent.tsx`
+**涉及文件：** `src/shared/utils.ts`、`src/components/sidebar/view/subcomponents/SidebarFooter.tsx`、`SidebarHeader.tsx`、`SidebarContent.tsx`
 
 **为什么改：** 隐藏移动端的 Report Issue/Discord 链接，标题改为点击直接打开 Settings，给项目列表腾空间。
 
-**同步官方时怎么办：** 保留我的。通过 `VITE_COMPACT_MOBILE_SIDEBAR` 开关控制（默认关闭），改动是在现有代码外面包一层条件判断，不是替换，冲突面小。冲突了就在官方改动过的代码外面重新套一遍条件分支。
+**同步官方时怎么办：** 保留我的。通过 `VITE_COMPACT_MOBILE_SIDEBAR` 开关控制（默认关闭），改动是在现有代码外面包一层条件判断，不是替换，冲突面小。冲突了就在官方改动过的代码外面重新套一遍条件分支。这个开关现在和官方自己的 `IS_PLATFORM` 放在同一个文件 `src/shared/utils.ts` 里（v1.37.2 删掉了 `src/constants/config.ts`，把内容挪了过去），所以官方以后再挪这个环境开关模块，这个 flag 跟着一起走就行。
 
 ## 2. 侧边栏收藏过滤
 
@@ -58,11 +58,11 @@
 
 ## 6. PWA / 标题名字统一改成 "CloudCLI"
 
-**涉及文件：** `index.html`、`public/manifest.json`、`src/utils/pageTitleNotification.ts`、`src/components/sidebar/view/subcomponents/SidebarProjectList.tsx`
+**涉及文件：** `index.html`、`public/manifest.json`、`src/utils/pageTitleNotification.ts`、`src/utils/pageTitle.ts`（含其测试）
 
 **为什么改：** 之前 App 名字有三个不一致的写法（manifest/标题写的是"CloudCLI UI"，iOS 专用的 meta 标签写的是更旧的"Claude UI"），统一成产品现在的名字"CloudCLI"。
 
-**同步官方时怎么办：** 保留我的，但先查一下——如果官方以后也把名字统一了，这条自定义可能就完全多余了，直接删掉即可。
+**同步官方时怎么办：** 保留我的，但先查一下——如果官方以后也把名字统一了，这条自定义可能就完全多余了，直接删掉即可。到 v1.37.2 为止，浏览器标签页那一半已经缩成一个常量了：官方把标题逻辑抽到了 `src/utils/pageTitle.ts` 的 `getPageTitle()`（顺带新增了"选中会话时标签页显示会话名"这个行为，本 fork 原来写在 `SidebarProjectList.tsx` 里的版本没有），所以现在整个采用官方的函数，只把里面的 `DEFAULT_PAGE_TITLE` 从 "CloudCLI UI" 改成 "CloudCLI"，并同步改 `pageTitle.test.ts` 里的两个断言。以后冲突就重新做这个改名，不要再把标题逻辑写回 fork 这边。
 
 ## 7. 记住上次打开的 session（仅限已安装的 PWA）
 
@@ -102,7 +102,7 @@
 
 **为什么改：** 手机上聊天区太窄，长回复读起来费劲；AskUserQuestion 的选项标题和说明被挤到根本分不出哪个是哪个——而在外面用手机回答这类提问，恰恰是这个面板最主要的使用场景。两处共用一个 `FullscreenSurface`（portal 到 body 的 `inset-0` 面板，Esc 关闭，锁 body 滚动，带安全区内边距）：消息复制按钮旁边加一个全屏按钮，AskUserQuestion 头部加一个（进全屏时同时放开选项列表的 `max-h-48` 并放大字号）。桌面端也显示，同一套代码，不做断点分支。答完自动退出全屏，状态不持久化。全屏容器还带了：标题栏里的复制按钮、下滑关闭手势（只在内容滚到顶部时才生效，不会跟滚动打架）、以及 `max-w-3xl` 的最大宽度，避免宽屏桌面上一行拉太长读不动。AskUserQuestion 还额外把 Skip/Back/Submit 那条操作栏固定在视口底部（走全屏容器的 `footer` 插槽——用 `sticky` 会被卡片自己的 `overflow-hidden` 困住不生效），并且标题栏显示会话名，通过 `PermissionPanelProps` 上新增的可选字段 `sessionTitle` 一路传下来。
 
-**同步官方时怎么办：** 保留我的。`FullscreenSurface` 是全新文件，官方没有对应物；`MessageComponent.tsx`（一行 import + 控件行里一项）和 `AskUserQuestionPanel.tsx`（state、头部按钮、底部的 `panel` 变量和包装、几处 `isFullscreen ?` 三元 class）改动都很小，官方就算重写了这两个文件也容易重新应用。
+**同步官方时怎么办：** 保留我的。`FullscreenSurface` 是全新文件，官方没有对应物；`MessageComponent.tsx`（一行 import + 控件行里一项）和 `AskUserQuestionPanel.tsx`（state、头部按钮、底部的 `panel` 变量和包装、几处 `isFullscreen ?` 三元 class）改动都很小，官方就算重写了这两个文件也容易重新应用。从 v1.37.2 起，全屏标题栏的会话名改用官方的 `getSessionTitle()`（`src/utils/pageTitle.ts`），之前 fork 是在 `ChatInterface.tsx` 里自己重复实现了一遍——一个副作用是：没有名字的会话现在显示 "New Session"，而不是像以前那样不显示标题。
 
 ## 12. 触屏能打开的文件树菜单 + 复制相对路径
 
@@ -110,7 +110,7 @@
 
 **为什么改：** 官方的文件树菜单只挂在 `onContextMenu` 上，触屏设备等于**整个菜单都打不开**——重命名、删除、下载、新建文件/文件夹、复制路径全没了。这里故意做了两个入口，方便真机上比一比再决定要不要砍掉一个：长按 500ms（手指移动超过 10px 就放弃，不影响滚动），以及每行末尾一个只在 `md:` 以下渲染的 `⋮` 按钮。两者共用同一份菜单状态；`FileContextMenu` 因此多支持了函数式 children，让每一行能自己渲染触发按钮而不用接管菜单状态。detailed 视图里手机上 `⋮` 占掉权限列——那一列本来就窄到放不下 `rw-rw-rw-` 加一个按钮。另外在官方的绝对路径"复制路径"旁边加了"复制相对路径"（两个平级菜单项，不做二级菜单），并且两个都改走项目自己的 `copyTextToClipboard`——官方直接调 `navigator.clipboard`，成功提示还是同步弹的，复制失败时会同时看到"复制路径失败"和"路径已复制到剪贴板"。
 
-**同步官方时怎么办：** 保留我的，但先看一眼入口：官方要是自己加了触屏入口，就用官方的，把重复的那个删掉。剪贴板兜底和重复 toast 属于纯 bug 修复、不是 fork 偏好，值得给官方提 PR。注意这条**动了** `src/i18n/locales/*/common.json`（在官方已有的 `fileTree.context` 块里加了两个 key），和第 3 条刻意只用 `t(key, '英文兜底')` 的做法不一样——那个块是官方的，这里大概率会冲突，重新把两个 key 加回去即可。
+**同步官方时怎么办：** 保留我的，但先看一眼入口：官方要是自己加了触屏入口，就用官方的，把重复的那个删掉。v1.37.2 在这几个文件里加了上传功能（拖拽、右键菜单项、目录行的 hover 上传按钮），但没碰"菜单在触屏上够不着"这个问题；它那个 hover 按钮是绝对定位在行的最右边，正好压在 `⋮` 上，所以合并时改成在三种视图模式里都把它内联渲染到 `menuButton` 旁边——官方以后再改行样式，保持这个形状。剪贴板兜底和重复 toast 属于纯 bug 修复、不是 fork 偏好，值得给官方提 PR。注意这条**动了** `src/i18n/locales/*/common.json`（在官方已有的 `fileTree.context` 块里加了两个 key），和第 3 条刻意只用 `t(key, '英文兜底')` 的做法不一样——那个块是官方的，这里大概率会冲突，重新把两个 key 加回去即可。
 
 ## 13. 从聊天标题进入的跨项目会话快切 ❌ 已废弃（v1.37.1）
 
@@ -134,7 +134,7 @@
 
 **为什么改：** 官方把标题和标签 pill 放在同一行。`lg:` 以下 pill 本来就只剩图标，但数量不固定——4 个内置，加可选的 Browser 和 Tasks，再加每个已启用插件一个——所以 375px 的手机上这排要占 148–220px，标题只剩不到 150px（6 个标签时实测 51px）。官方自己的缓解手段是给这排加横向滚动和左右渐变遮罩，能挡住溢出，但一点宽度都没还给标题。这在本 fork 里比在官方那边更亏，因为第 13 条把聊天标题变成了跨项目会话快切入口，挤窄标题等于同时挤掉一个导航入口。现在 768px 以下——用的就是 header 已经在给汉堡按钮用的那个 `isMobile`——整排收成一个约 48px 的 pill，里面是当前标签的图标加一个箭头；点开是下拉菜单，按原顺序列出全部标签，插件组前面加分隔线，当前项高亮并标 `aria-current`。标题实测宽度从 51px 变成 217px。桌面端一点没动，滚动和渐变遮罩都原样保留。
 
-**同步官方时怎么办：** 保留我的。上游足迹刻意做得极小且全是新增：`MainContentTabSwitcher.tsx` 里一个 prop 加一个提前 `return`、`MainContentHeader.tsx` 里一行 prop 透传、以及 `ActionMenu` 上四个可选 prop（`triggerIcon`、`showChevron`、菜单项的 `iconNode` 和 `isActive`）——它原有的两处调用一个都没用到。菜单代码全在 fork 自有的 `MainContentTabMenu.tsx` 里，冲突后把那几处放回去即可。那个提前 `return` 是**故意**放在标签列表构造完之后的：两种渲染共用同一份列表，官方以后加内置标签，移动端菜单自动就有了——重新应用时别改这个位置。下拉用的是 `ActionMenu` 的 `portal` 模式，也是故意的：header 那个标签槽是 `overflow-hidden`，绝对定位的菜单会被裁掉；官方要是重构了那个容器，先确认裁剪问题再考虑换掉 portal。文案用 `t(key, { defaultValue })`，没动 `src/i18n/locales/**`（和第 3、13 条一致）。官方哪天自己做了移动端标签方案，就用官方的，把这条删掉。
+**同步官方时怎么办：** 保留我的。上游足迹刻意做得极小且全是新增：`MainContentTabSwitcher.tsx` 里一个 prop 加一个提前 `return`、`MainContentHeader.tsx` 里一行 prop 透传、以及 `ActionMenu` 上四个可选 prop（`triggerIcon`、`showChevron`、菜单项的 `iconNode` 和 `isActive`）——它原有的两处调用一个都没用到。菜单代码全在 fork 自有的 `MainContentTabMenu.tsx` 里，冲突后把那几处放回去即可。那个提前 `return` 是**故意**放在标签列表构造完之后的：两种渲染共用同一份列表，官方以后加内置标签，移动端菜单自动就有了——重新应用时别改这个位置。下拉用的是 `ActionMenu` 的 `portal` 模式，也是故意的：header 那个标签槽是 `overflow-hidden`，绝对定位的菜单会被裁掉；官方要是重构了那个容器，先确认裁剪问题再考虑换掉 portal。文案用 `t(key, { defaultValue })`，没动 `src/i18n/locales/**`（和第 3、13 条一致）。官方哪天自己做了移动端标签方案，就用官方的，把这条删掉。⚠️ v1.37.2 已经朝这个方向走了一半：标签栏现在是个正经的横向滚动条（边缘渐变、桌面端左右箭头按钮、滚轮横滚、`role="tab"` 键盘导航），移动端只在当前标签上显示文字。但那仍然是"滚动"不是"折叠"，标题拿不回宽度，所以这条先保留了——下次同步别闭眼重新应用，先在真机上对比一下再决定。另外第 13 条的跨项目会话切换器已经退休，所以上面"挤压导航入口"那半个理由现在不成立了。
 
 ## 16. 推送通知按 session 收敛成一条，打开会话或在别的设备上处理完都会清掉
 
@@ -181,3 +181,11 @@
 这一版刻意只做手工、一次性的基础能力——"自动识别中转站限流文案、自动建一条定时"是明确留到后面做的扩展，这次不实现。触发是无头(headless)执行的（没有真实 WebSocket 客户端连着），所以如果凑巧开着这个 session 的页面，看不到回复实时流式进来——页面只会通过一条 `session_upserted` 广播感知到"这个 session 变了"，而前端现在把这条事件当成只更新侧边栏用，没有处理成"刷新当前打开的会话"；把无头触发的结果真正实时推进已打开的页面，这次没做。定时时间到了但服务当时没在跑（比如电脑关机）：只在一个可配置的宽限窗口内（`SCHEDULED_TRIGGER_GRACE_WINDOW_MINUTES`，默认 60 分钟）补发，超过宽限窗口就标记为 `expired`，不会悄悄丢掉，也不会不管多久之前的都硬发一条出去。
 
 **同步官方时怎么办：** 保留我的。新增一张表 + 一个独立模块，本身冲突面很小；唯一会碰到官方也在维护的文件的地方都是纯增量式的（`schema.ts` 里 `INIT_SCHEMA_SQL` 末尾追加一段 `CREATE TABLE IF NOT EXISTS` + 两条索引，`database/index.ts` 里加一行 repository 导出，`server/index.ts` 里加一个 import + 两行路由挂载/轮询启动，`ChatComposer.tsx` 里在已有的 `ComposerPermissionMenu` 旁边加一个 `ComposerScheduleMenu` 位置，`ChatInterface.tsx` 里多传一个 `sessionId` prop，通知模块的 orchestrator 里加两条 `CODE_MAP` 文案)。如果官方改了 `chat-websocket.service.ts` 里 `runtimeOptions` 的拼法（从 session 行取 `cwd`/`projectPath`），要同步改一下 `scheduled-trigger.service.ts` 的 `fireTrigger()`——这段是特意从那边抄过来的，没有抽成共用函数。如果官方以后做了真正的"无头触发结果推进已打开页面"机制，这里应该改用官方的，而不是继续用现在这个只更新侧边栏的 `session_upserted` 广播。
+
+## 21. 宽表格改成横向滚动，不再挤成一团
+
+**涉及文件：** `src/components/chat/view/subcomponents/Markdown.tsx`
+
+**为什么改：** 官方的表格渲染是外层 `overflow-x-auto` 配上 `min-w-full` 的表格，这样永远不会溢出——列一多，每个单元格就一路挤到看不清，外层根本没东西可滚。加上 `w-max` 让表格按自然宽度撑开，外层才真的能滚；`th`/`td` 上的 `min-w-28`/`max-w-[22rem]` 防止单列塌掉或者撑太宽；`overscroll-x-contain` 防止在表格里横滑时把后面的整页也一起带走。
+
+**同步官方时怎么办：** 这不是 fork 偏好，是纯 bug 修复，值得给官方提 PR；官方接受了就把这条删掉。在那之前保留我的，但要**合并、不要替换**：v1.37.2 重新设计了这几行的样式（圆角边框容器、单元格去边框、用 `my-0` 抵消 Tailwind Typography 的表格外边距），整段用 fork 这边覆盖会把这些静悄悄地退回去。做法是采用官方的 class，再把宽度/overscroll 这四个 class 加回去。

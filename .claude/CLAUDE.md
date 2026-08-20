@@ -20,7 +20,8 @@ npm run client             # frontend only
 npm run build               # build:client + build:server
 npm run typecheck           # tsc --noEmit for both src/ and server/
 npm run lint / lint:fix     # eslint src/ server/
-npm test                    # node's built-in test runner via tsx, globs server/**/*.test.{ts,js}
+npm test                    # backend: node's test runner via tsx, globs server/**/*.test.{ts,js}
+npm run test:client         # frontend: same runner, globs src/**/*.test.{ts,tsx}
 
 # run a single backend test file:
 npx tsx --tsconfig server/tsconfig.json --test server/modules/git/tests/git.test.ts
@@ -28,7 +29,7 @@ npx tsx --tsconfig server/tsconfig.json --test server/modules/git/tests/git.test
 npm run desktop:dev         # Electron shell against a running local dev server
 ```
 
-Frontend tests: there is no dedicated frontend test runner configured; `src/**/*.test.js` files (e.g. `src/utils/api.test.js`) are plain assertion scripts, not wired into `npm test`.
+`npm test` and `npm run test:client` are separate suites — running only `npm test` skips every frontend test. Legacy `src/**/*.test.js` files (e.g. `src/utils/api.test.js`) match neither glob and are plain assertion scripts nothing runs.
 
 `postinstall` runs `scripts/fix-node-pty.js` (native module patch). `prepare` installs husky hooks; pre-commit runs `lint-staged` (eslint on staged `src/**` and `server/**` files), commit-msg enforces Conventional Commits via commitlint.
 
@@ -91,14 +92,14 @@ Backend code follows a strict feature-module layout enforced by ESLint (`eslint-
 - `contexts/` — React context providers (Auth, Theme, WebSocket, Permission, Plugins, TaskMasterSettings…).
 - `stores/` — non-context app state (e.g. `useSessionStore.ts`, message reconciliation logic).
 - `utils/api.js` — the HTTP client wrapper for all `/api/*` calls.
-- `i18n/` — i18next setup; `locales/` holds per-language translation files (README/READMEs are translated into several languages too — keep `README.md` as the source of truth and mirror significant changes to `README.*.md` only if asked).
+- `i18n/` — i18next setup; `locales/` holds per-language translation files (README/READMEs are translated into several languages too — keep `docs/README.md` as the source of truth and mirror significant changes to `docs/README.*.md` only if asked).
 - `lib/`, `hooks/`, `types/` — shared frontend utilities, custom hooks, and TS type defs (`src/types/app.ts` holds the frontend `LLMProvider` union, kept in sync with the backend one).
 
 Vite dev server proxies `/api`, `/ws`, `/shell`, `/plugin-ws` to the Express backend (see `vite.config.js`); in production the Express server serves the built `dist/` directly (see `server/index.ts`).
 
 ## Plugin system
 
-`plugins/` holds installable plugins (each can add a frontend tab, optional Node backend service, and RPC over `/plugin-ws`). Plugin lifecycle (install/enable/start/stop) is managed by `server/modules/plugins/`. See `plugins/starter/` for the reference shape; the public plugin API is documented at cloudcli.ai/docs/plugin-overview (referenced from `README.md`).
+`plugins/` holds installable plugins (each can add a frontend tab, optional Node backend service, and RPC over `/plugin-ws`). Plugin lifecycle (install/enable/start/stop) is managed by `server/modules/plugins/`. See `plugins/starter/` for the reference shape; the public plugin API is documented at cloudcli.ai/docs/plugin-overview (referenced from `docs/README.md`).
 
 ## Electron desktop shell
 
