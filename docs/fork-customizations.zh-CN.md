@@ -126,7 +126,7 @@
 
 **为什么改：** 官方的 `installRuntime()` 用 `cwd: process.cwd()` 跑 `npm install --no-save --no-package-lock playwright`，但 `getPlaywright()` 是从模块自身所在位置去 `require('playwright')`。全局安装的 CloudCLI 下这是两棵完全不同的树：包会装到用户当时启动 CLI 的那个目录（多半是用户主目录），而从 `<npm root -g>/@cloudcli-ai/cloudcli/dist-server/server/modules/browser-use/` 往上找 `node_modules` 永远走不到那里。结果就是装其实成功了，设置页却一直显示 `Playwright: missing`，"Install Runtime" 按钮点多少次都像没反应——每次只是往同一个够不着的地方重装一遍。现在固定装到 `~/.cloudcli/browser-use/runtime`（和已有的 `profiles/` 并列），并先写一个私有 `package.json`，免得 npm 往上找项目根、把上层目录当成自己的工程；`getPlaywright()` 则先按模块自身位置解析，找不到再从这个目录解析。`runCommand()` 为此多了一个 `cwd` 参数。manifest 既然是自己的，去掉 `--no-save --no-package-lock` 就没有副作用，留着 lockfile 重装还更快。
 
-**同步官方时怎么办：** 这属于纯 bug 修复而不是 fork 偏好，值得给官方提 PR，官方收了就把这条删掉。在那之前保留我的，但要把 `installRuntime()` 和 `getPlaywright()` 当成一对看：两边必须配套才成立，官方要是改了其中一个，就两半一起重新应用，别只合一边留另一边。如果官方改成把 playwright 作为正式依赖发布，那这条整条丢掉即可——第一级解析本来就覆盖那种情况。
+**同步官方时怎么办：** 这属于纯 bug 修复而不是 fork 偏好。**别人已经报给官方了** —— [#995](https://github.com/siteboon/claudecodeui/pull/995) 提的方案和这里一模一样（同一个 `~/.cloudcli/browser-use/runtime` 目录、同样的解析顺序），[#1000](https://github.com/siteboon/claudecodeui/pull/1000) 和 [#917](https://github.com/siteboon/claudecodeui/pull/917) 是同一个根因；三个从 2026 年 6–7 月开到现在都没人回。别再报第四遍（见 `docs/pull-requests/PR04-browser-runtime-install-directory.zh-CN.md`）。其中任何一个合并了，就改用官方版本并退休这条。在那之前保留我的，但要把 `installRuntime()` 和 `getPlaywright()` 当成一对看：两边必须配套才成立，官方要是改了其中一个，就两半一起重新应用，别只合一边留另一边。如果官方改成把 playwright 作为正式依赖发布，那这条整条丢掉即可——第一级解析本来就覆盖那种情况。
 
 ## 15. 移动端把标签切换栏收成一个菜单
 
@@ -186,6 +186,6 @@
 
 **涉及文件：** `src/components/chat/view/subcomponents/Markdown.tsx`
 
-**为什么改：** 官方的表格渲染是外层 `overflow-x-auto` 配上 `min-w-full` 的表格，这样永远不会溢出——列一多，每个单元格就一路挤到看不清，外层根本没东西可滚。加上 `w-max` 让表格按自然宽度撑开，外层才真的能滚；`th`/`td` 上的 `min-w-28`/`max-w-[22rem]` 防止单列塌掉或者撑太宽；`overscroll-x-contain` 防止在表格里横滑时把后面的整页也一起带走。
+**为什么改：** 官方的表格渲染是外层 `overflow-x-auto` 配上 `min-w-full` 的表格。CSS 的 auto 表格布局只有在内容**再也没法换行**时才会溢出容器，所以一张普通文字的表格会把每一列压缩到接近"最长的那个单词"的宽度，而不是溢出——外层因此没东西可滚，文字挤到看不清。（如果表格里全是长的不可断开的串，它反而会溢出并正常滚动，所以这个 bug 看起来时有时无。）加上 `w-max` 让表格按自然宽度撑开，外层才真的能滚；`th`/`td` 上的 `min-w-28`/`max-w-[22rem]` 防止单列塌掉或者撑太宽；`overscroll-x-contain` 防止在表格里横滑时把后面的整页也一起带走。
 
 **同步官方时怎么办：** 这不是 fork 偏好，是纯 bug 修复，值得给官方提 PR；官方接受了就把这条删掉。在那之前保留我的，但要**合并、不要替换**：v1.37.2 重新设计了这几行的样式（圆角边框容器、单元格去边框、用 `my-0` 抵消 Tailwind Typography 的表格外边距），整段用 fork 这边覆盖会把这些静悄悄地退回去。做法是采用官方的 class，再把宽度/overscroll 这四个 class 加回去。
