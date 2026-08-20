@@ -12,6 +12,8 @@ export {
   // Used by provider runtimes to clear a resolved permission request's push
   // notification on every device, not just the one that answered it.
   notifyPermissionResolved,
+  // Used by provider runtimes to report background work that finished after its turn ended.
+  notifyBackgroundWorkCompleted,
 } from '@/modules/notifications/services/notification-orchestrator.service.js';
 export {
   registerDesktopNotificationClient,

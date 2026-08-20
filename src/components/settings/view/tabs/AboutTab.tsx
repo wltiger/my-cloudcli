@@ -2,8 +2,8 @@ import { Cloud, ExternalLink, MessageSquare, RefreshCw, Star, Users } from 'luci
 import { useCallback, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
-import { CLOUDCLI_WORDMARK_FONT_FAMILY } from '../../../../constants/branding';
-import { IS_PLATFORM } from '../../../../constants/config';
+import { CLOUDCLI_WORDMARK_FONT_FAMILY } from '../../../../shared/constants';
+import { IS_PLATFORM } from '../../../../shared/utils';
 import { useVersionCheck } from '../../../../hooks/useVersionCheck';
 import PremiumFeatureCard from '../PremiumFeatureCard';
 

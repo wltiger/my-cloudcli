@@ -129,6 +129,7 @@
       "download": "Descargar",
       "newFile": "Archivo nuevo",
       "newFolder": "Carpeta nueva",
+      "upload": "Subir archivos",
       "refresh": "Actualizar",
       "menuLabel": "Menú contextual de archivo",
       "openMenuFor": "Abrir menú de {{name}}",

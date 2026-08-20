@@ -1,4 +1,4 @@
-import type { ReactNode, RefObject } from 'react';
+import type { DragEvent, ReactNode, RefObject } from 'react';
 import type { FileTreeNode as FileTreeNodeType, FileTreeViewMode } from '../types/types';
 import FileTreeNode from './FileTreeNode';
 
@@ -17,7 +17,11 @@ type FileTreeListProps = {
   onCopyPath?: (item: FileTreeNodeType) => void;
   onCopyRelativePath?: (item: FileTreeNodeType) => void;
   onDownload?: (item: FileTreeNodeType) => void;
+  onUpload?: (path: string) => void;
   onRefresh?: () => void;
+  // Drag-and-drop upload targeting
+  dropTarget?: string | null;
+  onItemDragOver?: (event: DragEvent<HTMLDivElement>, targetPath: string) => void;
   // Rename state for inline editing
   renamingItem?: FileTreeNodeType | null;
   renameValue?: string;
@@ -43,7 +47,10 @@ export default function FileTreeList({
   onCopyPath,
   onCopyRelativePath,
   onDownload,
+  onUpload,
   onRefresh,
+  dropTarget,
+  onItemDragOver,
   renamingItem,
   renameValue,
   setRenameValue,
@@ -72,7 +79,10 @@ export default function FileTreeList({
           onCopyPath={onCopyPath}
           onCopyRelativePath={onCopyRelativePath}
           onDownload={onDownload}
+          onUpload={onUpload}
           onRefresh={onRefresh}
+          dropTarget={dropTarget}
+          onItemDragOver={onItemDragOver}
           renamingItem={renamingItem}
           renameValue={renameValue}
           setRenameValue={setRenameValue}

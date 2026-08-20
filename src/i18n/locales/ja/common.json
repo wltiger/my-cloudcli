@@ -129,6 +129,7 @@
       "download": "ダウンロード",
       "newFile": "新しいファイル",
       "newFolder": "新しいフォルダ",
+      "upload": "ファイルをアップロード",
       "refresh": "更新",
       "menuLabel": "ファイルのコンテキストメニュー",
       "openMenuFor": "{{name}} のメニューを開く",

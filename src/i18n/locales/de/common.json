@@ -129,6 +129,7 @@
       "download": "Herunterladen",
       "newFile": "Neue Datei",
       "newFolder": "Neuer Ordner",
+      "upload": "Dateien hochladen",
       "refresh": "Aktualisieren",
       "menuLabel": "Datei-Kontextmenü",
       "openMenuFor": "Menü für {{name}} öffnen",

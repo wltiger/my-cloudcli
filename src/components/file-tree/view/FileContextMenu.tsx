@@ -1,6 +1,6 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type ReactNode, type TouchEvent as ReactTouchEvent } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Copy, CornerUpLeft, Download, FileText, FolderPlus, Pencil, RefreshCw, Trash2, type LucideIcon } from 'lucide-react';
+import { Copy, CornerUpLeft, Download, FileText, FolderPlus, Pencil, RefreshCw, Trash2, Upload, type LucideIcon } from 'lucide-react';
 import { cn } from '../../../lib/utils';
 
 type FileContextItem = {
@@ -58,6 +58,7 @@ export default function FileContextMenu({
   onDelete,
   onNewFile,
   onNewFolder,
+  onUpload,
   onRefresh,
   onCopyPath,
   onCopyRelativePath,
@@ -71,6 +72,7 @@ export default function FileContextMenu({
   onDelete?: (item: FileContextItem) => void;
   onNewFile?: (path: string) => void;
   onNewFolder?: (path: string) => void;
+  onUpload?: (path: string) => void;
   onRefresh?: () => void;
   onCopyPath?: (item: FileContextItem) => void;
   onCopyRelativePath?: (item: FileContextItem) => void;
@@ -223,6 +225,12 @@ export default function FileContextMenu({
           onSelect: () => onNewFolder?.(item.path),
         },
         {
+          key: 'upload',
+          icon: Upload,
+          label: t('fileTree.context.upload', 'Upload Files'),
+          onSelect: () => onUpload?.(item.path),
+        },
+        {
           key: 'rename',
           icon: Pencil,
           label: t('fileTree.context.rename', 'Rename'),
@@ -272,6 +280,12 @@ export default function FileContextMenu({
         onSelect: () => onNewFolder?.(''),
       },
       {
+        key: 'upload',
+        icon: Upload,
+        label: t('fileTree.context.upload', 'Upload Files'),
+        onSelect: () => onUpload?.(''),
+      },
+      {
         key: 'refresh',
         icon: RefreshCw,
         label: t('fileTree.context.refresh', 'Refresh'),
@@ -279,7 +293,7 @@ export default function FileContextMenu({
         showDividerBefore: true,
       },
     ];
-  }, [item, onCopyPath, onCopyRelativePath, onDelete, onDownload, onNewFile, onNewFolder, onRefresh, onRename, t]);
+  }, [item, onCopyPath, onCopyRelativePath, onDelete, onDownload, onNewFile, onNewFolder, onRefresh, onRename, onUpload, t]);
 
   useEffect(() => {
     if (!isMenuOpen) {

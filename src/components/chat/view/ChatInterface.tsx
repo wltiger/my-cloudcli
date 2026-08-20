@@ -11,12 +11,14 @@ import { useChatSessionState } from '../hooks/useChatSessionState';
 import { useChatRealtimeHandlers } from '../hooks/useChatRealtimeHandlers';
 import { useChatComposerState } from '../hooks/useChatComposerState';
 import { useSessionStore } from '../../../stores/useSessionStore';
+import { getSessionTitle } from '../../../utils/pageTitle';
 
 import ChatMessagesPane from './subcomponents/ChatMessagesPane';
 import ChatComposer from './subcomponents/ChatComposer';
 import CommandResultModal from './subcomponents/CommandResultModal';
 
 function ChatInterface({
+  isActive,
   selectedProject,
   selectedSession,
   ws,
@@ -120,7 +122,9 @@ function ChatInterface({
     scrollToBottom,
     scrollToBottomAndReset,
     handleScroll,
+    requestLatestMessages,
   } = useChatSessionState({
+    isActive,
     selectedProject,
     selectedSession,
     ws,
@@ -221,20 +225,16 @@ function ChatInterface({
 
   // Shown as the header of anything this session opens fullscreen (currently
   // the AskUserQuestion panel), so the question is attributable when it fills
-  // the whole screen. Mirrors MainContentTitle's own session naming.
-  const sessionTitle = selectedSession
-    ? (selectedSession.__provider === 'cursor'
-      ? (selectedSession.name as string | undefined)
-      : (selectedSession.summary as string | undefined)) || undefined
-    : undefined;
+  // the whole screen. Same naming the browser tab title uses.
+  const sessionTitle = selectedSession ? getSessionTitle(selectedSession) : undefined;
 
-  // On WebSocket reconnect, re-fetch the current session's messages from the
-  // server so missed streaming events are shown, then re-subscribe — the
+  // On WebSocket reconnect, request a bounded persisted-tail sync (deferred
+  // while Chat is hidden), then re-subscribe — the
   // `chat_subscribed` ack restores or clears the activity indicator, replays
   // missed live events, and re-attaches a still-running stream to this socket.
   const handleWebSocketReconnect = useCallback(async () => {
     if (!selectedProject || !selectedSession) return;
-    await sessionStore.refreshFromServer(selectedSession.id);
+    await requestLatestMessages(selectedSession.id, isActive);
     statusCheckSentAtRef.current.set(selectedSession.id, Date.now());
     sendMessage({
       type: 'chat.subscribe',
@@ -243,9 +243,10 @@ function ChatInterface({
         lastSeq: lastSeqRef.current.get(selectedSession.id) ?? 0,
       }],
     });
-  }, [selectedProject, selectedSession, sendMessage, sessionStore]);
+  }, [isActive, requestLatestMessages, selectedProject, selectedSession, sendMessage]);
 
   useChatRealtimeHandlers({
+    isActive,
     subscribe,
     provider,
     selectedSession,
@@ -260,6 +261,7 @@ function ChatInterface({
     onSessionProcessing,
     onSessionIdle,
     onWebSocketReconnect: handleWebSocketReconnect,
+    requestLatestMessages,
     sessionStore,
   });
 

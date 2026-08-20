@@ -1,6 +1,6 @@
-import type { ReactNode, RefObject } from 'react';
+import type { DragEvent, ReactNode, RefObject } from 'react';
 import { useTranslation } from 'react-i18next';
-import { ChevronRight, Folder, FolderOpen, MoreVertical } from 'lucide-react';
+import { ChevronRight, Folder, FolderOpen, MoreVertical, Upload } from 'lucide-react';
 import { cn } from '../../../lib/utils';
 import type { FileTreeNode as FileTreeNodeType, FileTreeViewMode } from '../types/types';
 import { Input } from '../../../shared/view/ui';
@@ -22,7 +22,11 @@ type FileTreeNodeProps = {
   onCopyPath?: (item: FileTreeNodeType) => void;
   onCopyRelativePath?: (item: FileTreeNodeType) => void;
   onDownload?: (item: FileTreeNodeType) => void;
+  onUpload?: (path: string) => void;
   onRefresh?: () => void;
+  // Drag-and-drop upload targeting
+  dropTarget?: string | null;
+  onItemDragOver?: (event: DragEvent<HTMLDivElement>, targetPath: string) => void;
   // Rename state for inline editing
   renamingItem?: FileTreeNodeType | null;
   renameValue?: string;
@@ -38,6 +42,13 @@ type TreeItemIconProps = {
   isOpen: boolean;
   renderFileIcon: (filename: string) => ReactNode;
 };
+
+// A file dropped onto a file row should land next to it, in its parent folder.
+function getParentDirectoryPath(itemPath: string) {
+  const segments = itemPath.split(/[\\/]/);
+  segments.pop();
+  return segments.join('/');
+}
 
 function TreeItemIcon({ item, isOpen, renderFileIcon }: TreeItemIconProps) {
   if (item.type === 'directory') {
@@ -96,7 +107,10 @@ export default function FileTreeNode({
   onCopyPath,
   onCopyRelativePath,
   onDownload,
+  onUpload,
   onRefresh,
+  dropTarget,
+  onItemDragOver,
   renamingItem,
   renameValue,
   setRenameValue,
@@ -110,6 +124,8 @@ export default function FileTreeNode({
   const isOpen = isDirectory && expandedDirs.has(item.path);
   const hasChildren = Boolean(isDirectory && item.children && item.children.length > 0);
   const isRenaming = renamingItem?.path === item.path;
+  const dragTargetPath = isDirectory ? item.path : getParentDirectoryPath(item.path);
+  const isDropTarget = isDirectory && dropTarget === item.path;
 
   const nameClassName = cn(
     'text-[13px] leading-tight truncate',
@@ -125,6 +141,8 @@ export default function FileTreeNode({
       : 'group flex items-center gap-1.5 py-[3px] pr-2 cursor-pointer rounded-sm hover:bg-accent/60 transition-colors duration-100',
     isDirectory && isOpen && 'border-l-2 border-primary/30',
     (isDirectory && !isOpen) || !isDirectory ? 'border-l-2 border-transparent' : '',
+    'relative',
+    isDropTarget && 'bg-blue-500/10 ring-1 ring-inset ring-blue-500/40',
   );
 
   // Render rename input if this item is being renamed
@@ -158,6 +176,26 @@ export default function FileTreeNode({
     );
   }
 
+  // Upstream renders this as an absolutely-positioned overlay at the row's right
+  // edge, which would sit on top of the row menu button; inline next to it instead.
+  const uploadHoverButton = isDirectory && onUpload && (
+    <button
+      type="button"
+      onClick={(event) => {
+        event.stopPropagation();
+        onUpload(item.path);
+      }}
+      title={t('fileTree.uploadToFolder', 'Upload files to "{{folder}}"', { folder: item.name })}
+      aria-label={t('fileTree.uploadToFolder', 'Upload files to "{{folder}}"', { folder: item.name })}
+      className={cn(
+        'shrink-0 rounded p-1 text-muted-foreground opacity-0 transition-opacity',
+        'group-hover:opacity-100 focus-visible:opacity-100 hover:bg-accent hover:text-foreground',
+      )}
+    >
+      <Upload className="h-3.5 w-3.5" />
+    </button>
+  );
+
   const renderRowContent = (trigger?: FileContextMenuTrigger) => {
     const menuButton = trigger ? (
       <RowMenuButton
@@ -171,6 +209,7 @@ export default function FileTreeNode({
         className={rowClassName}
         style={{ paddingLeft: `${level * 16 + 4}px` }}
         onClick={() => onItemClick(item)}
+        onDragOver={onItemDragOver ? (event) => onItemDragOver(event, dragTargetPath) : undefined}
       >
         {viewMode === 'detailed' ? (
           <>
@@ -187,6 +226,7 @@ export default function FileTreeNode({
               <span className={cn('mr-auto truncate', menuButton && 'hidden md:inline')}>
                 {item.permissionsRwx || ''}
               </span>
+              {uploadHoverButton}
               {menuButton}
             </div>
           </>
@@ -203,6 +243,7 @@ export default function FileTreeNode({
                   <span className="font-mono">{item.permissionsRwx}</span>
                 </>
               )}
+              {uploadHoverButton}
               {menuButton}
             </div>
           </>
@@ -210,7 +251,12 @@ export default function FileTreeNode({
           <>
             <TreeItemIcon item={item} isOpen={isOpen} renderFileIcon={renderFileIcon} />
             <span className={nameClassName}>{item.name}</span>
-            {menuButton && <span className="ml-auto flex items-center">{menuButton}</span>}
+            {(uploadHoverButton || menuButton) && (
+              <span className="ml-auto flex items-center gap-0.5">
+                {uploadHoverButton}
+                {menuButton}
+              </span>
+            )}
           </>
         )}
       </div>
@@ -230,6 +276,7 @@ export default function FileTreeNode({
           onDelete={onDelete}
           onNewFile={onNewFile}
           onNewFolder={onNewFolder}
+          onUpload={onUpload}
           onCopyPath={onCopyPath}
           onCopyRelativePath={onCopyRelativePath}
           onDownload={onDownload}
@@ -266,7 +313,10 @@ export default function FileTreeNode({
               onCopyPath={onCopyPath}
               onCopyRelativePath={onCopyRelativePath}
               onDownload={onDownload}
+              onUpload={onUpload}
               onRefresh={onRefresh}
+              dropTarget={dropTarget}
+              onItemDragOver={onItemDragOver}
               renamingItem={renamingItem}
               renameValue={renameValue}
               setRenameValue={setRenameValue}
