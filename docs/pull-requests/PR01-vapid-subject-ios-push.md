@@ -1,7 +1,7 @@
 # PR01: VAPID `sub` uses the reserved `.local` TLD, so APNs rejects every iOS push
 
-**Status:** Draft — pending review
-**Type:** Issue
+**Status:** Won't submit — maintainer decided not to spend upstream review attention on it (2026-08-21). Kept for the verification work; the fork carries the fix either way (customization #10).
+**Type:** would have been an Issue
 **Target:** `siteboon/claudecodeui`
 **Found:** 2026-08-21, while syncing this fork to v1.37.2 (the underlying finding predates the sync — see fork customization #10)
 
@@ -114,9 +114,10 @@ Happy to open a PR if you'd like one — it seemed better to report the finding 
 - Related fork state: this is fork customization #10. If upstream ships any routable value, that entry gets retired — the specific string does not matter to this fork.
 - Prior-art caution: `siteboon/claudecodeui#1132` was a plain-looking fix rejected on design grounds. This one has no design tradeoff on the *behavior* side (the current value is simply non-functional for one platform); the only choice is which replacement string, which is why the issue defers that to the maintainer.
 
-## Open questions before this ships
+## Decision (2026-08-21)
 
-1. Title/body OK as-is, or changes wanted?
-2. Issue, or go straight to a one-line PR? (Note: three browser-runtime PRs — #995, #1000, #917 — have sat open with no maintainer response since June–July 2026, which suggests PRs may not be the faster path here.)
-3. Submit under `wltiger`, or another identity?
-4. Should the "make it configurable via env" suggestion stay in, or does it muddy a one-line bug report?
+**Not submitted.** The maintainer's standing bar for this fork is "don't open an upstream PR unless it's necessary", and under that bar this did not clear it. Upstream's bottleneck is visibly review attention, not awareness — #995, #1000 and #917 have sat open and unanswered since June–July 2026 — so each submission spends a scarce resource.
+
+What tipped it: the impact is real and large (no iOS device has ever received a push from an unmodified install), but it costs this fork nothing — customization #10 already fixes it here, and it would stay fixed whether or not upstream ever acts.
+
+The verification above is kept because it is reusable. Revisit if the calculus changes — e.g. upstream starts responding to PRs again, or this stops being purely upstream's problem and starts costing this fork something on a sync.

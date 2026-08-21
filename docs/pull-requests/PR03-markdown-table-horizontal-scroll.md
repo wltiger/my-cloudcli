@@ -1,7 +1,7 @@
 # PR03: Wide markdown tables compress instead of scrolling
 
-**Status:** Draft — pending review
-**Type:** PR
+**Status:** Won't submit — maintainer decided not to spend upstream review attention on it (2026-08-21). Kept for the verification work; the fork carries the fix either way (customization #21).
+**Type:** would have been a PR
 **Target:** `siteboon/claudecodeui`
 **Found:** 2026-08-21, while syncing this fork to v1.37.2 — v1.37.2's table restyle collided with this fork's existing fix, which is what surfaced it
 
@@ -51,7 +51,19 @@ This is why the symptom looks intermittent: a table whose cells contain long unb
 - `min-w-28` / `max-w-[22rem]` on `th`/`td` — floors a column so it cannot collapse to one character, and caps it so a single verbose cell cannot stretch the table arbitrarily wide.
 - `overscroll-x-contain` on the wrapper — a horizontal swipe that reaches the end of the table stops there instead of chaining to the page/history behind it. This matters on touch, where the gesture is otherwise easy to trigger by accident.
 
-I have exercised this in the fork's own chat view; I have not benchmarked it against every locale or CJK text, where min-content behaves differently (per-character breaking), so the caps may want different values there — flagged in the open questions below.
+**Measured, 2026-08-21.** Rendered two tables side by side in a live chat view at a 743px content column — identical markup and Tailwind classes, differing only in the three classes above. 8 columns, each cell "The quick brown fox jumps over the lazy dog repeatedly":
+
+| | with the fix | upstream as shipped |
+|---|---|---|
+| wrapper visible width | 743px | 743px |
+| table content width | **2816px** | 743px |
+| wrapper actually scrolls | **yes** | **no** |
+| first column width | 352px | **92px** |
+| body cell height | 57px | **137px** (text wrapped to ~4 lines) |
+
+That is the whole claim, measured: without `w-max` the table never exceeds its wrapper, so `overflow-x-auto` never engages and the columns collapse instead.
+
+Not measured: CJK text, which breaks per-character and so has a much narrower min-content width — the compression is worse there, but the `22rem` cap may also be wrong for it. Flagged in the open questions below.
 
 ## Draft title
 
@@ -117,9 +129,10 @@ The v1.37.2 restyle (rounded wrapper, borderless cells, `my-0`) is untouched; th
 - `CONTRIBUTING.md` invites direct PRs for bug fixes. This is CSS-only, additive, and preserves v1.37.2's fresh restyle rather than reverting any of it — so it shouldn't read as re-litigating a design decision the maintainer just made.
 - Related fork state: this is fork customization #21. If upstream takes it, that entry gets retired.
 
-## Open questions before this ships
+## Decision (2026-08-21)
 
-1. Title/body OK as-is, or changes wanted?
-2. The `22rem` cap and `28` (7rem) floor are this fork's tuning, not derived from anything. Propose them as-is, or drop the cap/floor and submit only `w-max` + `overscroll-x-contain` — a smaller, harder-to-argue-with change that leaves the column-width tuning to upstream?
-3. CJK text breaks per-character, so min-content is much narrower and the compression is *worse*, but the `22rem` cap may also be wrong for it. Worth mentioning, or out of scope?
-4. Submit under `wltiger`, or another identity?
+**Not submitted.** The maintainer's standing bar for this fork is "don't open an upstream PR unless it's necessary", and under that bar this did not clear it. Upstream's bottleneck is visibly review attention, not awareness — #995, #1000 and #917 have sat open and unanswered since June–July 2026 — so each submission spends a scarce resource.
+
+What tipped it: upstream restyled these exact lines three days earlier in #1153, the `min-w-28`/`max-w-[22rem]` values are this fork's untested tuning rather than anything derived, and the bug only bites at ~6+ columns of prose. Proposing a change to freshly-touched lines with unjustified magic numbers is a weak first contribution.
+
+The verification above is kept because it is reusable. Revisit if the calculus changes — e.g. upstream starts responding to PRs again, or this stops being purely upstream's problem and starts costing this fork something on a sync.

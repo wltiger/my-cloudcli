@@ -1,7 +1,7 @@
 # PR02：文件树"Copy Path"会同时弹出成功和失败两个 toast
 
-**状态：** 草稿 — 待审阅
-**类型：** PR
+**状态：** 不提交 —— 维护者决定不为此花上游的 review 精力（2026-08-21）。保留验证记录；不管上游动不动，本 fork 靠定制 #12 已经走共享 helper 了。
+**类型：** —（本来会是 PR）
 **目标仓库：** `siteboon/claudecodeui`
 **发现于：** 2026-08-21，同步 v1.37.2 时（问题本身更早，见 fork 定制 #12）
 
@@ -44,7 +44,17 @@ const handleCopyPath = useCallback((item: FileTreeNode) => {
 
 **代码引用 #5 —— 调用点。** 文件树的 `handleCopyPath` 以 `onCopyPath` 暴露，只在 `FileContextMenu.tsx` 的 115 和 165 行被调用，两处都是 `onSelect: () => onCopyPath?.(item)`，都不用返回值。所以改成 `async` 对调用方不是破坏性变更，只需要把 hook 结果类型里 54 行的 `=> void` 改成 `=> Promise<void>`。
 
-**这段是我的推断。** 除了双 toast 这个观感问题，现在的代码在非安全上下文里是彻底放弃的：明文 HTTP 下 `navigator.clipboard` 是 `undefined`，`.writeText` 在取属性时就同步抛错、不是返回 rejected promise，`.catch` 根本不会跑，用户只看到成功 toast 而剪贴板是空的。走共享 helper 两个问题一起解决（helper 有 `execCommand` 兜底）。我**没有**在真实明文 HTTP 部署上实测过；同步抛错这一点是从规范推出来的，加上 #1104 的存在本身就说明编辑器那边也需要这个兜底。
+**实测，2026-08-21 —— 并且纠正了本文件早先的一个错误说法。** 本文件早先的版本写的是"明文 HTTP 下用户只看到成功 toast，剪贴板是空的"。**这是错的。** 在 Chromium 里对着一个真实的非安全源（`http://192.168.15.110:8099`，`window.isSecureContext === false`）跑上游 `handleCopyPath` 的原样结构，实测：
+
+| 环境 | `navigator.clipboard` | 上游代码的真实行为 |
+|---|---|---|
+| HTTPS / `localhost` | 有 | 一个成功 toast，路径已复制 —— 正确 |
+| 剪贴板权限被拒 | 有，promise reject | **两个 toast 同时出** —— 双 toast bug |
+| 局域网 IP + 明文 HTTP | **`undefined`** | `.writeText` 取属性时抛 `TypeError`，**发生在成功 toast 那行之前**，所以**一个 toast 都不出**，点击完全没反应 |
+
+所以明文 HTTP 局域网部署下的失效模式不是"toast 撒谎"，而是**菜单项彻底死掉 + 控制台一个未捕获的 `TypeError`**。同一次实测确认 `document.execCommand` 在那个上下文里**是可用的**，所以上游自己的 `copyTextToClipboard` 兜底确实能让它工作。
+
+这改变了整条的定性：双 toast 是观感的那一半；实质的那一半是"任何在局域网明文 HTTP 上自托管的人，Copy Path 都是静默失效的"—— 而 `.env.example` 默认 `HOST=0.0.0.0`，这是一种很正常的部署方式。
 
 ## 草稿标题 / 正文
 
@@ -57,9 +67,10 @@ const handleCopyPath = useCallback((item: FileTreeNode) => {
 - 这正是 `CONTRIBUTING.md` 说可以直接提 PR 的类型（"Bug fixes are always welcome … feel free to open a PR directly"）：没有新行为、没有设计取舍，而且是把调用点挪到**官方自己已有的** helper 上，不是引入 fork 的主张。
 - 关联：这是 fork 定制 #12 的一半。#12 的另一半（触屏菜单入口、"复制相对路径"）是 fork 偏好，**故意**不放进这个 PR —— 两个搅在一起会把一个干净的 bug 修复变成功能讨论。
 
-## 提交前需要你定的
+## 结论（2026-08-21）
 
-1. 标题/正文照发，还是要改？
-2. 直接提 PR（建分支 + `gh pr create`），还是先开 issue？按 `CONTRIBUTING.md` 提 PR 合适，但 #995/#1000/#917 从 6–7 月开到现在官方零回应。
-3. 用 `wltiger` 提，还是别的身份？
-4. 正文里现在点出了"同文件其他 handler 都写对了"这一点 —— 留着（显得这个修复是显而易见的一致性工作），还是删掉？
+**不提交。** 按"非必要不给上游提 PR"这条标准，没过线。上游的瓶颈明显是 review 精力而不是不知情（#995、#1000、#917 从 6–7 月挂到现在没人回），每提一次都在消耗稀缺资源。
+
+决定性的一点：实质影响只打到**局域网明文 HTTP** 的装机，而本 fork 早就走共享 helper 了。在 HTTPS 和 localhost 上 —— 也就是大多数人的跑法 —— 上游代码的行为是正确的。
+
+上面的验证记录保留，因为可复用（尤其是那张三种上下文的实测表）。什么时候重新考虑：上游开始正常回应 PR 了，或者这件事开始在同步时给本 fork 造成成本。

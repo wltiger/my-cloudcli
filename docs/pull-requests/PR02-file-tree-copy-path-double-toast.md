@@ -1,7 +1,7 @@
 # PR02: File tree "Copy Path" shows success and failure toasts at the same time
 
-**Status:** Draft — pending review
-**Type:** PR
+**Status:** Won't submit — maintainer decided not to spend upstream review attention on it (2026-08-21). Kept for the verification work; the fork carries the fix either way (customization #12).
+**Type:** would have been a PR
 **Target:** `siteboon/claudecodeui`
 **Found:** 2026-08-21, while syncing this fork to v1.37.2 (finding predates the sync — see fork customization #12)
 
@@ -45,7 +45,17 @@ const handleCopyPath = useCallback((item: FileTreeNode) => {
 
 **Direct code trace #5 — call sites.** The file-tree `handleCopyPath` is surfaced as `onCopyPath` and invoked only from `FileContextMenu.tsx` (lines 115 and 165), both as `onSelect: () => onCopyPath?.(item)`. Neither uses the return value, so making the handler `async` is not a breaking change for any caller; only the `handleCopyPath: (item: FileTreeNode) => void` line in the hook's own result type (line 54) needs to become `Promise<void>`.
 
-**Interpretation (mine).** Beyond the cosmetic double toast, the current code also gives up entirely on non-secure contexts — `navigator.clipboard` is undefined over plain HTTP, so `writeText` throws synchronously on property access rather than rejecting, and the user gets *only* the success toast with nothing copied. Routing through the shared helper fixes both, because the helper has the `execCommand` fallback. I have not measured the plain-HTTP path on a live deployment; the synchronous-throw behavior is inferred from the spec and from the fact that #1104 existed to add exactly that fallback in the editor.
+**Measured, 2026-08-21 — and it corrects an earlier draft of this entry.** An earlier version of this file claimed that over plain HTTP the user "gets only the success toast with nothing copied". That is wrong. Probed in Chromium against a real non-secure origin (`http://192.168.15.110:8099`, `window.isSecureContext === false`), running upstream's exact `handleCopyPath` shape:
+
+| Context | `navigator.clipboard` | What upstream's code actually does |
+|---|---|---|
+| HTTPS / `localhost` | present | one success toast, path copied — correct |
+| clipboard permission denied | present, promise rejects | **both toasts fire** — the double-toast bug |
+| plain HTTP on a LAN IP | **`undefined`** | `.writeText` throws `TypeError` on property access **before** the success-toast line, so **no toast appears at all** and the click does nothing |
+
+So the failure mode on a plain-HTTP LAN install is not a lying toast — it is a completely dead menu entry plus an uncaught `TypeError`. `document.execCommand` *is* available in that context (verified in the same probe), so upstream's own `copyTextToClipboard` fallback would make it work.
+
+This reframes the entry: the double toast is the cosmetic half; the substantive half is that Copy Path is silently non-functional for anyone self-hosting over plain HTTP on a LAN — which `.env.example`'s `HOST=0.0.0.0` default makes a normal deployment.
 
 ## Draft title
 
@@ -71,7 +81,7 @@ const handleCopyPath = useCallback((item: FileTreeNode) => {
 
 `writeText()` is async. The `return` exits the `.catch` callback, not `handleCopyPath`, so the success toast fires synchronously before the promise settles — on every call, regardless of outcome.
 
-There's a second half to it: over plain HTTP `navigator.clipboard` is `undefined`, so `.writeText` throws on property access rather than returning a rejected promise. The `.catch` never runs, and the user gets only the success toast with an empty clipboard.
+There's a worse half. Over plain HTTP on a LAN IP (a normal self-hosted setup — `.env.example` defaults to `HOST=0.0.0.0`) the page is not a secure context, so `navigator.clipboard` is `undefined`. `.writeText` then throws a `TypeError` on property access, *before* the success-toast line — so no toast appears at all, nothing is copied, and an uncaught `TypeError` lands in the console. Copy Path is simply dead there.
 
 **Fix**
 
@@ -96,19 +106,20 @@ This also makes the handler consistent with every other operation in the same ho
 **Testing**
 
 - HTTPS / localhost: one success toast, path is on the clipboard (unchanged behavior).
-- Plain HTTP: previously one *false* success toast and nothing copied; now the `execCommand` fallback copies and one success toast shows.
+- Plain HTTP on a LAN IP (`isSecureContext === false`): previously no toast at all, nothing copied, uncaught `TypeError`; now the `execCommand` fallback copies and one success toast shows.
 - Clipboard denied by permission policy: previously both toasts; now one error toast.
 
 ## Submission rationale
 
 - Duplicate-checked across 4 phrasings on both issues and PRs. The one near-miss (#1104) is a different file, a different feature, and closed unmerged for unrelated reasons.
-- Every claim is a direct code citation against `677b7ba`, except the plain-HTTP synchronous-throw detail, which is explicitly marked as inference.
+- Every claim is a direct code citation against `677b7ba` or a browser measurement recorded in Evidence. The plain-HTTP behavior was originally written as inference, then measured — and the measurement contradicted the inference, so the entry was corrected before any submission was considered.
 - This is the kind of change `CONTRIBUTING.md` says to send directly ("Bug fixes are always welcome … feel free to open a PR directly"): no new behavior, no design tradeoff, and it moves the call site onto upstream's own existing helper rather than introducing a fork opinion.
 - Related fork state: this is one half of fork customization #12. The *other* half of #12 (touch-reachable menu entry points, "Copy Relative Path") is a fork preference and is deliberately **not** part of this PR — proposing them together would turn a clean bug fix into a feature discussion.
 
-## Open questions before this ships
+## Decision (2026-08-21)
 
-1. Title/body OK as-is, or changes wanted?
-2. Send as a PR (branch + `gh pr create`), or file it as an issue first? A PR fits `CONTRIBUTING.md` here, but note #995/#1000/#917 have sat open with no maintainer response since June–July 2026.
-3. Submit under `wltiger`, or another identity?
-4. The draft body now points out that every other handler in the hook already does this correctly. Keep that (it makes the fix read as obviously-correct consistency work), or cut it as unnecessary?
+**Not submitted.** The maintainer's standing bar for this fork is "don't open an upstream PR unless it's necessary", and under that bar this did not clear it. Upstream's bottleneck is visibly review attention, not awareness — #995, #1000 and #917 have sat open and unanswered since June–July 2026 — so each submission spends a scarce resource.
+
+What tipped it: the substantive half only bites plain-HTTP LAN installs, and the fork already routes this through the shared helper. On HTTPS and localhost — how most people run it — upstream's code behaves correctly.
+
+The verification above is kept because it is reusable. Revisit if the calculus changes — e.g. upstream starts responding to PRs again, or this stops being purely upstream's problem and starts costing this fork something on a sync.
