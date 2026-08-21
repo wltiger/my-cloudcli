@@ -125,7 +125,7 @@ Whenever asked to sync/merge/pull in the latest official source (`upstream/main`
 
 ### Reporting to upstream
 
-Whenever a bug, a design gap, or a validated technical finding surfaces that's worth reporting back to upstream (`siteboon/claudecodeui`) — including at the end of an upstream sync — follow `docs/upstream-pr.md` (duplicate-check, evidence, draft, maintainer review, then submit) rather than drafting an issue/PR from scratch. Chinese translation: `docs/upstream-pr.zh-CN.md`. Run this interactively; never submit via `gh` without the maintainer's explicit sign-off on the drafted content.
+**The bar is high and the default is not to submit.** When a bug, design gap, or validated finding surfaces that looks reportable to upstream (`siteboon/claudecodeui`) — including at the end of an upstream sync — follow `docs/upstream-pr.md` rather than improvising. Run its "Is this worth submitting at all?" triage *first*, before any duplicate check or drafting: the load-bearing question is whether *not* submitting costs this fork anything, and severity to upstream's users is explicitly not sufficient on its own. Findings that don't clear the bar still get written up under `docs/pull-requests/` with `Status: Won't submit — {reason}` — that's the expected outcome, not a failure. Chinese translation: `docs/upstream-pr.zh-CN.md`. Run this interactively; never submit via `gh` without the maintainer's explicit sign-off, and never argue them into submitting.
 
 ### Triage labels
 
