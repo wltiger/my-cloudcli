@@ -82,8 +82,23 @@ export default function MainContentHeader({
 
   return (
     <header className="pwa-header-safe flex-shrink-0 border-b border-border/60 bg-background/95 px-3 py-1.5 backdrop-blur-sm sm:px-4 sm:py-2">
-      <div className="flex min-w-0 flex-col gap-1.5 sm:flex-row sm:items-center sm:gap-3">
-        <div className="flex min-w-0 items-center gap-2 sm:max-w-[min(34%,24rem)] sm:flex-[1_1_18rem]">
+      {/* Upstream stacks the title and the tab strip below `sm:` so its full-width
+          scroller gets a row of its own. On mobile this fork renders the strip as one
+          compact pill instead (MainContentTabMenu), which is meant to share the title's
+          row — stacking would spend a whole row on a single pill, which is the opposite
+          of what that customization is for. */}
+      <div
+        className={cn(
+          'flex min-w-0',
+          isMobile ? 'flex-row items-center gap-2' : 'flex-col gap-1.5 sm:flex-row sm:items-center sm:gap-3',
+        )}
+      >
+        <div
+          className={cn(
+            'flex min-w-0 items-center gap-2',
+            isMobile ? 'flex-1' : 'sm:max-w-[min(34%,24rem)] sm:flex-[1_1_18rem]',
+          )}
+        >
           {isMobile && <MobileMenuButton onMenuClick={onMenuClick} />}
           <MainContentTitle
             activeTab={activeTab}
@@ -93,7 +108,7 @@ export default function MainContentHeader({
           />
         </div>
 
-        <div className="-mx-3 min-w-0 sm:mx-0 sm:flex-1">
+        <div className={cn('min-w-0', isMobile ? 'shrink-0' : '-mx-3 sm:mx-0 sm:flex-1')}>
           <div className="relative ml-auto w-fit max-w-full">
             {canScrollLeft && (
               <div className="pointer-events-none absolute inset-y-0 left-0 z-10 w-12 bg-gradient-to-r from-background via-background/90 to-transparent" />
