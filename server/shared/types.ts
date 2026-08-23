@@ -189,7 +189,8 @@ export type MessageKind =
   | 'permission_cancelled'
   | 'session_created'
   | 'interactive_prompt'
-  | 'task_notification';
+  | 'task_notification'
+  | 'compact_boundary';
 
 /**
  * Event kinds added by the chat gateway layer on top of provider message kinds.
@@ -278,6 +279,14 @@ export type NormalizedMessage = {
   toolUseResult?: unknown;
   sequence?: number;
   rowid?: number;
+  /**
+   * compact_boundary fields: whether compaction was invoked manually
+   * (`/compact`) or run automatically by the provider, and the context token
+   * counts immediately before/after.
+   */
+  compactTrigger?: 'manual' | 'auto';
+  compactPreTokens?: number;
+  compactPostTokens?: number;
   [key: string]: unknown;
 };
 

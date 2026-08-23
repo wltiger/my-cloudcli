@@ -146,6 +146,25 @@ const MessageComponent = memo(({ message, prevMessage, createDiff, onFileOpen, s
             <span className="text-xs text-gray-500 dark:text-gray-400">{message.content}</span>
           </div>
         </div>
+      ) : message.isCompactBoundary ? (
+        /* Compact chrome marker where compaction happened */
+        <div className="w-full">
+          <div className="flex items-center gap-2 py-0.5">
+            <span className="inline-block h-1.5 w-1.5 flex-shrink-0 rounded-full bg-gray-400 dark:bg-gray-500" />
+            <span className="text-xs text-gray-500 dark:text-gray-400">
+              {t(message.compactTrigger === 'auto' ? 'compact.auto' : 'compact.manual')}
+              {typeof message.compactPreTokens === 'number' && typeof message.compactPostTokens === 'number' && (
+                <>
+                  {' · '}
+                  {t('compact.tokens', {
+                    pre: message.compactPreTokens.toLocaleString(),
+                    post: message.compactPostTokens.toLocaleString(),
+                  })}
+                </>
+              )}
+            </span>
+          </div>
+        </div>
       ) : (
         /* Claude/Error/Tool messages on the left */
         <div className="w-full">

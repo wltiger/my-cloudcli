@@ -40,7 +40,8 @@ export type MessageKind =
   | 'permission_cancelled'
   | 'session_created'
   | 'interactive_prompt'
-  | 'task_notification';
+  | 'task_notification'
+  | 'compact_boundary';
 
 export interface NormalizedMessage {
   id: string;
@@ -72,6 +73,10 @@ export interface NormalizedMessage {
   isLocalCommand?: boolean;
   isLocalCommandStdout?: boolean;
   isCompactSummary?: boolean;
+  /** compact_boundary fields: trigger and before/after context token counts. */
+  compactTrigger?: 'manual' | 'auto';
+  compactPreTokens?: number;
+  compactPostTokens?: number;
   images?: Array<{ path?: string; data?: string; name?: string }>;
   files?: Array<{ path?: string; name?: string; mimeType?: string; size?: number }>;
   toolName?: string;

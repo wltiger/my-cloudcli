@@ -61,6 +61,10 @@ export interface ChatMessage {
   isLocalCommand?: boolean;
   isLocalCommandStdout?: boolean;
   isCompactSummary?: boolean;
+  isCompactBoundary?: boolean;
+  compactTrigger?: 'manual' | 'auto';
+  compactPreTokens?: number;
+  compactPostTokens?: number;
   isSubagentContainer?: boolean;
   subagentState?: {
     childTools: SubagentChildTool[];

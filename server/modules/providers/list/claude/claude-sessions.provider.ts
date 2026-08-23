@@ -320,6 +320,32 @@ export class ClaudeSessionsProvider implements IProviderSessions {
     const ts = raw.timestamp || new Date().toISOString();
     const baseId = raw.uuid || generateMessageId('claude');
 
+    /**
+     * The Claude Agent SDK emits a compaction boundary both live (query
+     * stream) and in the persisted transcript, so `/compact` and
+     * provider-initiated automatic compaction stay visible after a reload.
+     * The two shapes carry the same fields under different casing: the live
+     * stream uses `compact_metadata` (snake_case), the persisted JSONL row
+     * uses `compactMetadata` (camelCase).
+     */
+    if (raw.type === 'system' && raw.subtype === 'compact_boundary') {
+      const metadata = raw.compact_metadata ?? raw.compactMetadata ?? {};
+      messages.push(createNormalizedMessage({
+        id: baseId,
+        sessionId,
+        timestamp: ts,
+        provider: PROVIDER,
+        kind: 'compact_boundary',
+        // Narrowed rather than trusted: persisted transcripts predate the
+        // current SDK types, so an unrecognized trigger must not masquerade
+        // as a manual compaction.
+        compactTrigger: metadata.trigger === 'auto' ? 'auto' : 'manual',
+        compactPreTokens: metadata.pre_tokens ?? metadata.preTokens,
+        compactPostTokens: metadata.post_tokens ?? metadata.postTokens,
+      }));
+      return messages;
+    }
+
     if (raw.message?.role === 'user' && raw.message?.content && raw.isMeta !== true) {
       if (Array.isArray(raw.message.content)) {
         // Image attachments sent through the SDK are persisted as base64

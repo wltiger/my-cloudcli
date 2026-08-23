@@ -25,6 +25,11 @@
     "codex": "Codex",
     "opencode": "OpenCode"
   },
+  "compact": {
+    "manual": "Compacted",
+    "auto": "Compacted automatically",
+    "tokens": "{{pre}} → {{post}} tokens"
+  },
   "tools": {
     "settings": "Tool Settings",
     "error": "Tool Error",

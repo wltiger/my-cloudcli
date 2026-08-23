@@ -231,6 +231,19 @@ export function normalizedToChatMessages(messages: NormalizedMessage[]): ChatMes
         });
         break;
 
+      case 'compact_boundary':
+        converted.push({
+          type: 'assistant',
+          content: '',
+          timestamp: msg.timestamp,
+          isCompactBoundary: true,
+          compactTrigger: msg.compactTrigger,
+          compactPreTokens: msg.compactPreTokens,
+          compactPostTokens: msg.compactPostTokens,
+          ...sharedMetadata,
+        });
+        break;
+
       case 'stream_delta':
         if (msg.content) {
           converted.push({
