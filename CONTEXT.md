@@ -34,3 +34,18 @@ _Avoid_: Friendly name — reserve that term for the hardcoded catalog's own `la
 **Tab** (main content):
 One of the views the selected Project is worked on through — Chat, Shell, Files, Git, plus Browser and Tasks when available and one per enabled plugin. Scope differs per tab and is easy to get wrong: only Chat and Shell follow the selected session; Files and Git are project-scoped and don't change when the session does.
 _Avoid_: Session tab — most tabs ignore the session entirely. Also distinct from the sidebar's Projects/Conversations tabs and the Settings dialog's tabs; when one of those is meant, name it explicitly
+**Compact** (session):
+Replacing the earlier part of a session's conversation with a model-written summary, so the session continues under the same session id with far fewer context tokens. Provider-native and one-way with respect to Rewind: the summarized messages stay in the on-disk transcript, but they stop being addressable, so a Rewind target from before a Compact no longer resolves.
+_Avoid_: Summarize, condense — summarizing is the mechanism, not the operation. Also distinct from Clear, which starts a different session rather than shrinking this one.
+
+**Clear** (session):
+Starting an empty conversation in place of the current one. Providers implement this by beginning a new session — Claude Code's `/clear` opens a fresh transcript under a new session id and leaves the previous one intact — so it is a session boundary, not a context operation.
+_Avoid_: Reset, wipe. Don't describe it as "clearing the current session": the current session is left untouched and a different one takes over.
+
+**Rewind** (session):
+Re-entering the current session with its conversation truncated at a chosen earlier message, keeping the same session id and the same transcript file. Everything after the chosen message leaves the context without being deleted. Distinct from **Rewind code**, which restores tracked files to their state at a message and leaves the conversation alone — the two are separately selectable, so always say which is meant.
+_Avoid_: Undo, revert — both read as "put the files back". Also distinct from Clear, which cannot preserve the session id.
+
+**Fork** (session):
+Copying a session's transcript up to a chosen message into a **new** session with its own id, leaving the original untouched and still resumable. The branching counterpart to Rewind: the same choose-a-message gesture, the opposite outcome for the session id.
+_Avoid_: Branch, duplicate, copy — reserve those for git. Also distinct from Rewind, which continues the same session instead of creating one.
