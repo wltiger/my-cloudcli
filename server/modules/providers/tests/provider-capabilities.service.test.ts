@@ -16,8 +16,11 @@ test('Codex withholds Compact support (ADR 0004)', () => {
   assert.equal(capabilities.supportsCompact, false);
 });
 
-test('OpenCode and Cursor withhold Compact support for now', () => {
-  assert.equal(providerCapabilitiesService.getProviderCapabilities('opencode').supportsCompact, false);
+test('OpenCode reports Compact support via the side channel (#21)', () => {
+  assert.equal(providerCapabilitiesService.getProviderCapabilities('opencode').supportsCompact, true);
+});
+
+test('Cursor withholds Compact support for now', () => {
   assert.equal(providerCapabilitiesService.getProviderCapabilities('cursor').supportsCompact, false);
 });
 

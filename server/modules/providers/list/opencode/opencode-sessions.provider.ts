@@ -493,6 +493,28 @@ export class OpenCodeSessionsProvider implements IProviderSessions {
           toolId: row.part_id,
         }));
       }
+
+      /**
+       * OpenCode persists a compaction as a `compaction` part on its own
+       * synthetic user-role message with no accompanying text part (verified
+       * against a real 1.18.18 session — see #21). Because this loop
+       * dispatches per part rather than per message, that message never also
+       * hits the `text` branch above, so no empty user bubble is emitted for
+       * it — only this boundary marker.
+       */
+      if (partType === 'compaction') {
+        normalized.push(createNormalizedMessage({
+          id: baseId,
+          sessionId,
+          timestamp,
+          provider: PROVIDER,
+          kind: 'compact_boundary',
+          // OpenCode's CompactionPart carries only `{type, auto}` — no token
+          // counts — so compactPreTokens/compactPostTokens stay undefined and
+          // the marker renders trigger-only, a shape #19 already supports.
+          compactTrigger: partData.auto === true ? 'auto' : 'manual',
+        }));
+      }
     }
 
     return normalized;

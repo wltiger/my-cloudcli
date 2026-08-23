@@ -34,8 +34,9 @@ type ProviderCapabilities = {
  * - permission modes match the option sets accepted by each CLI/SDK.
  * - only the Claude SDK integration surfaces interactive permission requests.
  * - Cursor has no token usage endpoint support (its store.db has no usage rows).
- * - only Claude supports Compact today; see ADR 0004 for why Codex does not,
- *   and issue #21 for OpenCode.
+ * - Claude and OpenCode support Compact; see ADR 0004 for why Codex does not,
+ *   and issue #21 for OpenCode's side-channel implementation. Cursor is
+ *   unsupported — not investigated.
  */
 const PROVIDER_CAPABILITIES: Record<LLMProvider, ProviderCapabilities> = {
   claude: {
@@ -87,7 +88,7 @@ const PROVIDER_CAPABILITIES: Record<LLMProvider, ProviderCapabilities> = {
     supportsPermissionRequests: false,
     supportsTokenUsage: true,
     supportsEffort: true,
-    supportsCompact: false,
+    supportsCompact: true,
   },
 };
 

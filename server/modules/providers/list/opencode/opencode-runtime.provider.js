@@ -123,7 +123,319 @@ function readOpenCodeTokenUsage(sessionId) {
   }
 }
 
+const OPENCODE_COMPACT_COMMAND = '/compact';
+// Startup is normally near-instant; this only guards against a hung CLI.
+const OPENCODE_SERVE_READY_TIMEOUT_MS = 15_000;
+// Compaction summarizes the whole context, so it can run well past a typical
+// request (issue #18 measured ~20s on a real session).
+const OPENCODE_COMPACT_REQUEST_TIMEOUT_MS = 120_000;
+// A kill must not outlive this: on POSIX it is the SIGTERM -> SIGKILL
+// escalation window, on Windows the cap on `taskkill` itself.
+const OPENCODE_KILL_ESCALATE_MS = 5_000;
+const OPENCODE_SERVE_LISTENING_PATTERN = /listening on http:\/\/([^\s/:]+):(\d+)/i;
+
+/**
+ * OpenCode's `run` CLI does not expand slash commands — the positional
+ * message reaches the model as plain text (verified against 1.18.18) — so
+ * `/compact` must be intercepted before it is ever handed to `opencode run`.
+ * Exported for tests only.
+ */
+export function isOpenCodeCompactCommand(command) {
+  return typeof command === 'string' && command.trim() === OPENCODE_COMPACT_COMMAND;
+}
+
+/**
+ * Splits a resolved `<providerID>/<modelID>` model id into the two halves
+ * OpenCode's summarize endpoint body needs separately. Returns null when the
+ * value is missing or not in that shape.
+ * Exported for tests only.
+ */
+export function splitOpenCodeModelId(resolvedModel) {
+  if (typeof resolvedModel !== 'string') {
+    return null;
+  }
+
+  const slashIndex = resolvedModel.indexOf('/');
+  if (slashIndex <= 0 || slashIndex === resolvedModel.length - 1) {
+    return null;
+  }
+
+  return {
+    providerID: resolvedModel.slice(0, slashIndex),
+    modelID: resolvedModel.slice(slashIndex + 1),
+  };
+}
+
+/**
+ * Terminates a spawned OpenCode process, tree and all.
+ *
+ * cross-spawn resolves `opencode` to its Windows `.cmd` shim, which Windows
+ * can only execute through an intermediary `cmd.exe`. Killing that top-level
+ * process leaves the real `node`/`bun` process underneath it — and the port
+ * it holds — orphaned, because Windows does not cascade termination to
+ * children on its own (verified against this exact spawn chain: a plain
+ * `.kill('SIGTERM')` left the ephemeral server's port still listening).
+ * `taskkill /T` kills the whole tree. POSIX has no such indirection, so a
+ * plain SIGTERM already reaches the real process there.
+ */
+function killOpenCodeProcessTree(childProcess) {
+  if (!childProcess || !childProcess.pid) {
+    return Promise.resolve();
+  }
+
+  if (process.platform !== 'win32') {
+    // Same escalation the plugin module uses (`stopPluginServer`): ask politely,
+    // then force it, so a server that ignores SIGTERM cannot keep its port.
+    return new Promise((resolve) => {
+      const settle = () => {
+        clearTimeout(forceKillTimer);
+        resolve();
+      };
+
+      childProcess.once('exit', settle);
+      childProcess.kill('SIGTERM');
+
+      const forceKillTimer = setTimeout(() => {
+        try {
+          childProcess.kill('SIGKILL');
+        } catch {
+          // Already gone.
+        }
+        settle();
+      }, OPENCODE_KILL_ESCALATE_MS);
+    });
+  }
+
+  return new Promise((resolve) => {
+    const settle = () => {
+      clearTimeout(killTimeoutHandle);
+      resolve();
+    };
+
+    const killer = spawnFunction('taskkill', ['/pid', String(childProcess.pid), '/T', '/F'], { stdio: 'ignore' });
+    killer.on('close', settle);
+    killer.on('error', settle);
+
+    // `taskkill` is itself a subprocess; without this a hung one would leave
+    // the awaiting side channel pending forever.
+    const killTimeoutHandle = setTimeout(settle, OPENCODE_KILL_ESCALATE_MS);
+  });
+}
+
+/**
+ * Starts a short-lived headless `opencode serve` on an OS-assigned ephemeral
+ * port (`--port 0`) and resolves once its own stdout confirms it is
+ * listening — that line is only printed once the socket is already accepting
+ * connections, so no separate readiness poll is needed. OpenCode's session
+ * storage is global (verified in #18/#21), so this instance can address any
+ * session regardless of which directory it starts in.
+ *
+ * Any failure to reach "listening" (spawn error, early exit, timeout) kills
+ * the process itself before rejecting, so a caller never has to clean up a
+ * process it was never handed.
+ */
+function startOpenCodeServeProcess(cwd) {
+  return new Promise((resolve, reject) => {
+    const serveProcess = spawnFunction('opencode', ['serve', '--port', '0', '--hostname', '127.0.0.1'], {
+      cwd,
+      stdio: ['ignore', 'pipe', 'pipe'],
+      env: process.env,
+    });
+
+    let settled = false;
+    let stdoutBuffer = '';
+    let stderrBuffer = '';
+
+    function settleResolve(baseUrl) {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeoutHandle);
+      resolve({ process: serveProcess, baseUrl });
+    }
+
+    function settleReject(error) {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeoutHandle);
+      void killOpenCodeProcessTree(serveProcess).finally(() => reject(error));
+    }
+
+    const timeoutHandle = setTimeout(() => {
+      settleReject(new Error('Timed out waiting for the OpenCode server to start.'));
+    }, OPENCODE_SERVE_READY_TIMEOUT_MS);
+
+    serveProcess.stdout.on('data', (data) => {
+      stdoutBuffer += data.toString();
+      const match = stdoutBuffer.match(OPENCODE_SERVE_LISTENING_PATTERN);
+      if (match) {
+        settleResolve(`http://${match[1]}:${match[2]}`);
+      }
+    });
+
+    serveProcess.stderr.on('data', (data) => {
+      stderrBuffer += data.toString();
+    });
+
+    serveProcess.on('error', (error) => {
+      settleReject(error);
+    });
+
+    serveProcess.on('close', (code) => {
+      settleReject(new Error(
+        stderrBuffer.trim()
+          ? `OpenCode server exited with code ${code} before it started listening: ${stderrBuffer.trim()}`
+          : `OpenCode server exited with code ${code} before it started listening.`
+      ));
+    });
+  });
+}
+
+/**
+ * Runs OpenCode's Compact through its HTTP server API, the only place it is
+ * reachable — the one-shot `run` CLI has no equivalent (verified in #18/#21).
+ * Starts a short-lived headless server, posts to the legacy `/summarize`
+ * route with the resolved provider/model, and always shuts the server down
+ * before returning, on every path including failure.
+ */
+async function runOpenCodeCompactSideChannel(options, ws, context) {
+  const { sessionId, projectPath, cwd, model } = options;
+  const workingDir = cwd || projectPath || process.cwd();
+
+  const sendError = (content) => {
+    ws.send(createNormalizedMessage({
+      kind: 'error',
+      content,
+      sessionId: sessionId || null,
+      provider: 'opencode',
+    }));
+  };
+
+  let completeSent = false;
+  const finish = (success, { aborted = false } = {}) => {
+    if (completeSent) {
+      return;
+    }
+    completeSent = true;
+    ws.send(createCompleteMessage({
+      provider: 'opencode',
+      sessionId: sessionId || null,
+      exitCode: success ? 0 : 1,
+      ...(aborted ? { aborted: true } : {}),
+    }));
+  };
+
+  const providerSessionId = context.resolveProviderSessionId(sessionId);
+  if (!providerSessionId) {
+    sendError('Nothing to compact yet — start a conversation first.');
+    finish(false);
+    return;
+  }
+
+  const resolvedModel = await context.resolveResumeModel(sessionId, model);
+  const modelIds = splitOpenCodeModelId(resolvedModel);
+  if (!modelIds) {
+    sendError('OpenCode Compact could not determine a provider/model to summarize with.');
+    finish(false);
+    return;
+  }
+
+  // Registered under the same key as a normal run so Stop reaches the side
+  // channel too; without this `abortOpenCodeSession` reports nothing running
+  // and the ephemeral server keeps its port until the request times out.
+  let serveHandle;
+  const compactHandle = {
+    aborted: false,
+    kill: () => {
+      void killOpenCodeProcessTree(serveHandle?.process);
+    },
+  };
+  activeOpenCodeProcesses.set(sessionId, compactHandle);
+
+  const notifyTerminalState = (error) => {
+    const notifyPayload = {
+      userId: ws?.userId || null,
+      provider: 'opencode',
+      sessionId: sessionId || null,
+      sessionName: options.sessionSummary,
+    };
+    if (error) {
+      notifyRunFailed({ ...notifyPayload, error });
+      return;
+    }
+    notifyRunStopped({ ...notifyPayload, stopReason: 'completed' });
+  };
+
+  try {
+    serveHandle = await startOpenCodeServeProcess(workingDir);
+  } catch (error) {
+    const errorContent = error instanceof Error ? error.message : String(error);
+    console.error('[OpenCode] Compact failed to start the headless server:', errorContent);
+    activeOpenCodeProcesses.delete(sessionId);
+    if (!compactHandle.aborted) {
+      sendError(`OpenCode Compact could not start: ${errorContent}`);
+      notifyTerminalState(errorContent);
+    }
+    finish(false, { aborted: compactHandle.aborted });
+    return;
+  }
+
+  try {
+    const response = await fetch(
+      `${serveHandle.baseUrl}/session/${encodeURIComponent(providerSessionId)}/summarize`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ providerID: modelIds.providerID, modelID: modelIds.modelID }),
+        signal: AbortSignal.timeout(OPENCODE_COMPACT_REQUEST_TIMEOUT_MS),
+      }
+    );
+
+    const responseText = await response.text();
+    let parsedBody;
+    try {
+      parsedBody = JSON.parse(responseText);
+    } catch {
+      parsedBody = undefined;
+    }
+
+    // The published `/api/session/{id}/compact` is unimplemented (503) and
+    // `/api/session/{id}/summarize` is not a route at all — it falls through
+    // to the web UI's HTML catch-all and answers 200 with an HTML body. Only
+    // the legacy unprefixed route works, so the body — not just the status —
+    // has to confirm the summarize call actually ran. See #18/#21.
+    if (!response.ok || parsedBody !== true) {
+      sendError(`OpenCode Compact failed (HTTP ${response.status}).`);
+      notifyTerminalState(`OpenCode Compact failed (HTTP ${response.status}).`);
+      finish(false);
+      return;
+    }
+
+    notifyTerminalState(null);
+    finish(true);
+  } catch (error) {
+    const errorContent = error instanceof Error ? error.message : String(error);
+    console.error('[OpenCode] Compact request failed:', errorContent);
+    // An abort tears the server down mid-request, so the resulting fetch
+    // failure is expected rather than something to report as a failure.
+    if (compactHandle.aborted) {
+      finish(false, { aborted: true });
+    } else {
+      sendError(`OpenCode Compact failed: ${errorContent}`);
+      notifyTerminalState(errorContent);
+      finish(false);
+    }
+  } finally {
+    activeOpenCodeProcesses.delete(sessionId);
+    await killOpenCodeProcessTree(serveHandle.process);
+  }
+}
+
 async function spawnOpenCode(command, options = {}, ws, context) {
+  // `/compact` never reaches `opencode run` — see runOpenCodeCompactSideChannel.
+  if (isOpenCodeCompactCommand(command)) {
+    return runOpenCodeCompactSideChannel(options, ws, context);
+  }
+
   return new Promise((resolve, reject) => {
     const {
       sessionId,

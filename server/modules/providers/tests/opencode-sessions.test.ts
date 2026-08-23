@@ -418,6 +418,141 @@ test('OpenCode sessions provider reads sqlite history and token usage', { concur
   }
 });
 
+test('OpenCode sessions provider renders a compaction boundary and its summary, without an empty user bubble', { concurrency: false }, async () => {
+  const tempRoot = await mkdtemp(path.join(os.tmpdir(), 'opencode-session-compaction-'));
+  const workspacePath = path.join(tempRoot, 'workspace');
+  await mkdir(workspacePath, { recursive: true });
+  const restoreHomeDir = patchHomeDir(tempRoot);
+
+  try {
+    await createOpenCodeDatabase(tempRoot, workspacePath);
+
+    // Matches the real shape observed against OpenCode 1.18.18 (#21): the
+    // boundary is a user-role message whose ONLY part is `compaction`, with
+    // no text part, immediately followed by the summary as an ordinary
+    // assistant text message.
+    const db = new Database(path.join(tempRoot, '.local', 'share', 'opencode', 'opencode.db'));
+    try {
+      db.prepare(
+        'INSERT INTO message (id, session_id, time_created, time_updated, data) VALUES (?, ?, ?, ?, ?)',
+      ).run(
+        'message-compact-boundary',
+        'open-session-1',
+        1_700_000_004_000,
+        1_700_000_004_000,
+        JSON.stringify({ role: 'user', time: { created: 1_700_000_004_000 } }),
+      );
+      db.prepare(
+        'INSERT INTO message (id, session_id, time_created, time_updated, data) VALUES (?, ?, ?, ?, ?)',
+      ).run(
+        'message-compact-summary',
+        'open-session-1',
+        1_700_000_005_000,
+        1_700_000_005_000,
+        JSON.stringify({ role: 'assistant', time: { created: 1_700_000_005_000 } }),
+      );
+
+      const insertPart = db.prepare(`
+        INSERT INTO part (id, message_id, session_id, time_created, time_updated, data)
+        VALUES (?, ?, ?, ?, ?, ?)
+      `);
+      insertPart.run(
+        'part-compaction',
+        'message-compact-boundary',
+        'open-session-1',
+        1_700_000_004_000,
+        1_700_000_004_000,
+        JSON.stringify({ type: 'compaction', auto: false }),
+      );
+      insertPart.run(
+        'part-compact-summary-text',
+        'message-compact-summary',
+        'open-session-1',
+        1_700_000_005_000,
+        1_700_000_005_000,
+        JSON.stringify({ type: 'text', text: '## Objective\nSummarized so far.' }),
+      );
+    } finally {
+      db.close();
+    }
+
+    const provider = new OpenCodeSessionsProvider();
+    const history = await provider.fetchHistory('open-session-1');
+
+    // 4 pre-existing (from createOpenCodeDatabase) + boundary + summary.
+    assert.equal(history.total, 6);
+
+    const boundary = history.messages.find((message) => message.kind === 'compact_boundary');
+    assert.ok(boundary, 'expected a compact_boundary message');
+    assert.equal(boundary?.compactTrigger, 'manual');
+    assert.equal(boundary?.compactPreTokens, undefined);
+    assert.equal(boundary?.compactPostTokens, undefined);
+
+    // The empty-user-message gotcha: the boundary's message has no text
+    // part, so it must not also surface as an empty user bubble.
+    const emptyUserBubbles = history.messages.filter(
+      (message) => message.kind === 'text' && message.role === 'user' && !(message.content || '').trim(),
+    );
+    assert.equal(emptyUserBubbles.length, 0);
+
+    // The summary arrives as an ordinary assistant text message right after
+    // the boundary — the OpenCode analogue of Claude's isCompactSummary row.
+    const boundaryIndex = history.messages.findIndex((message) => message.kind === 'compact_boundary');
+    const summary = history.messages[boundaryIndex + 1];
+    assert.equal(summary?.kind, 'text');
+    assert.equal(summary?.role, 'assistant');
+    assert.equal(summary?.content, '## Objective\nSummarized so far.');
+  } finally {
+    restoreHomeDir();
+    await rm(tempRoot, { recursive: true, force: true });
+  }
+});
+
+test('OpenCode sessions provider maps a provider-initiated compaction to the auto trigger', { concurrency: false }, async () => {
+  const tempRoot = await mkdtemp(path.join(os.tmpdir(), 'opencode-session-compaction-auto-'));
+  const workspacePath = path.join(tempRoot, 'workspace');
+  await mkdir(workspacePath, { recursive: true });
+  const restoreHomeDir = patchHomeDir(tempRoot);
+
+  try {
+    await createOpenCodeDatabase(tempRoot, workspacePath);
+
+    const db = new Database(path.join(tempRoot, '.local', 'share', 'opencode', 'opencode.db'));
+    try {
+      db.prepare(
+        'INSERT INTO message (id, session_id, time_created, time_updated, data) VALUES (?, ?, ?, ?, ?)',
+      ).run(
+        'message-compact-boundary-auto',
+        'open-session-1',
+        1_700_000_004_000,
+        1_700_000_004_000,
+        JSON.stringify({ role: 'user', time: { created: 1_700_000_004_000 } }),
+      );
+      db.prepare(`
+        INSERT INTO part (id, message_id, session_id, time_created, time_updated, data)
+        VALUES (?, ?, ?, ?, ?, ?)
+      `).run(
+        'part-compaction-auto',
+        'message-compact-boundary-auto',
+        'open-session-1',
+        1_700_000_004_000,
+        1_700_000_004_000,
+        JSON.stringify({ type: 'compaction', auto: true }),
+      );
+    } finally {
+      db.close();
+    }
+
+    const provider = new OpenCodeSessionsProvider();
+    const history = await provider.fetchHistory('open-session-1');
+    const boundary = history.messages.find((message) => message.kind === 'compact_boundary');
+    assert.equal(boundary?.compactTrigger, 'auto');
+  } finally {
+    restoreHomeDir();
+    await rm(tempRoot, { recursive: true, force: true });
+  }
+});
+
 /**
  * Seeds a single OpenCode session with a controllable stored title and first
  * user message. Uses a minimal schema (only the columns the synchronizer reads)
