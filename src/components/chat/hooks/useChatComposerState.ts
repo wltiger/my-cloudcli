@@ -48,6 +48,8 @@ interface UseChatComposerStateArgs {
    */
   currentProviderModel: string;
   currentProviderEffort: string;
+  /** Whether the active provider can run Compact; gates the `/compact` completion entry. */
+  currentProviderSupportsCompact: boolean;
   isLoading: boolean;
   processingSessions?: SessionActivityMap;
   canAbortSession: boolean;
@@ -238,6 +240,7 @@ export function useChatComposerState({
   resolvePermissionModeForProvider,
   currentProviderModel,
   currentProviderEffort,
+  currentProviderSupportsCompact,
   isLoading,
   processingSessions,
   canAbortSession,
@@ -492,6 +495,21 @@ export function useChatComposerState({
     );
   }, [executeCommand]);
 
+  // The token usage panel's Compact button: writes "/compact" back into the
+  // input and submits it through the ordinary composer path, exactly like
+  // typing it — never the backend command endpoint (see the interception
+  // exemption below), so there is one path through the code, not two.
+  const triggerCompact = useCallback(() => {
+    closeCommandModal();
+    setInput('/compact');
+    inputValueRef.current = '/compact';
+    setTimeout(() => {
+      if (handleSubmitRef.current) {
+        handleSubmitRef.current(createFakeSubmitEvent());
+      }
+    }, 0);
+  }, [closeCommandModal, setInput]);
+
   const {
     slashCommands,
     slashCommandsCount,
@@ -512,6 +530,7 @@ export function useChatComposerState({
     setInput,
     textareaRef,
     onExecuteCommand: executeCommand,
+    currentProviderSupportsCompact,
   });
 
   const {
@@ -789,7 +808,9 @@ export function useChatComposerState({
                 metadata: { type: 'builtin' },
               } as SlashCommand)
             : undefined);
-        if (matchedCommand && matchedCommand.type !== 'skill') {
+        // Compact joins the skill exemption: both must reach the provider
+        // verbatim rather than being intercepted into a UI action.
+        if (matchedCommand && matchedCommand.type !== 'skill' && matchedCommand.type !== 'compact') {
           executeCommand(matchedCommand, isHelpAlias ? '/help' : commandInput);
           setInput('');
           inputValueRef.current = '';
@@ -1313,5 +1334,6 @@ export function useChatComposerState({
     commandModalPayload,
     closeCommandModal,
     showCostModal,
+    triggerCompact,
   };
 }

@@ -28,7 +28,9 @@
   "compact": {
     "manual": "Compacted",
     "auto": "Compacted automatically",
-    "tokens": "{{pre}} → {{post}} tokens"
+    "tokens": "{{pre}} → {{post}} tokens",
+    "description": "Replace earlier messages with a summary to free up context in this session.",
+    "button": "Compact"
   },
   "tools": {
     "settings": "Tool Settings",

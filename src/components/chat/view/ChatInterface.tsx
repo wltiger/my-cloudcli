@@ -74,6 +74,7 @@ function ChatInterface({
     currentProviderEffortOptions,
     currentProviderModel,
     currentProviderModelOptions,
+    currentProviderSupportsCompact,
     opencodeModel,
     setOpenCodeModel,
     permissionMode,
@@ -196,6 +197,7 @@ function ChatInterface({
     commandModalPayload,
     closeCommandModal,
     showCostModal,
+    triggerCompact,
   } = useChatComposerState({
     selectedProject,
     selectedSession,
@@ -205,6 +207,7 @@ function ChatInterface({
     cyclePermissionMode,
     currentProviderModel,
     currentProviderEffort,
+    currentProviderSupportsCompact,
     isLoading: isProcessing,
     processingSessions,
     canAbortSession,
@@ -491,6 +494,7 @@ function ChatInterface({
         activeProviderModel={currentProviderModel}
         currentSessionId={currentSessionId || selectedSession?.id || null}
         onSelectProviderModel={selectProviderModel}
+        onCompact={currentProviderSupportsCompact ? triggerCompact : undefined}
       />
     </PermissionContext.Provider>
   );

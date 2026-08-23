@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import {
   Activity,
   BadgeCheck,
@@ -50,6 +51,8 @@ type CommandResultModalProps = {
     scope: 'default' | 'session';
     model: string;
   }>;
+  /** Runs Compact through the ordinary composer path. Omitted entirely when the active provider does not support it. */
+  onCompact?: () => void;
 };
 
 type CommandEntry = {
@@ -540,7 +543,9 @@ export default function CommandResultModal({
   activeProviderModel,
   currentSessionId,
   onSelectProviderModel,
+  onCompact,
 }: CommandResultModalProps) {
+  const { t } = useTranslation('chat');
   const isOpen = Boolean(payload);
   const kind = payload?.kind;
   const isModelsModal = kind === 'models';
@@ -640,9 +645,16 @@ export default function CommandResultModal({
             <Gauge className="h-3.5 w-3.5" />
             <span>Esc closes the modal.</span>
           </div>
-          <Button type="button" variant="outline" size="sm" onClick={onClose} className="rounded-xl">
-            Close
-          </Button>
+          <div className="flex items-center gap-2">
+            {kind === 'cost' && onCompact && (
+              <Button type="button" variant="outline" size="sm" onClick={onCompact} className="rounded-xl">
+                {t('compact.button')}
+              </Button>
+            )}
+            <Button type="button" variant="outline" size="sm" onClick={onClose} className="rounded-xl">
+              Close
+            </Button>
+          </div>
         </div>
       </DialogContent>
     </Dialog>

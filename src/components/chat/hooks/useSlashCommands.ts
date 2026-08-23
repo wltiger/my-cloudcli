@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { Dispatch, KeyboardEvent, RefObject, SetStateAction } from 'react';
+import { useTranslation } from 'react-i18next';
 
 import { authenticatedFetch } from '../../../utils/api';
+import { withCompactCommand } from '../utils/compactCommand';
 import { safeLocalStorage } from '../utils/chatStorage';
 import type { LLMProvider, Project } from '../../../types/app';
 
@@ -12,7 +14,7 @@ export interface SlashCommand {
   description?: string;
   namespace?: string;
   path?: string;
-  type?: 'built-in' | 'custom' | 'skill' | string;
+  type?: 'built-in' | 'custom' | 'skill' | 'compact' | string;
   metadata?: Record<string, unknown>;
   [key: string]: unknown;
 }
@@ -24,6 +26,8 @@ interface UseSlashCommandsOptions {
   setInput: Dispatch<SetStateAction<string>>;
   textareaRef: RefObject<HTMLTextAreaElement>;
   onExecuteCommand: (command: SlashCommand, rawInput?: string) => void | Promise<void>;
+  /** Whether the active provider can run Compact; gates the `/compact` completion entry. */
+  currentProviderSupportsCompact: boolean;
 }
 
 type ProviderSkill = {
@@ -66,8 +70,11 @@ const saveCommandHistory = (projectName: string, history: Record<string, number>
 const isPromiseLike = (value: unknown): value is Promise<unknown> =>
   Boolean(value) && typeof (value as Promise<unknown>).then === 'function';
 
+// Also matches Compact: selecting it from the menu must only insert the
+// command text (not execute it through the backend command endpoint), the
+// same pass-through treatment skill commands already get.
 const isSkillCommand = (command: SlashCommand) =>
-  command.type === 'skill' || command.metadata?.type === 'skill';
+  command.type === 'skill' || command.metadata?.type === 'skill' || command.type === 'compact';
 
 const dedupeProviderSkills = (skills: ProviderSkill[]): ProviderSkill[] => {
   const seenCommands = new Set<string>();
@@ -142,8 +149,10 @@ export function useSlashCommands({
   setInput,
   textareaRef,
   onExecuteCommand,
+  currentProviderSupportsCompact,
 }: UseSlashCommandsOptions) {
-  const [slashCommands, setSlashCommands] = useState<SlashCommand[]>([]);
+  const { t } = useTranslation('chat');
+  const [fetchedCommands, setFetchedCommands] = useState<SlashCommand[]>([]);
   const [filteredCommands, setFilteredCommands] = useState<SlashCommand[]>([]);
   const [showCommandMenu, setShowCommandMenu] = useState(false);
   const [commandQuery, setCommandQuery] = useState('');
@@ -172,7 +181,7 @@ export function useSlashCommands({
 
     const fetchCommands = async () => {
       if (!selectedProject) {
-        setSlashCommands([]);
+        setFetchedCommands([]);
         setFilteredCommands([]);
         return;
       }
@@ -227,12 +236,12 @@ export function useSlashCommands({
         });
 
         if (!cancelled) {
-          setSlashCommands(sortedCommands);
+          setFetchedCommands(sortedCommands);
         }
       } catch (error) {
         console.error('Error fetching slash commands:', error);
         if (!cancelled) {
-          setSlashCommands([]);
+          setFetchedCommands([]);
         }
       }
     };
@@ -242,6 +251,15 @@ export function useSlashCommands({
       cancelled = true;
     };
   }, [selectedProject, provider]);
+
+  // Derived, not fetched: the Compact capability resolves after the command
+  // list does, so folding it in here keeps the capability out of the fetching
+  // effect's dependencies and avoids a second round of requests per session.
+  const slashCommands = useMemo(() => withCompactCommand(fetchedCommands, {
+    supported: currentProviderSupportsCompact,
+    description: t('compact.description'),
+    usage: selectedProject ? readCommandHistory(selectedProject.projectId) : {},
+  }), [fetchedCommands, currentProviderSupportsCompact, t, selectedProject]);
 
   useEffect(() => {
     if (!showCommandMenu) {

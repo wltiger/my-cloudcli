@@ -28,7 +28,9 @@
   "compact": {
     "manual": "已压缩",
     "auto": "已自动压缩",
-    "tokens": "{{pre}} → {{post}} Token"
+    "tokens": "{{pre}} → {{post}} Token",
+    "description": "把之前的对话换成一段摘要，为当前会话腾出上下文空间。",
+    "button": "压缩"
   },
   "tools": {
     "settings": "工具设置",
