@@ -287,6 +287,16 @@ export type NormalizedMessage = {
   compactTrigger?: 'manual' | 'auto';
   compactPreTokens?: number;
   compactPostTokens?: number;
+  /**
+   * The Anchor this message can be Forked (later: Rewound) at — the transcript
+   * row the operation is taken at, named the way this message's provider names
+   * it. Computed backend-side from the raw transcript rows, because one agent
+   * turn spans several rows and the ids on rendered messages are CloudCLI's
+   * own. Absent when the operation cannot be performed on this message at all
+   * (live events, and anything before the last compaction boundary), in which
+   * case the frontend simply offers no entry.
+   */
+  anchor?: string;
   [key: string]: unknown;
 };
 

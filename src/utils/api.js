@@ -228,6 +228,14 @@ export const api = {
       method: 'PUT',
       body: JSON.stringify({ summary }),
     }),
+  // Fork: the pre-filled dialog name, then the fork itself at a message's Anchor.
+  forkSessionName: (sessionId) =>
+    authenticatedFetch(`/api/providers/sessions/${encodeURIComponent(sessionId)}/fork-name`),
+  forkSession: (sessionId, anchor, summary) =>
+    authenticatedFetch(`/api/providers/sessions/${encodeURIComponent(sessionId)}/fork`, {
+      method: 'POST',
+      body: JSON.stringify({ anchor, summary }),
+    }),
   // `hardDelete` => server `?force=true` (remove DB row + Claude *.jsonl + sessions rows for path).
   deleteProject: (projectId, hardDelete = false) => {
     const params = new URLSearchParams();

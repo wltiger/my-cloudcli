@@ -27,6 +27,8 @@ type ProviderCapabilities = {
   supportsEffort: boolean;
   /** Whether the provider can run Compact (`/compact`) to shrink a session's context. */
   supportsCompact: boolean;
+  /** Whether a message's Anchor can be Forked into a new session. */
+  supportsFork: boolean;
 };
 
 /**
@@ -37,6 +39,9 @@ type ProviderCapabilities = {
  * - Claude and OpenCode support Compact; see ADR 0004 for why Codex does not,
  *   and issue #21 for OpenCode's side-channel implementation. Cursor is
  *   unsupported — not investigated.
+ * - only Claude supports Fork so far; see ADR 0008 for why Codex never will,
+ *   and issue #23 for OpenCode's own fork. Cursor is unsupported — not
+ *   investigated.
  */
 const PROVIDER_CAPABILITIES: Record<LLMProvider, ProviderCapabilities> = {
   claude: {
@@ -50,6 +55,7 @@ const PROVIDER_CAPABILITIES: Record<LLMProvider, ProviderCapabilities> = {
     supportsTokenUsage: true,
     supportsEffort: true,
     supportsCompact: true,
+    supportsFork: true,
   },
   cursor: {
     provider: 'cursor',
@@ -62,6 +68,7 @@ const PROVIDER_CAPABILITIES: Record<LLMProvider, ProviderCapabilities> = {
     supportsTokenUsage: false,
     supportsEffort: false,
     supportsCompact: false,
+    supportsFork: false,
   },
   codex: {
     provider: 'codex',
@@ -74,6 +81,7 @@ const PROVIDER_CAPABILITIES: Record<LLMProvider, ProviderCapabilities> = {
     supportsTokenUsage: true,
     supportsEffort: true,
     supportsCompact: false,
+    supportsFork: false,
   },
   opencode: {
     provider: 'opencode',
@@ -89,6 +97,7 @@ const PROVIDER_CAPABILITIES: Record<LLMProvider, ProviderCapabilities> = {
     supportsTokenUsage: true,
     supportsEffort: true,
     supportsCompact: true,
+    supportsFork: false,
   },
 };
 

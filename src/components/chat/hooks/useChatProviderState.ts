@@ -57,6 +57,7 @@ type ProviderCapabilities = {
   supportsTokenUsage: boolean;
   supportsEffort?: boolean;
   supportsCompact?: boolean;
+  supportsFork?: boolean;
 };
 
 type ProviderCapabilitiesApiResponse = {
@@ -299,6 +300,11 @@ export function useChatProviderState({ selectedSession, selectedProject: _select
    */
   const getSupportsCompactForProvider = useCallback((targetProvider: LLMProvider): boolean => (
     providerCapabilities?.[targetProvider]?.supportsCompact === true
+  ), [providerCapabilities]);
+
+  /** Same no-fallback rule as Compact above: hidden until the backend confirms it. */
+  const getSupportsForkForProvider = useCallback((targetProvider: LLMProvider): boolean => (
+    providerCapabilities?.[targetProvider]?.supportsFork === true
   ), [providerCapabilities]);
 
   const pickStoredOrCurrent = (
@@ -754,6 +760,10 @@ export function useChatProviderState({ selectedSession, selectedProject: _select
     () => getSupportsCompactForProvider(provider),
     [getSupportsCompactForProvider, provider],
   );
+  const currentProviderSupportsFork = useMemo(
+    () => getSupportsForkForProvider(provider),
+    [getSupportsForkForProvider, provider],
+  );
 
   const applyProviderCatalog = useCallback((
     targetProvider: LLMProvider,
@@ -881,6 +891,7 @@ export function useChatProviderState({ selectedSession, selectedProject: _select
     currentProviderModel,
     currentProviderModelOptions,
     currentProviderSupportsCompact,
+    currentProviderSupportsFork,
     opencodeModel,
     setOpenCodeModel,
     permissionMode,

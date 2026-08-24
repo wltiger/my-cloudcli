@@ -154,6 +154,23 @@ export interface IProviderMcp {
 export interface IProviderSessions {
   normalizeMessage(raw: unknown, sessionId: string | null): NormalizedMessage[];
   fetchHistory(sessionId: string, options?: FetchHistoryOptions): Promise<FetchHistoryResult>;
+  /**
+   * Forks one session at an Anchor, returning the new provider-native session id.
+   *
+   * `anchor` is a value this same provider produced on a normalized message, so
+   * each implementation owns whether its own fork keeps or drops the named row
+   * — providers disagree, and callers must not compensate for that here.
+   * `title` is the fork's name, passed on so the provider's own CLI shows it too.
+   *
+   * Optional: a provider that cannot branch a session at a point omits this and
+   * reports `supportsFork: false` in the capability matrix.
+   */
+  forkSession?(options: {
+    providerSessionId: string;
+    projectPath: string;
+    anchor: string;
+    title: string;
+  }): Promise<string>;
 }
 
 // ---------------------------

@@ -3,11 +3,15 @@ import fsp from 'node:fs/promises';
 import path from 'node:path';
 import readline from 'node:readline';
 
+import { forkSession as forkClaudeSession } from '@anthropic-ai/claude-agent-sdk';
+
 import type { IProviderSessions } from '@/shared/interfaces.js';
 import type { AnyRecord, FetchHistoryOptions, FetchHistoryResult, NormalizedMessage } from '@/shared/types.js';
 import { parseFilesInputTag } from '@/shared/image-attachments.js';
 import { createNormalizedMessage, generateMessageId, readObjectRecord, sliceTailPage } from '@/shared/utils.js';
 import { sessionsDb } from '@/modules/database/index.js';
+
+import { buildClaudeAnchorIndex } from './claude-anchors.js';
 
 const PROVIDER = 'claude';
 
@@ -102,7 +106,7 @@ async function parseAgentTools(filePath: string): Promise<AnyRecord[]> {
   return tools;
 }
 
-async function getSessionMessages(
+async function readClaudeTranscriptRows(
   sessionId: string,
   providerSessionId: string,
   limit: number | null,
@@ -641,7 +645,7 @@ export class ClaudeSessionsProvider implements IProviderSessions {
     try {
       // Load full history first so `total` reflects frontend-normalized messages,
       // not raw JSONL records.
-      result = await getSessionMessages(sessionId, providerSessionId, null, 0);
+      result = await readClaudeTranscriptRows(sessionId, providerSessionId, null, 0);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       console.warn(`[ClaudeProvider] Failed to load session ${sessionId}:`, message);
@@ -666,9 +670,19 @@ export class ClaudeSessionsProvider implements IProviderSessions {
       }
     }
 
+    // Anchors are read off the raw rows rather than the normalized messages:
+    // one agent turn spans several rows, and the ids emitted below are
+    // CloudCLI composites the provider would not accept back.
+    const anchors = buildClaudeAnchorIndex(rawMessages);
     const normalized: NormalizedMessage[] = [];
     for (const raw of rawMessages) {
-      normalized.push(...this.normalizeMessage(raw, sessionId));
+      const anchor = typeof raw.uuid === 'string' ? anchors.get(raw.uuid) : undefined;
+      for (const message of this.normalizeMessage(raw, sessionId)) {
+        if (anchor) {
+          message.anchor = anchor;
+        }
+        normalized.push(message);
+      }
     }
 
     for (const msg of normalized) {
@@ -706,5 +720,27 @@ export class ClaudeSessionsProvider implements IProviderSessions {
       offset: normalizedOffset,
       limit: normalizedLimit,
     };
+  }
+
+  /**
+   * Copies the transcript up to (and including) `anchor` into a new session.
+   *
+   * A pure file operation: the SDK copies the rows, remaps every uuid, and
+   * preserves the parent chain. No model runs and no tokens are spent. The new
+   * transcript is written next to the original, as `<newSessionId>.jsonl` in
+   * the same project directory.
+   */
+  async forkSession(options: {
+    providerSessionId: string;
+    projectPath: string;
+    anchor: string;
+    title: string;
+  }): Promise<string> {
+    const result = await forkClaudeSession(options.providerSessionId, {
+      dir: options.projectPath,
+      upToMessageId: options.anchor,
+      title: options.title,
+    });
+    return result.sessionId;
   }
 }

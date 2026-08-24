@@ -65,6 +65,8 @@ export interface ChatMessage {
   compactTrigger?: 'manual' | 'auto';
   compactPreTokens?: number;
   compactPostTokens?: number;
+  /** The Anchor a Fork of this message is taken at. Absent when it cannot be forked. */
+  anchor?: string;
   isSubagentContainer?: boolean;
   subagentState?: {
     childTools: SubagentChildTool[];

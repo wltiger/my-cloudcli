@@ -32,6 +32,14 @@
     "description": "把之前的对话换成一段摘要，为当前会话腾出上下文空间。",
     "button": "压缩"
   },
+  "fork": {
+    "action": "从这里分叉",
+    "dialogTitle": "分叉这段对话",
+    "dialogDescription": "把这条消息之前的对话复制成一个新会话，当前会话保持不变。",
+    "cancel": "取消",
+    "confirm": "创建分叉",
+    "creating": "创建中…"
+  },
   "tools": {
     "settings": "工具设置",
     "error": "工具错误",

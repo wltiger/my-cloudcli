@@ -30,6 +30,8 @@ interface ChatMessagesPaneProps {
   isProcessing?: boolean;
   /** True while ChatComposer's floating activity/stop tab is rendered above the input. */
   hasActivityIndicator?: boolean;
+  /** Opens the Fork dialog at a message's Anchor. Undefined whenever Fork must not be offered. */
+  onForkMessage?: (anchor: string) => void;
   chatMessages: ChatMessage[];
   selectedSession: ProjectSession | null;
   currentSessionId: string | null;
@@ -79,6 +81,7 @@ function ChatMessagesPane({
   isLoadingSessionMessages,
   isProcessing = false,
   hasActivityIndicator = false,
+  onForkMessage,
   chatMessages,
   selectedSession,
   currentSessionId,
@@ -301,6 +304,7 @@ function ChatMessagesPane({
                   showThinking={showThinking}
                   selectedProject={selectedProject}
                   provider={provider}
+                  onForkMessage={onForkMessage}
                 />
               );
             });

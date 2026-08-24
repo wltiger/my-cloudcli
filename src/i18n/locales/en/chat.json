@@ -32,6 +32,14 @@
     "description": "Replace earlier messages with a summary to free up context in this session.",
     "button": "Compact"
   },
+  "fork": {
+    "action": "Fork from here",
+    "dialogTitle": "Fork this conversation",
+    "dialogDescription": "Copies the conversation up to this message into a new session. This session is left unchanged.",
+    "cancel": "Cancel",
+    "confirm": "Create fork",
+    "creating": "Creating…"
+  },
   "tools": {
     "settings": "Tool Settings",
     "error": "Tool Error",

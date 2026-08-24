@@ -7,6 +7,7 @@ import { providerModelsService } from '@/modules/providers/services/provider-mod
 import { providerTokenUsageService } from '@/modules/providers/services/provider-token-usage.service.js';
 import { providerSkillsService } from '@/modules/providers/services/skills.service.js';
 import { sessionConversationsSearchService } from '@/modules/providers/services/session-conversations-search.service.js';
+import { sessionForkService } from '@/modules/providers/services/session-fork.service.js';
 import { sessionsService } from '@/modules/providers/services/sessions.service.js';
 import type {
   CustomProviderModelInput,
@@ -814,6 +815,42 @@ router.get(
       offset,
     });
     res.json(createApiSuccessResponse(result));
+  }),
+);
+
+// ----------------- Fork routes -----------------
+/**
+ * The name the Fork dialog opens pre-filled with. Resolved here rather than in
+ * the frontend, which only holds the first page of a project's sessions and so
+ * cannot tell whether a name is already taken.
+ */
+router.get(
+  '/sessions/:sessionId/fork-name',
+  asyncHandler(async (req: Request, res: Response) => {
+    const sessionId = parseSessionId(req.params.sessionId);
+    res.json(createApiSuccessResponse(sessionForkService.suggestForkName(sessionId)));
+  }),
+);
+
+router.post(
+  '/sessions/:sessionId/fork',
+  asyncHandler(async (req: Request, res: Response) => {
+    const sessionId = parseSessionId(req.params.sessionId);
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    const anchor = typeof body.anchor === 'string' ? body.anchor.trim() : '';
+    if (!anchor) {
+      throw new AppError('anchor is required.', {
+        code: 'ANCHOR_REQUIRED',
+        statusCode: 400,
+      });
+    }
+
+    const result = await sessionForkService.forkSession(
+      sessionId,
+      anchor,
+      parseSessionRenameSummary(body),
+    );
+    res.status(201).json(createApiSuccessResponse(result));
   }),
 );
 

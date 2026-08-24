@@ -31,3 +31,30 @@ test('the full capability list carries supportsCompact for every provider', () =
     assert.equal(typeof capability.supportsCompact, 'boolean');
   }
 });
+
+// Seam: this is what the per-message Fork entry gates on. Codex must withhold
+// it per ADR 0008 (docs/adr/0008-no-codex-rewind-or-fork.md); OpenCode flips to
+// true with its own fork in #23.
+test('Claude reports Fork support', () => {
+  assert.equal(providerCapabilitiesService.getProviderCapabilities('claude').supportsFork, true);
+});
+
+test('Codex withholds Fork support (ADR 0008)', () => {
+  assert.equal(providerCapabilitiesService.getProviderCapabilities('codex').supportsFork, false);
+});
+
+test('Cursor withholds Fork support for now', () => {
+  assert.equal(providerCapabilitiesService.getProviderCapabilities('cursor').supportsFork, false);
+});
+
+test('OpenCode withholds Fork support until #23 lands', () => {
+  assert.equal(providerCapabilitiesService.getProviderCapabilities('opencode').supportsFork, false);
+});
+
+test('the full capability list carries supportsFork for every provider', () => {
+  const all = providerCapabilitiesService.listAllProviderCapabilities();
+  assert.equal(all.length, 4);
+  for (const capability of all) {
+    assert.equal(typeof capability.supportsFork, 'boolean');
+  }
+});

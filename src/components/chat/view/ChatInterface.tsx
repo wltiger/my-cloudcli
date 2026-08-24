@@ -10,12 +10,14 @@ import { useChatProviderState } from '../hooks/useChatProviderState';
 import { useChatSessionState } from '../hooks/useChatSessionState';
 import { useChatRealtimeHandlers } from '../hooks/useChatRealtimeHandlers';
 import { useChatComposerState } from '../hooks/useChatComposerState';
+import { useSessionFork } from '../hooks/useSessionFork';
 import { useSessionStore } from '../../../stores/useSessionStore';
 import { getSessionTitle } from '../../../utils/pageTitle';
 
 import ChatMessagesPane from './subcomponents/ChatMessagesPane';
 import ChatComposer from './subcomponents/ChatComposer';
 import CommandResultModal from './subcomponents/CommandResultModal';
+import SessionForkDialog from './subcomponents/SessionForkDialog';
 
 function ChatInterface({
   isActive,
@@ -75,6 +77,7 @@ function ChatInterface({
     currentProviderModel,
     currentProviderModelOptions,
     currentProviderSupportsCompact,
+    currentProviderSupportsFork,
     opencodeModel,
     setOpenCodeModel,
     permissionMode,
@@ -148,6 +151,25 @@ function ChatInterface({
     onSessionEstablished?.(sessionId, context);
     onNavigateToSession?.(sessionId);
   }, [setCurrentSessionId, onSessionEstablished, onNavigateToSession]);
+
+  // A Fork is a brand-new session too, so it reaches the sidebar and the URL
+  // through exactly the same handoff rather than a second, parallel path.
+  const handleSessionForked = useCallback((forkedSessionId: string, sessionName: string) => {
+    if (!selectedProject) {
+      return;
+    }
+    handleSessionEstablished(forkedSessionId, {
+      provider,
+      project: selectedProject,
+      summary: sessionName,
+    });
+  }, [handleSessionEstablished, provider, selectedProject]);
+
+  const { onForkMessage, forkDialogProps } = useSessionFork({
+    sessionId: currentSessionId || selectedSession?.id || null,
+    canFork: currentProviderSupportsFork && !isProcessing,
+    onForked: handleSessionForked,
+  });
 
   const {
     input,
@@ -356,6 +378,7 @@ function ChatInterface({
           isLoadingSessionMessages={isLoadingSessionMessages}
           isProcessing={isProcessing}
           hasActivityIndicator={hasActivityIndicator}
+          onForkMessage={onForkMessage}
           chatMessages={chatMessages}
           selectedSession={selectedSession}
           currentSessionId={currentSessionId}
@@ -496,6 +519,8 @@ function ChatInterface({
         onSelectProviderModel={selectProviderModel}
         onCompact={currentProviderSupportsCompact ? triggerCompact : undefined}
       />
+
+      <SessionForkDialog {...forkDialogProps} />
     </PermissionContext.Provider>
   );
 }

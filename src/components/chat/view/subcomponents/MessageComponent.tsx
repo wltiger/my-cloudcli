@@ -21,6 +21,7 @@ import { Markdown } from './Markdown';
 import MessageCopyControl from './MessageCopyControl';
 import MessageFullscreenControl from './MessageFullscreenControl';
 import MessageSpeakControl from './MessageSpeakControl';
+import SessionForkControl from './SessionForkControl';
 
 type DiffLine = {
   type: string;
@@ -39,6 +40,8 @@ type MessageComponentProps = {
   showThinking?: boolean;
   selectedProject?: Project | null;
   provider: Provider | string;
+  /** Opens the Fork dialog at a message's Anchor. Undefined whenever Fork must not be offered. */
+  onForkMessage?: (anchor: string) => void;
 };
 
 type InteractiveOption = {
@@ -49,7 +52,7 @@ type InteractiveOption = {
 
 const COPY_HIDDEN_TOOL_NAMES = new Set(['Bash', 'Edit', 'Write', 'ApplyPatch']);
 
-const MessageComponent = memo(({ message, prevMessage, createDiff, onFileOpen, showRawParameters, showThinking, selectedProject, provider }: MessageComponentProps) => {
+const MessageComponent = memo(({ message, prevMessage, createDiff, onFileOpen, showRawParameters, showThinking, selectedProject, provider, onForkMessage }: MessageComponentProps) => {
   const { t } = useTranslation('chat');
   const spacingClasses = useChatSpacing();
   const widthClasses = useChatWidthClasses();
@@ -81,6 +84,10 @@ const MessageComponent = memo(({ message, prevMessage, createDiff, onFileOpen, s
     !isCommandOrFileEditToolResponse &&
     !message.isThinking;
 
+
+  // Empty for every message the backend could not resolve an Anchor for, which
+  // is what keeps the entry off pre-compaction history and live-streamed turns.
+  const forkAnchor = typeof message.anchor === 'string' ? message.anchor : '';
 
   const formattedTime = useMemo(() => new Date(message.timestamp).toLocaleTimeString(), [message.timestamp]);
   const shouldHideThinkingMessage = Boolean(message.isThinking && !showThinking);
@@ -119,6 +126,9 @@ const MessageComponent = memo(({ message, prevMessage, createDiff, onFileOpen, s
                   </Markdown>
                 </div>
                 <div className="mt-1 flex items-center justify-end gap-1 text-xs text-muted-foreground">
+                  {onForkMessage && forkAnchor && (
+                    <SessionForkControl anchor={forkAnchor} messageType="user" onFork={onForkMessage} />
+                  )}
                   {shouldShowUserCopyControl && (
                     <MessageCopyControl content={userCopyContent} messageType="user" />
                   )}
@@ -420,6 +430,9 @@ const MessageComponent = memo(({ message, prevMessage, createDiff, onFileOpen, s
                 )}
                 {shouldShowAssistantCopyControl && (
                   <MessageFullscreenControl content={assistantCopyContent} />
+                )}
+                {onForkMessage && forkAnchor && shouldShowAssistantCopyControl && !message.isToolUse && (
+                  <SessionForkControl anchor={forkAnchor} messageType="assistant" onFork={onForkMessage} />
                 )}
                 {!isGrouped && <span>{formattedTime}</span>}
               </div>

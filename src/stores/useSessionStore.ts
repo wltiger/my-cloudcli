@@ -77,6 +77,8 @@ export interface NormalizedMessage {
   compactTrigger?: 'manual' | 'auto';
   compactPreTokens?: number;
   compactPostTokens?: number;
+  /** The Anchor a Fork of this message is taken at. Absent when it cannot be forked. */
+  anchor?: string;
   images?: Array<{ path?: string; data?: string; name?: string }>;
   files?: Array<{ path?: string; name?: string; mimeType?: string; size?: number }>;
   toolName?: string;
