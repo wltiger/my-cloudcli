@@ -916,6 +916,11 @@ const server = http.createServer((req, res) => {
       res.end('<!doctype html><html><body>CloudCLI</body></html>');
       return;
     }
+    if (process.env.OPENCODE_SESSION_READ_FAILS && req.method === 'GET') {
+      res.writeHead(500, { 'Content-Type': 'application/json' });
+      res.end('{}');
+      return;
+    }
     res.writeHead(200, { 'Content-Type': 'application/json' });
     if (req.url.indexOf('/unrevert') !== -1) {
       res.end(JSON.stringify({ id: 'ses_1' }));
@@ -964,6 +969,7 @@ test('spawnOpenCode reverts before the send, and unreverts when the send fails',
   const previousRunCapture = process.env.OPENCODE_RUN_CAPTURE;
   const previousRunBehavior = process.env.OPENCODE_RUN_BEHAVIOR;
   const previousCommitted = process.env.OPENCODE_COMMITTED;
+  const previousSessionReadFails = process.env.OPENCODE_SESSION_READ_FAILS;
   const previousPortCapture = process.env.OPENCODE_SERVE_PORT_CAPTURE;
   const messages = [];
   const writer = { userId: null, send: (message) => messages.push(message) };
@@ -1056,8 +1062,32 @@ test('spawnOpenCode reverts before the send, and unreverts when the send fails',
     const committed = await readRequests(revertCapturePath);
     assert.equal(committed.some((request) => request.url.endsWith('/unrevert')), false);
     assert.ok(messages.some((message) =>
-      message.kind === 'error' && /your files are still rolled back/i.test(message.content),
+      message.kind === 'error' && /had already applied the Rewind/.test(message.content),
     ));
+
+    // A session read that fails is evidence of nothing. Reading it is the whole
+    // mechanism for telling a committed revert from a standing one, so a 500
+    // there leaves the question open — and an open question must not be
+    // reported as the settled, unrecoverable answer.
+    await rm(revertCapturePath, { force: true });
+    messages.length = 0;
+    delete process.env.OPENCODE_COMMITTED;
+    process.env.OPENCODE_SESSION_READ_FAILS = '1';
+    await assert.rejects(opencodeRuntime.run(
+      'try that again',
+      { sessionId: 'ses_1', cwd: tempRoot, resumeSessionAt: 'msg_u2' },
+      writer,
+      runtimeContext,
+    ));
+
+    const unreadable = await readRequests(revertCapturePath);
+    assert.equal(unreadable.some((request) => request.url.endsWith('/unrevert')), false);
+    assert.ok(messages.some((message) =>
+      message.kind === 'error' && /could not be undone/.test(message.content),
+    ));
+    assert.equal(messages.some((message) =>
+      /had already applied the Rewind/.test(message.content || ''),
+    ), false);
   } finally {
     if (previousPath === undefined) {
       delete process.env[pathKey];
@@ -1076,6 +1106,7 @@ test('spawnOpenCode reverts before the send, and unreverts when the send fails',
       ['OPENCODE_RUN_CAPTURE', previousRunCapture],
       ['OPENCODE_RUN_BEHAVIOR', previousRunBehavior],
       ['OPENCODE_COMMITTED', previousCommitted],
+      ['OPENCODE_SESSION_READ_FAILS', previousSessionReadFails],
       ['OPENCODE_SERVE_PORT_CAPTURE', previousPortCapture],
     ]) {
       if (previous === undefined) {

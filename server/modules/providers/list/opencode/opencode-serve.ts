@@ -184,10 +184,22 @@ function undoOpenCodeRewind(providerSessionId: string, cwd: string, anchor: stri
   return withOpenCodeServe(cwd, async (serveHandle) => {
     const sessionUrl = `${serveHandle.baseUrl}/session/${encodeURIComponent(providerSessionId)}`;
 
-    const current = await readOpenCodeJsonBody(await fetch(sessionUrl, {
+    const sessionResponse = await fetch(sessionUrl, {
       signal: AbortSignal.timeout(OPENCODE_REVERT_REQUEST_TIMEOUT_MS),
-    }));
-    if (current?.revert?.messageID !== anchor) {
+    });
+    const current = await readOpenCodeJsonBody(sessionResponse);
+
+    // A read that failed is not evidence that anything was committed. Falling
+    // through to the `false` below would tell the reader their earlier messages
+    // are gone for good and their files are still rolled back, on the strength
+    // of a 500 — the very lie the session is read here to avoid. An unreadable
+    // session throws instead, so the caller reports the state as unknown rather
+    // than as settled.
+    if (!sessionResponse.ok || typeof current?.id !== 'string') {
+      throw new Error(`OpenCode session could not be read (HTTP ${sessionResponse.status}).`);
+    }
+
+    if (current.revert?.messageID !== anchor) {
       return false;
     }
 
