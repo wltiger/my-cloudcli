@@ -40,6 +40,9 @@
     "confirm": "创建分叉",
     "creating": "创建中…"
   },
+  "clear": {
+    "description": "归档当前对话，在一个新的空会话里继续。"
+  },
   "tools": {
     "settings": "工具设置",
     "error": "工具错误",

@@ -3,6 +3,7 @@ import type { Dispatch, KeyboardEvent, RefObject, SetStateAction } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { authenticatedFetch } from '../../../utils/api';
+import { withClearCommand } from '../utils/clearCommand';
 import { withCompactCommand } from '../utils/compactCommand';
 import { safeLocalStorage } from '../utils/chatStorage';
 import type { LLMProvider, Project } from '../../../types/app';
@@ -14,7 +15,7 @@ export interface SlashCommand {
   description?: string;
   namespace?: string;
   path?: string;
-  type?: 'built-in' | 'custom' | 'skill' | 'compact' | string;
+  type?: 'built-in' | 'custom' | 'skill' | 'compact' | 'clear' | string;
   metadata?: Record<string, unknown>;
   [key: string]: unknown;
 }
@@ -28,6 +29,8 @@ interface UseSlashCommandsOptions {
   onExecuteCommand: (command: SlashCommand, rawInput?: string) => void | Promise<void>;
   /** Whether the active provider can run Compact; gates the `/compact` completion entry. */
   currentProviderSupportsCompact: boolean;
+  /** Whether the active provider offers Clear; gates the `/clear` completion entry. */
+  currentProviderSupportsClear: boolean;
 }
 
 type ProviderSkill = {
@@ -150,6 +153,7 @@ export function useSlashCommands({
   textareaRef,
   onExecuteCommand,
   currentProviderSupportsCompact,
+  currentProviderSupportsClear,
 }: UseSlashCommandsOptions) {
   const { t } = useTranslation('chat');
   const [fetchedCommands, setFetchedCommands] = useState<SlashCommand[]>([]);
@@ -255,11 +259,19 @@ export function useSlashCommands({
   // Derived, not fetched: the Compact capability resolves after the command
   // list does, so folding it in here keeps the capability out of the fetching
   // effect's dependencies and avoids a second round of requests per session.
-  const slashCommands = useMemo(() => withCompactCommand(fetchedCommands, {
+  const compactCommands = useMemo(() => withCompactCommand(fetchedCommands, {
     supported: currentProviderSupportsCompact,
     description: t('compact.description'),
     usage: selectedProject ? readCommandHistory(selectedProject.projectId) : {},
   }), [fetchedCommands, currentProviderSupportsCompact, t, selectedProject]);
+
+  // Clear folds in one entry later, for the same reason and on the same terms.
+  // Unlike Compact it is never sent anywhere: the composer intercepts it.
+  const slashCommands = useMemo(() => withClearCommand(compactCommands, {
+    supported: currentProviderSupportsClear,
+    description: t('clear.description'),
+    usage: selectedProject ? readCommandHistory(selectedProject.projectId) : {},
+  }), [compactCommands, currentProviderSupportsClear, t, selectedProject]);
 
   useEffect(() => {
     if (!showCommandMenu) {

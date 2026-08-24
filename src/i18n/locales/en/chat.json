@@ -40,6 +40,9 @@
     "confirm": "Create fork",
     "creating": "Creating…"
   },
+  "clear": {
+    "description": "Archive this conversation and continue in a new, empty session."
+  },
   "tools": {
     "settings": "Tool Settings",
     "error": "Tool Error",

@@ -236,6 +236,11 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ anchor, summary }),
     }),
+  // Clear: retires the open conversation and opens an empty one beside it.
+  clearSession: (sessionId) =>
+    authenticatedFetch(`/api/providers/sessions/${encodeURIComponent(sessionId)}/clear`, {
+      method: 'POST',
+    }),
   // `hardDelete` => server `?force=true` (remove DB row + Claude *.jsonl + sessions rows for path).
   deleteProject: (projectId, hardDelete = false) => {
     const params = new URLSearchParams();

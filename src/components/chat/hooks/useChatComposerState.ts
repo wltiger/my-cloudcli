@@ -13,6 +13,7 @@ import { useDropzone } from 'react-dropzone';
 
 import { authenticatedFetch } from '../../../utils/api';
 import type { MarkSessionProcessing, SessionActivityMap } from '../../../hooks/useSessionProtection';
+import { CLEAR_COMMAND_NAME } from '../utils/clearCommand';
 import { grantClaudeToolPermission } from '../utils/chatPermissions';
 import {
   clearQueuedMessage,
@@ -50,6 +51,10 @@ interface UseChatComposerStateArgs {
   currentProviderEffort: string;
   /** Whether the active provider can run Compact; gates the `/compact` completion entry. */
   currentProviderSupportsCompact: boolean;
+  /** Whether the active provider offers Clear; gates the `/clear` completion entry. */
+  currentProviderSupportsClear: boolean;
+  /** Retires the open conversation and opens an empty one. Runs `/clear` in place of executing it. */
+  onClearSession?: () => Promise<void> | void;
   isLoading: boolean;
   processingSessions?: SessionActivityMap;
   canAbortSession: boolean;
@@ -241,6 +246,8 @@ export function useChatComposerState({
   currentProviderModel,
   currentProviderEffort,
   currentProviderSupportsCompact,
+  currentProviderSupportsClear,
+  onClearSession,
   isLoading,
   processingSessions,
   canAbortSession,
@@ -407,6 +414,17 @@ export function useChatComposerState({
         return;
       }
 
+      // Clear is a CloudCLI-side action, not a backend or provider command: it
+      // retires this conversation and opens an empty one, so it must never
+      // reach /api/commands/execute. Both ways in -- picking it from the menu
+      // and typing it -- funnel through here.
+      if (command.name === CLEAR_COMMAND_NAME) {
+        setInput('');
+        inputValueRef.current = '';
+        await onClearSession?.();
+        return;
+      }
+
       try {
         const effectiveInput = rawInput ?? input;
         const commandMatch = effectiveInput.match(new RegExp(`${escapeRegExp(command.name)}\\s*(.*)`));
@@ -479,6 +497,7 @@ export function useChatComposerState({
       selectedSession?.id,
       addMessage,
       tokenBudget,
+      onClearSession,
     ],
   );
 
@@ -531,6 +550,7 @@ export function useChatComposerState({
     textareaRef,
     onExecuteCommand: executeCommand,
     currentProviderSupportsCompact,
+    currentProviderSupportsClear,
   });
 
   const {

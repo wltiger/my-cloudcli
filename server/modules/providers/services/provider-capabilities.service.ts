@@ -29,6 +29,8 @@ type ProviderCapabilities = {
   supportsCompact: boolean;
   /** Whether a message's Anchor can be Forked into a new session. */
   supportsFork: boolean;
+  /** Whether the open conversation can be Cleared: archived, and replaced by an empty session. */
+  supportsClear: boolean;
 };
 
 /**
@@ -42,6 +44,9 @@ type ProviderCapabilities = {
  * - Claude and OpenCode support Fork; see ADR 0008 for why Codex never will,
  *   and issue #23 for OpenCode's own, which forks through the same side channel
  *   Compact uses. Cursor is unsupported — not investigated.
+ * - Clear reaches no provider API at all (ADR 0005), so the flag records which
+ *   providers it was verified on — Claude and OpenCode (#24) — rather than what
+ *   a runtime can do. Codex and Cursor are simply unverified.
  */
 const PROVIDER_CAPABILITIES: Record<LLMProvider, ProviderCapabilities> = {
   claude: {
@@ -56,6 +61,7 @@ const PROVIDER_CAPABILITIES: Record<LLMProvider, ProviderCapabilities> = {
     supportsEffort: true,
     supportsCompact: true,
     supportsFork: true,
+    supportsClear: true,
   },
   cursor: {
     provider: 'cursor',
@@ -69,6 +75,7 @@ const PROVIDER_CAPABILITIES: Record<LLMProvider, ProviderCapabilities> = {
     supportsEffort: false,
     supportsCompact: false,
     supportsFork: false,
+    supportsClear: false,
   },
   codex: {
     provider: 'codex',
@@ -82,6 +89,7 @@ const PROVIDER_CAPABILITIES: Record<LLMProvider, ProviderCapabilities> = {
     supportsEffort: true,
     supportsCompact: false,
     supportsFork: false,
+    supportsClear: false,
   },
   opencode: {
     provider: 'opencode',
@@ -98,6 +106,7 @@ const PROVIDER_CAPABILITIES: Record<LLMProvider, ProviderCapabilities> = {
     supportsEffort: true,
     supportsCompact: true,
     supportsFork: true,
+    supportsClear: true,
   },
 };
 

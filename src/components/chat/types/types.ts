@@ -126,6 +126,12 @@ export type SessionEstablishedContext = {
   provider: LLMProvider;
   project: Project;
   summary?: string | null;
+  /**
+   * The conversation this session replaces, when a Clear opened it. Archived
+   * now, so it has to leave the sidebar's active lists in the same update that
+   * adds the session taking over — otherwise both are shown at once.
+   */
+  retiredSessionId?: string | null;
 };
 
 export interface ChatInterfaceProps {

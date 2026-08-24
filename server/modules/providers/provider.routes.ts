@@ -7,6 +7,7 @@ import { providerModelsService } from '@/modules/providers/services/provider-mod
 import { providerTokenUsageService } from '@/modules/providers/services/provider-token-usage.service.js';
 import { providerSkillsService } from '@/modules/providers/services/skills.service.js';
 import { sessionConversationsSearchService } from '@/modules/providers/services/session-conversations-search.service.js';
+import { sessionClearService } from '@/modules/providers/services/session-clear.service.js';
 import { sessionForkService } from '@/modules/providers/services/session-fork.service.js';
 import { sessionsService } from '@/modules/providers/services/sessions.service.js';
 import type {
@@ -851,6 +852,19 @@ router.post(
       parseSessionRenameSummary(body),
     );
     res.status(201).json(createApiSuccessResponse(result));
+  }),
+);
+
+/**
+ * Clear: retires the open conversation and opens an empty session beside it.
+ * Reaches no provider API -- see ADR 0005 for why this is a session boundary
+ * rather than a Rewind to zero.
+ */
+router.post(
+  '/sessions/:sessionId/clear',
+  asyncHandler(async (req: Request, res: Response) => {
+    const sessionId = parseSessionId(req.params.sessionId);
+    res.status(201).json(createApiSuccessResponse(sessionClearService.clearSession(sessionId)));
   }),
 );
 

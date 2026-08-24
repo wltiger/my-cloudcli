@@ -58,3 +58,30 @@ test('the full capability list carries supportsFork for every provider', () => {
     assert.equal(typeof capability.supportsFork, 'boolean');
   }
 });
+
+// Seam: this is what the composer's Clear entry gates on. Clear reaches no
+// provider API at all, so the flag records where it was verified (#24) rather
+// than what a runtime can do -- Codex and Cursor are simply unverified.
+test('Claude reports Clear support', () => {
+  assert.equal(providerCapabilitiesService.getProviderCapabilities('claude').supportsClear, true);
+});
+
+test('OpenCode reports Clear support (#24)', () => {
+  assert.equal(providerCapabilitiesService.getProviderCapabilities('opencode').supportsClear, true);
+});
+
+test('Codex withholds Clear support until it is verified', () => {
+  assert.equal(providerCapabilitiesService.getProviderCapabilities('codex').supportsClear, false);
+});
+
+test('Cursor withholds Clear support until it is verified', () => {
+  assert.equal(providerCapabilitiesService.getProviderCapabilities('cursor').supportsClear, false);
+});
+
+test('the full capability list carries supportsClear for every provider', () => {
+  const all = providerCapabilitiesService.listAllProviderCapabilities();
+  assert.equal(all.length, 4);
+  for (const capability of all) {
+    assert.equal(typeof capability.supportsClear, 'boolean');
+  }
+});

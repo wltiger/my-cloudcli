@@ -51,6 +51,8 @@ type RegisterOptimisticSessionArgs = {
   provider: LLMProvider;
   project: Project;
   summary?: string | null;
+  /** Set by Clear: the archived conversation this session replaces. */
+  retiredSessionId?: string | null;
 };
 
 /**
@@ -590,6 +592,7 @@ export function useProjectsState({
     provider,
     project,
     summary,
+    retiredSessionId,
   }: RegisterOptimisticSessionArgs) => {
     if (!newSessionId || !project?.projectId) {
       return;
@@ -628,7 +631,14 @@ export function useProjectsState({
         return [upsertSessionIntoProject(projectFromRegistration(project), upsert), ...previousProjects];
       }
 
-      const updatedProject = upsertSessionIntoProject(existingProject, upsert);
+      // A Clear retires a conversation in the same breath as opening this one.
+      // Dropping it here rather than through a refetch is what keeps the two
+      // from ever being listed at once: the project payload already excludes
+      // the archived row, but mergeExpandedSessionPages would put it back.
+      const projectWithoutRetired = retiredSessionId
+        ? removeSessionFromProject(existingProject, retiredSessionId)
+        : existingProject;
+      const updatedProject = upsertSessionIntoProject(projectWithoutRetired, upsert);
       if (updatedProject === existingProject) {
         return previousProjects;
       }

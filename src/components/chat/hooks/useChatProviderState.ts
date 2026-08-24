@@ -58,6 +58,7 @@ type ProviderCapabilities = {
   supportsEffort?: boolean;
   supportsCompact?: boolean;
   supportsFork?: boolean;
+  supportsClear?: boolean;
 };
 
 type ProviderCapabilitiesApiResponse = {
@@ -305,6 +306,11 @@ export function useChatProviderState({ selectedSession, selectedProject: _select
   /** Same no-fallback rule as Compact above: hidden until the backend confirms it. */
   const getSupportsForkForProvider = useCallback((targetProvider: LLMProvider): boolean => (
     providerCapabilities?.[targetProvider]?.supportsFork === true
+  ), [providerCapabilities]);
+
+  /** Same no-fallback rule again: hidden until the backend confirms it. */
+  const getSupportsClearForProvider = useCallback((targetProvider: LLMProvider): boolean => (
+    providerCapabilities?.[targetProvider]?.supportsClear === true
   ), [providerCapabilities]);
 
   const pickStoredOrCurrent = (
@@ -764,6 +770,10 @@ export function useChatProviderState({ selectedSession, selectedProject: _select
     () => getSupportsForkForProvider(provider),
     [getSupportsForkForProvider, provider],
   );
+  const currentProviderSupportsClear = useMemo(
+    () => getSupportsClearForProvider(provider),
+    [getSupportsClearForProvider, provider],
+  );
 
   const applyProviderCatalog = useCallback((
     targetProvider: LLMProvider,
@@ -892,6 +902,7 @@ export function useChatProviderState({ selectedSession, selectedProject: _select
     currentProviderModelOptions,
     currentProviderSupportsCompact,
     currentProviderSupportsFork,
+    currentProviderSupportsClear,
     opencodeModel,
     setOpenCodeModel,
     permissionMode,

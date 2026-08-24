@@ -10,6 +10,7 @@ import { useChatProviderState } from '../hooks/useChatProviderState';
 import { useChatSessionState } from '../hooks/useChatSessionState';
 import { useChatRealtimeHandlers } from '../hooks/useChatRealtimeHandlers';
 import { useChatComposerState } from '../hooks/useChatComposerState';
+import { useSessionClear } from '../hooks/useSessionClear';
 import { useSessionFork } from '../hooks/useSessionFork';
 import { useSessionStore } from '../../../stores/useSessionStore';
 import { getSessionTitle } from '../../../utils/pageTitle';
@@ -78,6 +79,7 @@ function ChatInterface({
     currentProviderModelOptions,
     currentProviderSupportsCompact,
     currentProviderSupportsFork,
+    currentProviderSupportsClear,
     opencodeModel,
     setOpenCodeModel,
     permissionMode,
@@ -171,6 +173,26 @@ function ChatInterface({
     onForked: handleSessionForked,
   });
 
+  // Clear opens a brand-new session too, so it takes the very same handoff a
+  // Fork does -- a new session is a new session, whichever gesture made it.
+  // The retired conversation rides along in the same context so it leaves the
+  // sidebar's active lists in the update that adds its replacement.
+  const handleSessionCleared = useCallback((openedSessionId: string, retiredSessionId: string) => {
+    if (!selectedProject) {
+      return;
+    }
+    handleSessionEstablished(openedSessionId, {
+      provider,
+      project: selectedProject,
+      retiredSessionId,
+    });
+  }, [handleSessionEstablished, provider, selectedProject]);
+
+  const clearSession = useSessionClear({
+    sessionId: currentSessionId || selectedSession?.id || null,
+    onCleared: handleSessionCleared,
+  });
+
   const {
     input,
     setInput,
@@ -230,6 +252,8 @@ function ChatInterface({
     currentProviderModel,
     currentProviderEffort,
     currentProviderSupportsCompact,
+    currentProviderSupportsClear,
+    onClearSession: clearSession,
     isLoading: isProcessing,
     processingSessions,
     canAbortSession,
