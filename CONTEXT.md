@@ -39,13 +39,21 @@ Replacing the earlier part of a session's conversation with a model-written summ
 _Avoid_: Summarize, condense — summarizing is the mechanism, not the operation. Also distinct from Clear, which starts a different session rather than shrinking this one.
 
 **Clear** (session):
-Starting an empty conversation in place of the current one. Providers implement this by beginning a new session — Claude Code's `/clear` opens a fresh transcript under a new session id and leaves the previous one intact — so it is a session boundary, not a context operation.
+Retiring the open conversation and continuing in an empty one. The retired session is left whole and Archived rather than emptied, and a new session takes over — so it is a session boundary, not a context operation, and nothing it contained becomes unreadable.
 _Avoid_: Reset, wipe. Don't describe it as "clearing the current session": the current session is left untouched and a different one takes over.
 
 **Rewind** (session):
-Re-entering the current session with its conversation truncated at a chosen earlier message, keeping the same session id and the same transcript file. Everything after the chosen message leaves the context without being deleted. Distinct from **Rewind code**, which restores tracked files to their state at a message and leaves the conversation alone — the two are separately selectable, so always say which is meant.
+Re-sending an earlier message so the session continues from that point, keeping the same session id and the same transcript file. Everything that followed the chosen message leaves the context without being deleted. A Rewind is inseparable from the message that triggers it — there is no state in which a session is rewound and waiting for input. Whether it also restores tracked files to their state at that point is settled by the provider, not chosen per Rewind.
 _Avoid_: Undo, revert — both read as "put the files back". Also distinct from Clear, which cannot preserve the session id.
 
 **Fork** (session):
 Copying a session's transcript up to a chosen message into a **new** session with its own id, leaving the original untouched and still resumable. The branching counterpart to Rewind: the same choose-a-message gesture, the opposite outcome for the session id.
 _Avoid_: Branch, duplicate, copy — reserve those for git. Also distinct from Rewind, which continues the same session instead of creating one.
+
+**Transcript row**:
+One line of a provider's own on-disk session record. Not the unit a reader sees: a single agent turn is written as several rows — reasoning, text, one per tool call — which CloudCLI renders as one message plus its tool cards. Only rows carry an identity the provider will accept back; the ids on rendered messages are CloudCLI's own.
+_Avoid_: Line, entry, event
+
+**Anchor**:
+The transcript row a Rewind or Fork is taken at, named the way its provider names it. Chosen by pointing at a message but never derivable from one: providers disagree about which row the same gesture lands on, and even about whether the named row is kept or dropped — OpenCode's own fork excludes it while its own revert includes it. A message with no anchor is one the operation cannot be performed on at all.
+_Avoid_: Checkpoint, cut point, target

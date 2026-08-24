@@ -1,0 +1,5 @@
+# Abandoned-branch filtering applies only after the last compaction boundary
+
+A Claude Rewind does not rewrite the transcript: the new turn is appended with its `parentUuid` pointing back at the anchor, so the file becomes a tree and CloudCLI's flat reader would go on rendering the abandoned branch after a reload. The SDK's `getSessionMessages` resolves the active branch correctly, but it also drops everything before a compaction boundary, which would undo the compaction boundary CloudCLI renders in the message stream. Since a Rewind anchor from before a Compact cannot resolve at all, no abandoned branch can exist before the last boundary — so the filter is applied only to the segment after it, and everything before it renders flat exactly as it does today.
+
+**Consequences**: a Rewind performed before a Compact leaves its abandoned branch visible in the pre-boundary history. That segment is already unaddressable by then, so it is history either way; the alternative — filtering the whole transcript — costs the compaction boundary display, which is worse.
