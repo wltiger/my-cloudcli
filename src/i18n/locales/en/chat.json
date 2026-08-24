@@ -49,7 +49,8 @@
     "escToCancel": "Esc to cancel",
     "cancel": "Cancel rewind",
     "leavingContext_one": "Sending will take the conversation back to this message. 1 message leaves the context.",
-    "leavingContext_other": "Sending will take the conversation back to this message. {{count}} messages leave the context."
+    "leavingContext_other": "Sending will take the conversation back to this message. {{count}} messages leave the context.",
+    "filesRollBack": "Tracked files will be rolled back to their state at that message too."
   },
   "tools": {
     "settings": "Tool Settings",

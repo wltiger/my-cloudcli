@@ -18,6 +18,7 @@ import {
 } from '@/shared/utils.js';
 
 import { buildOpenCodeAnchorIndex } from './opencode-anchors.js';
+import { buildOpenCodeRewindAnchorIndex, filterOpenCodeRevertedRows } from './opencode-rewind.js';
 import { forkOpenCodeSession } from './opencode-runtime.provider.js';
 
 const PROVIDER = 'opencode';
@@ -46,6 +47,26 @@ const openOpenCodeDatabase = (): Database.Database | null => {
   }
 
   return new Database(dbPath, { readonly: true, fileMustExist: true });
+};
+
+/**
+ * The message id this session was Rewound at, or null when it is not reverted.
+ *
+ * A Rewind on OpenCode is a server-side revert, and OpenCode records it as one
+ * column on the session row rather than by removing anything: every message it
+ * reverted stays in `message`/`part` and its own read API still returns them
+ * all (measured against 1.18.18). The column holds `{messageID, snapshot,
+ * diff}` and has been part of the base `session` schema, so it is read without
+ * the `PRAGMA table_info` guard the token counters need.
+ */
+const readOpenCodeRevertedMessageId = (
+  db: Database.Database,
+  sessionId: string,
+): string | null => {
+  const row = db.prepare('SELECT revert FROM session WHERE id = ?').get(sessionId) as
+    | { revert: string | null }
+    | undefined;
+  return readOptionalString(readJsonRecord(row?.revert)?.messageID) ?? null;
 };
 
 const formatToolContent = (value: unknown): string => {
@@ -341,7 +362,14 @@ export class OpenCodeSessionsProvider implements IProviderSessions {
           p.id
       `).all(providerSessionId) as OpenCodeHistoryRow[];
 
-      const normalized = this.normalizeHistoryRows(rows, sessionId);
+      // A Rewind leaves everything it reverted in OpenCode's own database, so a
+      // straight read goes on rendering it. Filtered before anything else looks
+      // at the rows, so anchors and pagination all count the same conversation.
+      const activeRows = filterOpenCodeRevertedRows(
+        rows,
+        readOpenCodeRevertedMessageId(db, providerSessionId),
+      );
+      const normalized = this.normalizeHistoryRows(activeRows, sessionId);
       const tokenUsage = aggregateOpenCodeSessionTokenUsage(db, providerSessionId);
 
       const normalizedOffset = Math.max(0, offset);
@@ -371,15 +399,21 @@ export class OpenCodeSessionsProvider implements IProviderSessions {
     // anchor names an OpenCode message, and one message becomes several
     // messages here, each under an id of CloudCLI's own making.
     const anchors = buildOpenCodeAnchorIndex(rows);
+    const rewindAnchors = buildOpenCodeRewindAnchorIndex(rows);
     const normalized: NormalizedMessage[] = [];
     const emittedMessageErrors = new Set<string>();
 
     for (const row of rows) {
-      // Every message this row produces is forkable at the same anchor.
+      // Every message this row produces is forkable at the same anchor, and
+      // rewindable at the other one — two rules, two rows, both opaque here.
       const anchor = anchors.get(row.message_id);
+      const rewindAnchor = rewindAnchors.get(row.message_id);
       const push = (message: NormalizedMessage) => {
         if (anchor) {
           message.anchor = anchor;
+        }
+        if (rewindAnchor) {
+          message.rewindAnchor = rewindAnchor;
         }
         normalized.push(message);
       };

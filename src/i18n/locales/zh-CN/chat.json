@@ -48,7 +48,8 @@
     "label": "回到这里",
     "escToCancel": "按 Esc 取消",
     "cancel": "取消回退",
-    "leavingContext_other": "发送后对话将回到这条消息，有 {{count}} 条消息离开上下文。"
+    "leavingContext_other": "发送后对话将回到这条消息，有 {{count}} 条消息离开上下文。",
+    "filesRollBack": "被跟踪的文件也会一起回到那条消息时的内容。"
   },
   "tools": {
     "settings": "工具设置",

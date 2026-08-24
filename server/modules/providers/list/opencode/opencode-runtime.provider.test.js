@@ -805,3 +805,220 @@ test('forkOpenCodeSession forks through the ephemeral server, renames the copy, 
     await rm(tempRoot, { recursive: true, force: true });
   }
 });
+
+/**
+ * A fake `opencode` that is both halves of a Rewind: `serve` starts a real HTTP
+ * server answering the legacy `revert`/`unrevert` routes, and `run` is the send
+ * that rides with it. One executable rather than two because a Rewind is two
+ * calls to the same binary — that is the whole reason it needs its own path.
+ *
+ * `OPENCODE_RUN_BEHAVIOR=fail` makes the send exit non-zero, which is the case
+ * that has to put the reader's files back.
+ */
+async function createFakeOpenCodeRewindExecutable(binDir) {
+  const scriptPath = path.join(binDir, 'opencode.js');
+  await writeFile(scriptPath, `
+const fs = require('node:fs');
+
+if (process.argv[2] !== 'serve') {
+  if (process.env.OPENCODE_RUN_CAPTURE) {
+    fs.writeFileSync(process.env.OPENCODE_RUN_CAPTURE, JSON.stringify({ args: process.argv.slice(2) }));
+  }
+  if (process.env.OPENCODE_RUN_BEHAVIOR === 'fail') {
+    process.stderr.write('run failed\\n');
+    process.exit(3);
+  }
+  console.log(JSON.stringify({ type: 'text', sessionID: 'ses_rewound', text: 'assistant response' }));
+  console.log(JSON.stringify({ type: 'step_finish', sessionID: 'ses_rewound' }));
+  process.exit(0);
+}
+
+const http = require('node:http');
+const server = http.createServer((req, res) => {
+  let body = '';
+  req.on('data', (chunk) => { body += chunk; });
+  req.on('end', () => {
+    if (process.env.OPENCODE_REVERT_CAPTURE) {
+      fs.appendFileSync(process.env.OPENCODE_REVERT_CAPTURE, JSON.stringify({
+        method: req.method,
+        url: req.url,
+        body: body,
+      }) + '\\n');
+    }
+    if (process.env.OPENCODE_REVERT_BEHAVIOR === 'html-trap') {
+      res.writeHead(200, { 'Content-Type': 'text/html' });
+      res.end('<!doctype html><html><body>CloudCLI</body></html>');
+      return;
+    }
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    if (req.url.indexOf('/unrevert') !== -1) {
+      res.end(JSON.stringify({ id: 'ses_1' }));
+      return;
+    }
+    // The session read the undo path takes first. OPENCODE_COMMITTED=1 is the
+    // measured case where \`opencode run\` already committed the revert, so
+    // there is nothing left to put back.
+    if (req.method === 'GET') {
+      res.end(JSON.stringify(process.env.OPENCODE_COMMITTED
+        ? { id: 'ses_1' }
+        : { id: 'ses_1', revert: { messageID: 'msg_u2' } }));
+      return;
+    }
+    res.end(JSON.stringify({ id: 'ses_1', revert: { messageID: JSON.parse(body).messageID } }));
+  });
+});
+
+server.listen(0, '127.0.0.1', () => {
+  const address = server.address();
+  if (process.env.OPENCODE_SERVE_PORT_CAPTURE) {
+    fs.writeFileSync(process.env.OPENCODE_SERVE_PORT_CAPTURE, String(address.port));
+  }
+  console.log('opencode server listening on http://127.0.0.1:' + address.port);
+});
+`, 'utf8');
+
+  if (process.platform === 'win32') {
+    const commandPath = path.join(binDir, 'opencode.cmd');
+    await writeFile(commandPath, '@echo off\r\nnode "%~dp0opencode.js" %*\r\n', 'utf8');
+    return;
+  }
+
+  const commandPath = path.join(binDir, 'opencode');
+  await writeFile(commandPath, '#!/bin/sh\nnode "$(dirname "$0")/opencode.js" "$@"\n', 'utf8');
+  await chmod(commandPath, 0o755);
+}
+
+test('spawnOpenCode reverts before the send, and unreverts when the send fails', async () => {
+  const tempRoot = await mkdtemp(path.join(os.tmpdir(), 'opencode-cli-rewind-'));
+  const pathKey = findEnvKey('PATH');
+  const pathExtKey = findEnvKey('PATHEXT');
+  const previousPath = process.env[pathKey];
+  const previousPathExt = process.env[pathExtKey];
+  const previousRevertCapture = process.env.OPENCODE_REVERT_CAPTURE;
+  const previousRunCapture = process.env.OPENCODE_RUN_CAPTURE;
+  const previousRunBehavior = process.env.OPENCODE_RUN_BEHAVIOR;
+  const previousCommitted = process.env.OPENCODE_COMMITTED;
+  const previousPortCapture = process.env.OPENCODE_SERVE_PORT_CAPTURE;
+  const messages = [];
+  const writer = { userId: null, send: (message) => messages.push(message) };
+  const readRequests = async (capturePath) => (await readFile(capturePath, 'utf8'))
+    .split('\n')
+    .filter((line) => line.trim())
+    .map((line) => JSON.parse(line));
+
+  try {
+    await createFakeOpenCodeRewindExecutable(tempRoot);
+    process.env[pathKey] = `${tempRoot}${path.delimiter}${previousPath || ''}`;
+    if (process.platform === 'win32') {
+      process.env[pathExtKey] = previousPathExt?.toUpperCase().includes('.CMD')
+        ? previousPathExt
+        : `.COM;.EXE;.BAT;.CMD${previousPathExt ? `;${previousPathExt}` : ''}`;
+    }
+
+    const revertCapturePath = path.join(tempRoot, 'revert-requests.jsonl');
+    const runCapturePath = path.join(tempRoot, 'run-args.json');
+    const portCapturePath = path.join(tempRoot, 'serve-port.txt');
+    process.env.OPENCODE_REVERT_CAPTURE = revertCapturePath;
+    process.env.OPENCODE_RUN_CAPTURE = runCapturePath;
+    process.env.OPENCODE_SERVE_PORT_CAPTURE = portCapturePath;
+
+    await opencodeRuntime.run(
+      'try that again',
+      { sessionId: 'ses_1', cwd: tempRoot, resumeSessionAt: 'msg_u2' },
+      writer,
+      runtimeContext,
+    );
+
+    // One revert, at the legacy unprefixed route, naming the Anchor verbatim —
+    // OpenCode's revert is inclusive, so the Anchor is the message itself.
+    const requests = await readRequests(revertCapturePath);
+    assert.equal(requests.length, 1);
+    assert.equal(requests[0].method, 'POST');
+    assert.match(requests[0].url, /^\/session\/ses_1\/revert$/);
+    assert.deepEqual(JSON.parse(requests[0].body), { messageID: 'msg_u2' });
+
+    // ...and then an ordinary send under the same session id, with the Anchor
+    // dropped rather than passed on to a CLI that has no flag for it.
+    const runArgs = JSON.parse(await readFile(runCapturePath, 'utf8')).args;
+    assert.deepEqual(runArgs.slice(0, 3), ['run', '--format', 'json']);
+    assert.equal(runArgs[runArgs.indexOf('--session') + 1], 'ses_1');
+    assert.equal(runArgs.includes('msg_u2'), false);
+    assert.ok(messages.some((message) => message.kind === 'stream_delta'));
+    assert.equal(messages.some((message) => message.kind === 'error'), false);
+
+    const port = Number((await readFile(portCapturePath, 'utf8')).trim());
+    assert.ok(await waitUntilPortUnreachable(port, 3000), 'expected the server to be shut down after the revert');
+
+    // A send that fails after the revert succeeded leaves the reader with
+    // rolled-back files and nothing to show for it, so both go back.
+    await rm(revertCapturePath, { force: true });
+    messages.length = 0;
+    process.env.OPENCODE_RUN_BEHAVIOR = 'fail';
+    await assert.rejects(opencodeRuntime.run(
+      'try that again',
+      { sessionId: 'ses_1', cwd: tempRoot, resumeSessionAt: 'msg_u2' },
+      writer,
+      runtimeContext,
+    ));
+
+    const recovered = await readRequests(revertCapturePath);
+    assert.deepEqual(recovered.map((request) => request.url), [
+      '/session/ses_1/revert',
+      '/session/ses_1',
+      '/session/ses_1/unrevert',
+    ]);
+    // Silent recovery is not acceptable: their working tree moved twice.
+    assert.ok(messages.some((message) =>
+      message.kind === 'error' && /the Rewind was undone/.test(message.content),
+    ));
+
+    // Measured: `opencode run` commits an outstanding revert as soon as it
+    // appends its own user message, so most failures surface with nothing left
+    // to undo — and `unrevert` would still answer 200. Claiming the files came
+    // back there would be a lie, so the session is read first and the reader is
+    // told what actually happened.
+    await rm(revertCapturePath, { force: true });
+    messages.length = 0;
+    process.env.OPENCODE_COMMITTED = '1';
+    await assert.rejects(opencodeRuntime.run(
+      'try that again',
+      { sessionId: 'ses_1', cwd: tempRoot, resumeSessionAt: 'msg_u2' },
+      writer,
+      runtimeContext,
+    ));
+
+    const committed = await readRequests(revertCapturePath);
+    assert.equal(committed.some((request) => request.url.endsWith('/unrevert')), false);
+    assert.ok(messages.some((message) =>
+      message.kind === 'error' && /your files are still rolled back/i.test(message.content),
+    ));
+  } finally {
+    if (previousPath === undefined) {
+      delete process.env[pathKey];
+    } else {
+      process.env[pathKey] = previousPath;
+    }
+
+    if (previousPathExt === undefined) {
+      delete process.env[pathExtKey];
+    } else {
+      process.env[pathExtKey] = previousPathExt;
+    }
+
+    for (const [name, previous] of [
+      ['OPENCODE_REVERT_CAPTURE', previousRevertCapture],
+      ['OPENCODE_RUN_CAPTURE', previousRunCapture],
+      ['OPENCODE_RUN_BEHAVIOR', previousRunBehavior],
+      ['OPENCODE_COMMITTED', previousCommitted],
+      ['OPENCODE_SERVE_PORT_CAPTURE', previousPortCapture],
+    ]) {
+      if (previous === undefined) {
+        delete process.env[name];
+      } else {
+        process.env[name] = previous;
+      }
+    }
+
+    await rm(tempRoot, { recursive: true, force: true });
+  }
+});

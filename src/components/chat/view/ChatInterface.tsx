@@ -83,6 +83,7 @@ function ChatInterface({
     currentProviderSupportsFork,
     currentProviderSupportsClear,
     currentProviderSupportsRewind,
+    currentProviderRewindRestoresFiles,
     opencodeModel,
     setOpenCodeModel,
     permissionMode,
@@ -496,7 +497,11 @@ function ChatInterface({
           )}
 
           {rewindDraft && (
-            <SessionRewindNotice leavingCount={rewindLeavingCount} onCancel={cancelRewind} />
+            <SessionRewindNotice
+              leavingCount={rewindLeavingCount}
+              restoresFiles={currentProviderRewindRestoresFiles}
+              onCancel={cancelRewind}
+            />
           )}
 
           <ChatComposer

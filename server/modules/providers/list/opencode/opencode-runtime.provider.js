@@ -134,6 +134,9 @@ const OPENCODE_COMPACT_REQUEST_TIMEOUT_MS = 120_000;
 // Fork copies rows and runs no model, so it answers in well under a second;
 // this only stops a wedged server from hanging the request that awaits it.
 const OPENCODE_FORK_REQUEST_TIMEOUT_MS = 30_000;
+// Revert and unrevert restore a git snapshot as well as the conversation, so
+// they do a little more work than fork does — still nowhere near a model call.
+const OPENCODE_REVERT_REQUEST_TIMEOUT_MS = 30_000;
 // A kill must not outlive this: on POSIX it is the SIGTERM -> SIGKILL
 // escalation window, on Windows the cap on `taskkill` itself.
 const OPENCODE_KILL_ESCALATE_MS = 5_000;
@@ -505,10 +508,182 @@ export async function forkOpenCodeSession(providerSessionId, { cwd, anchor, titl
   }
 }
 
+/**
+ * Rewinds a session to `anchor`, rolling its tracked files back with it.
+ *
+ * Starts and shuts down the same short-lived headless server Compact and fork
+ * use, never a second implementation. The revert and the unrevert below each
+ * get their own, because the revert happens at send time and the unrevert only
+ * if that send later fails, with the whole run in between.
+ */
+async function revertOpenCodeSession(providerSessionId, cwd, anchor) {
+  const serveHandle = await startOpenCodeServeProcess(cwd || process.cwd());
+
+  try {
+    const response = await fetch(
+      `${serveHandle.baseUrl}/session/${encodeURIComponent(providerSessionId)}/revert`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ messageID: anchor }),
+        signal: AbortSignal.timeout(OPENCODE_REVERT_REQUEST_TIMEOUT_MS),
+      }
+    );
+
+    // The third time this trap has bitten the feature, and the most expensive:
+    // the published `/api/session/{id}/revert` is not a route, falls through to
+    // the web UI's HTML catch-all and answers 200 with an HTML body having
+    // changed nothing at all (measured — the file it should have rolled back
+    // was untouched). Only the recorded revert, read *out of the body* of the
+    // legacy unprefixed route, proves anything ran.
+    const session = await readOpenCodeJsonBody(response);
+    if (!response.ok || session?.revert?.messageID !== anchor) {
+      throw new Error(`OpenCode revert failed (HTTP ${response.status}).`);
+    }
+  } finally {
+    await killOpenCodeProcessTree(serveHandle.process);
+  }
+}
+
+/**
+ * Puts a Rewind back after the send that carried it failed.
+ *
+ * Deliberately not a bare `unrevert`, because of one measured fact:
+ * `opencode run` **commits** an outstanding revert the moment it appends its
+ * own user message, deleting every reverted message for good — which happens
+ * before the model call that most failures come from. By then there is nothing
+ * left to undo, and `unrevert` still answers 200 with an empty `revert`, which
+ * is indistinguishable from having restored something. So the session is read
+ * first and only a revert still standing at this Anchor is undone; the caller
+ * needs the difference because it has to tell the reader the truth about their
+ * working tree.
+ *
+ * @returns true when the conversation and the files were actually put back.
+ */
+async function undoOpenCodeRewind(providerSessionId, cwd, anchor) {
+  const serveHandle = await startOpenCodeServeProcess(cwd || process.cwd());
+  const sessionUrl = `${serveHandle.baseUrl}/session/${encodeURIComponent(providerSessionId)}`;
+
+  try {
+    const current = await readOpenCodeJsonBody(await fetch(sessionUrl, {
+      signal: AbortSignal.timeout(OPENCODE_REVERT_REQUEST_TIMEOUT_MS),
+    }));
+    if (current?.revert?.messageID !== anchor) {
+      return false;
+    }
+
+    const response = await fetch(`${sessionUrl}/unrevert`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: '{}',
+      signal: AbortSignal.timeout(OPENCODE_REVERT_REQUEST_TIMEOUT_MS),
+    });
+    const session = await readOpenCodeJsonBody(response);
+    if (!response.ok || typeof session?.id !== 'string' || session.revert) {
+      throw new Error(`OpenCode unrevert failed (HTTP ${response.status}).`);
+    }
+
+    return true;
+  } finally {
+    await killOpenCodeProcessTree(serveHandle.process);
+  }
+}
+
+/**
+ * The Anchor a pending Rewind put on this send, or null when there is none.
+ *
+ * The frontend snapshots it into the send options under the name Claude's SDK
+ * option uses, so it arrives here for free — `chat-websocket.service.ts`
+ * spreads unknown client options straight through. It is meaningless without a
+ * session to revert.
+ */
+function readOpenCodeRewindAnchor(options) {
+  const anchor = options?.resumeSessionAt;
+  return typeof anchor === 'string' && anchor.trim() ? anchor.trim() : null;
+}
+
+/**
+ * Performs a Rewind and then the send that carries it.
+ *
+ * Unlike Claude's, this cannot ride inside the send: `resumeSessionAt` is an
+ * option on the SDK query, but OpenCode's revert is an immediate call of its
+ * own, so a Rewind here is **two** operations and the atomicity Claude gets for
+ * free has to be built. The revert is inclusive of the Anchor it names (see
+ * `buildOpenCodeRewindAnchorIndex`) and restores tracked files along with the
+ * conversation, which is why the composer warns about the files first.
+ *
+ * If the send fails after the revert succeeded, the reader would be left with
+ * rolled-back files and nothing to show for it, so the revert is undone where
+ * OpenCode still allows it (see `undoOpenCodeRewind` for when it does not) and
+ * they are told either way — their working tree moved, and silence about that
+ * is not an option.
+ */
+async function runOpenCodeRewindSend(command, options, ws, context, anchor) {
+  const { sessionId, projectPath, cwd } = options;
+  const workingDir = cwd || projectPath || process.cwd();
+  const providerSessionId = context.resolveProviderSessionId(sessionId);
+
+  const sendError = (content) => {
+    ws.send(createNormalizedMessage({
+      kind: 'error',
+      content,
+      sessionId: sessionId || null,
+      provider: 'opencode',
+    }));
+  };
+  const finishFailed = () => {
+    ws.send(createCompleteMessage({
+      provider: 'opencode',
+      sessionId: sessionId || null,
+      exitCode: 1,
+    }));
+  };
+
+  if (!providerSessionId) {
+    sendError('Nothing to rewind to yet — start a conversation first.');
+    finishFailed();
+    return;
+  }
+
+  try {
+    await revertOpenCodeSession(providerSessionId, workingDir, anchor);
+  } catch (error) {
+    const errorContent = error instanceof Error ? error.message : String(error);
+    console.error('[OpenCode] Rewind failed before the send:', errorContent);
+    sendError(`Rewind failed, so nothing was sent: ${errorContent}`);
+    finishFailed();
+    return;
+  }
+
+  try {
+    // An ordinary send from here on, minus the Anchor that brought it here —
+    // dropping it is what stops this branch from being taken a second time.
+    return await spawnOpenCode(command, { ...options, resumeSessionAt: undefined }, ws, context);
+  } catch (error) {
+    try {
+      sendError(await undoOpenCodeRewind(providerSessionId, workingDir, anchor)
+        ? 'The send failed, so the Rewind was undone — the conversation and your files are back where they were.'
+        : 'The send failed, and OpenCode had already applied the Rewind by then — the earlier messages are gone and your files are still rolled back to that point.');
+    } catch (undoError) {
+      const undoContent = undoError instanceof Error ? undoError.message : String(undoError);
+      console.error('[OpenCode] Rewind could not be undone after a failed send:', undoContent);
+      sendError(`The send failed and the Rewind could not be undone (${undoContent}). Your files are still rolled back to the earlier point.`);
+    }
+    throw error;
+  }
+}
+
 async function spawnOpenCode(command, options = {}, ws, context) {
   // `/compact` never reaches `opencode run` — see runOpenCodeCompactSideChannel.
   if (isOpenCodeCompactCommand(command)) {
     return runOpenCodeCompactSideChannel(options, ws, context);
+  }
+
+  // A Rewind is issued here rather than folded into the CLI arguments below,
+  // because it is a separate call that has to happen before the send.
+  const rewindAnchor = readOpenCodeRewindAnchor(options);
+  if (rewindAnchor) {
+    return runOpenCodeRewindSend(command, options, ws, context, rewindAnchor);
   }
 
   return new Promise((resolve, reject) => {

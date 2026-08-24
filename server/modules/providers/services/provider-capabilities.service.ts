@@ -33,6 +33,13 @@ type ProviderCapabilities = {
   supportsClear: boolean;
   /** Whether an earlier message can be re-sent to Rewind the session back to that point. */
   supportsRewind: boolean;
+  /**
+   * Whether that Rewind also restores tracked files to their state at that
+   * point. Settled by the provider rather than chosen per Rewind (see the
+   * Rewind entry in `CONTEXT.md`): it exists so the notice above the composer
+   * can say so before the reader commits, not as a toggle.
+   */
+  rewindRestoresFiles: boolean;
 };
 
 /**
@@ -46,9 +53,11 @@ type ProviderCapabilities = {
  * - Claude and OpenCode support Fork; see ADR 0008 for why Codex never will,
  *   and issue #23 for OpenCode's own, which forks through the same side channel
  *   Compact uses. Cursor is unsupported — not investigated.
- * - Only Claude supports Rewind so far (#25), through the SDK's own
- *   `resumeSessionAt`. OpenCode's `revert` lands in #26, Codex never will
- *   (ADR 0008), and Cursor is unsupported — not investigated.
+ * - Claude and OpenCode support Rewind — Claude through the SDK's own
+ *   `resumeSessionAt` (#25), OpenCode through the `revert` its HTTP API
+ *   exposes (#26). Codex never will (ADR 0008), and Cursor is unsupported —
+ *   not investigated. Only OpenCode's restores tracked files with the
+ *   conversation, because that is the only shape its API has.
  * - Clear reaches no provider API at all (ADR 0005), so the flag records which
  *   providers it was verified on — Claude and OpenCode (#24) — rather than what
  *   a runtime can do. Codex and Cursor are simply unverified.
@@ -68,6 +77,7 @@ const PROVIDER_CAPABILITIES: Record<LLMProvider, ProviderCapabilities> = {
     supportsFork: true,
     supportsClear: true,
     supportsRewind: true,
+    rewindRestoresFiles: false,
   },
   cursor: {
     provider: 'cursor',
@@ -83,6 +93,7 @@ const PROVIDER_CAPABILITIES: Record<LLMProvider, ProviderCapabilities> = {
     supportsFork: false,
     supportsClear: false,
     supportsRewind: false,
+    rewindRestoresFiles: false,
   },
   codex: {
     provider: 'codex',
@@ -98,6 +109,7 @@ const PROVIDER_CAPABILITIES: Record<LLMProvider, ProviderCapabilities> = {
     supportsFork: false,
     supportsClear: false,
     supportsRewind: false,
+    rewindRestoresFiles: false,
   },
   opencode: {
     provider: 'opencode',
@@ -115,7 +127,8 @@ const PROVIDER_CAPABILITIES: Record<LLMProvider, ProviderCapabilities> = {
     supportsCompact: true,
     supportsFork: true,
     supportsClear: true,
-    supportsRewind: false,
+    supportsRewind: true,
+    rewindRestoresFiles: true,
   },
 };
 

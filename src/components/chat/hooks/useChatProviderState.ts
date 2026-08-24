@@ -60,6 +60,7 @@ type ProviderCapabilities = {
   supportsFork?: boolean;
   supportsClear?: boolean;
   supportsRewind?: boolean;
+  rewindRestoresFiles?: boolean;
 };
 
 type ProviderCapabilitiesApiResponse = {
@@ -315,12 +316,23 @@ export function useChatProviderState({ selectedSession, selectedProject: _select
   ), [providerCapabilities]);
 
   /**
-   * Same no-fallback rule once more. Deliberately separate from Fork: OpenCode
-   * can fork today but cannot rewind until #26, so one flag would offer an
-   * entry that does nothing.
+   * Same no-fallback rule once more. Deliberately separate from Fork: the two
+   * are different rules on the same providers, and one shared flag would offer
+   * an entry that does nothing.
    */
   const getSupportsRewindForProvider = useCallback((targetProvider: LLMProvider): boolean => (
     providerCapabilities?.[targetProvider]?.supportsRewind === true
+  ), [providerCapabilities]);
+
+  /**
+   * Whether a Rewind on this provider also rolls tracked files back. Settled by
+   * the provider, never a choice (see the Rewind entry in `CONTEXT.md`) — this
+   * exists only so the notice above the composer can say so before the reader
+   * commits. OpenCode's revert restores files; Claude's `resumeSessionAt` does
+   * not.
+   */
+  const getRewindRestoresFilesForProvider = useCallback((targetProvider: LLMProvider): boolean => (
+    providerCapabilities?.[targetProvider]?.rewindRestoresFiles === true
   ), [providerCapabilities]);
 
   const pickStoredOrCurrent = (
@@ -788,6 +800,10 @@ export function useChatProviderState({ selectedSession, selectedProject: _select
     () => getSupportsRewindForProvider(provider),
     [getSupportsRewindForProvider, provider],
   );
+  const currentProviderRewindRestoresFiles = useMemo(
+    () => getRewindRestoresFilesForProvider(provider),
+    [getRewindRestoresFilesForProvider, provider],
+  );
 
   const applyProviderCatalog = useCallback((
     targetProvider: LLMProvider,
@@ -918,6 +934,7 @@ export function useChatProviderState({ selectedSession, selectedProject: _select
     currentProviderSupportsFork,
     currentProviderSupportsClear,
     currentProviderSupportsRewind,
+    currentProviderRewindRestoresFiles,
     opencodeModel,
     setOpenCodeModel,
     permissionMode,

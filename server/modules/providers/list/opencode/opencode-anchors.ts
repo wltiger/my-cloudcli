@@ -13,15 +13,75 @@ import { readJsonRecord, readOptionalString } from '@/shared/utils.js';
 export const OPENCODE_SESSION_END_ANCHOR = 'opencode:session-end';
 
 /**
- * The columns of one joined message/part row that the Anchor rule reads. The
+ * The columns of one joined message/part row that the Anchor rules read. The
  * history query in `opencode-sessions.provider.ts` selects more than this; the
  * extra columns say nothing about where a turn ends.
+ *
+ * Exported for `opencode-rewind.ts`, which reads the same rows under the
+ * opposite convention.
  */
-type OpenCodeAnchorRow = {
+export type OpenCodeAnchorRow = {
   message_id: string;
   message_data: string | null;
   part_data: string | null;
 };
+
+/**
+ * One OpenCode message, collapsed back out of the per-part rows the history
+ * query returns.
+ */
+export type OpenCodeMessageSummary = {
+  id: string;
+  role: string;
+  isCompaction: boolean;
+};
+
+/**
+ * Collapses per-part rows into the messages an Anchor can name, in first-seen
+ * order, and locates the last compaction among them.
+ *
+ * Exported for `opencode-rewind.ts`: the fork rule, the rewind rule and the
+ * revert filter all need this same collapse and this same boundary, and three
+ * private copies of it would drift. It is the counterpart of
+ * `claude-anchors.ts` exporting `findLastCompactBoundaryIndex` to
+ * `claude-rewind.ts` — one shared scan, three rules that stay separate.
+ *
+ * @param rows Joined message/part rows in the order the history query returns.
+ * @returns The collapsed messages and the index of the last compaction among
+ *   them, or -1 when the session has never been compacted.
+ */
+export function readOpenCodeMessageIndex(rows: OpenCodeAnchorRow[]): {
+  messages: OpenCodeMessageSummary[];
+  lastCompactionIndex: number;
+} {
+  // A Map keeps first-seen order, which is the order the query returned.
+  const byId = new Map<string, OpenCodeMessageSummary>();
+  for (const row of rows) {
+    let message = byId.get(row.message_id);
+    if (!message) {
+      message = {
+        id: row.message_id,
+        role: readOptionalString(readJsonRecord(row.message_data)?.role) ?? '',
+        isCompaction: false,
+      };
+      byId.set(row.message_id, message);
+    }
+    if (readOptionalString(readJsonRecord(row.part_data)?.type) === 'compaction') {
+      message.isCompaction = true;
+    }
+  }
+
+  const messages = [...byId.values()];
+  let lastCompactionIndex = -1;
+  for (let index = messages.length - 1; index >= 0; index--) {
+    if (messages[index].isCompaction) {
+      lastCompactionIndex = index;
+      break;
+    }
+  }
+
+  return { messages, lastCompactionIndex };
+}
 
 /**
  * Computes the Anchor of every OpenCode message in a session.
@@ -53,40 +113,16 @@ type OpenCodeAnchorRow = {
  *   anchor and offers no Fork.
  */
 export function buildOpenCodeAnchorIndex(rows: OpenCodeAnchorRow[]): Map<string, string> {
-  // The history query returns one row per *part*, so collapse it back to the
-  // messages an anchor can actually name. A Map keeps first-seen order.
-  const messages = new Map<string, { role: string; isCompaction: boolean }>();
-  for (const row of rows) {
-    let message = messages.get(row.message_id);
-    if (!message) {
-      message = {
-        role: readOptionalString(readJsonRecord(row.message_data)?.role) ?? '',
-        isCompaction: false,
-      };
-      messages.set(row.message_id, message);
-    }
-    if (readOptionalString(readJsonRecord(row.part_data)?.type) === 'compaction') {
-      message.isCompaction = true;
-    }
-  }
-
-  const ordered = [...messages.entries()];
-  let lastCompactionIndex = -1;
-  for (let index = ordered.length - 1; index >= 0; index--) {
-    if (ordered[index][1].isCompaction) {
-      lastCompactionIndex = index;
-      break;
-    }
-  }
+  const { messages, lastCompactionIndex } = readOpenCodeMessageIndex(rows);
 
   // Walking backwards carries "the next message that opens a turn" along, so
   // every message of a turn ends up with the same anchor in one pass.
   const anchors = new Map<string, string>();
   let nextTurnStart = OPENCODE_SESSION_END_ANCHOR;
-  for (let index = ordered.length - 1; index > lastCompactionIndex; index--) {
-    anchors.set(ordered[index][0], nextTurnStart);
-    if (opensTurn(ordered, index)) {
-      nextTurnStart = ordered[index][0];
+  for (let index = messages.length - 1; index > lastCompactionIndex; index--) {
+    anchors.set(messages[index].id, nextTurnStart);
+    if (opensTurn(messages, index)) {
+      nextTurnStart = messages[index].id;
     }
   }
 
@@ -98,9 +134,6 @@ export function buildOpenCodeAnchorIndex(rows: OpenCodeAnchorRow[]): Map<string,
  * started. Everything else — a user prompt, the first assistant message
  * answering one, OpenCode's synthetic compaction message — opens a turn.
  */
-function opensTurn(
-  ordered: [string, { role: string }][],
-  index: number,
-): boolean {
-  return !(ordered[index][1].role === 'assistant' && ordered[index - 1]?.[1].role === 'assistant');
+function opensTurn(messages: OpenCodeMessageSummary[], index: number): boolean {
+  return !(messages[index].role === 'assistant' && messages[index - 1]?.role === 'assistant');
 }

@@ -16,9 +16,17 @@ import { useChatWidthClasses } from '../../hooks/useChatTypography';
  */
 export default function SessionRewindNotice({
   leavingCount,
+  restoresFiles,
   onCancel,
 }: {
   leavingCount: number;
+  /**
+   * Whether this provider's Rewind also puts tracked files back. It is settled
+   * by the provider rather than chosen here, and it is the one thing the reader
+   * has to be told *before* they press send, because it moves their working
+   * tree — so it gets a line of its own rather than a clause.
+   */
+  restoresFiles: boolean;
   onCancel: () => void;
 }) {
   const { t } = useTranslation('chat');
@@ -51,6 +59,11 @@ export default function SessionRewindNotice({
           <p className="mt-0.5 break-words text-sm text-foreground/90">
             {t('rewind.leavingContext', { count: leavingCount })}
           </p>
+          {restoresFiles && (
+            <p className="mt-1 break-words text-sm font-medium text-foreground/90">
+              {t('rewind.filesRollBack')}
+            </p>
+          )}
         </div>
 
         <button
