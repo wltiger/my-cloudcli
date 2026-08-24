@@ -85,3 +85,39 @@ test('the full capability list carries supportsClear for every provider', () => 
     assert.equal(typeof capability.supportsClear, 'boolean');
   }
 });
+
+// Seam: this is what the per-message Rewind entry gates on. Only Claude has it
+// so far (#25), through the SDK's own `resumeSessionAt`; OpenCode's `revert`
+// lands in #26 and Codex never will (ADR 0008).
+test('Claude reports Rewind support', () => {
+  assert.equal(providerCapabilitiesService.getProviderCapabilities('claude').supportsRewind, true);
+});
+
+test('OpenCode withholds Rewind support until #26', () => {
+  assert.equal(providerCapabilitiesService.getProviderCapabilities('opencode').supportsRewind, false);
+});
+
+test('Codex withholds Rewind support (ADR 0008)', () => {
+  assert.equal(providerCapabilitiesService.getProviderCapabilities('codex').supportsRewind, false);
+});
+
+test('Cursor withholds Rewind support for now', () => {
+  assert.equal(providerCapabilitiesService.getProviderCapabilities('cursor').supportsRewind, false);
+});
+
+test('the full capability list carries supportsRewind for every provider', () => {
+  const all = providerCapabilitiesService.listAllProviderCapabilities();
+  assert.equal(all.length, 4);
+  for (const capability of all) {
+    assert.equal(typeof capability.supportsRewind, 'boolean');
+  }
+});
+
+// Fork and Rewind are two rules on the same provider, not one flag: OpenCode
+// can fork today but cannot rewind until #26. Collapsing them would silently
+// offer a Rewind that does nothing.
+test('Fork and Rewind are tracked separately', () => {
+  const opencode = providerCapabilitiesService.getProviderCapabilities('opencode');
+  assert.equal(opencode.supportsFork, true);
+  assert.equal(opencode.supportsRewind, false);
+});

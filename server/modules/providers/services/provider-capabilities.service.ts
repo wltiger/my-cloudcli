@@ -31,6 +31,8 @@ type ProviderCapabilities = {
   supportsFork: boolean;
   /** Whether the open conversation can be Cleared: archived, and replaced by an empty session. */
   supportsClear: boolean;
+  /** Whether an earlier message can be re-sent to Rewind the session back to that point. */
+  supportsRewind: boolean;
 };
 
 /**
@@ -44,6 +46,9 @@ type ProviderCapabilities = {
  * - Claude and OpenCode support Fork; see ADR 0008 for why Codex never will,
  *   and issue #23 for OpenCode's own, which forks through the same side channel
  *   Compact uses. Cursor is unsupported — not investigated.
+ * - Only Claude supports Rewind so far (#25), through the SDK's own
+ *   `resumeSessionAt`. OpenCode's `revert` lands in #26, Codex never will
+ *   (ADR 0008), and Cursor is unsupported — not investigated.
  * - Clear reaches no provider API at all (ADR 0005), so the flag records which
  *   providers it was verified on — Claude and OpenCode (#24) — rather than what
  *   a runtime can do. Codex and Cursor are simply unverified.
@@ -62,6 +67,7 @@ const PROVIDER_CAPABILITIES: Record<LLMProvider, ProviderCapabilities> = {
     supportsCompact: true,
     supportsFork: true,
     supportsClear: true,
+    supportsRewind: true,
   },
   cursor: {
     provider: 'cursor',
@@ -76,6 +82,7 @@ const PROVIDER_CAPABILITIES: Record<LLMProvider, ProviderCapabilities> = {
     supportsCompact: false,
     supportsFork: false,
     supportsClear: false,
+    supportsRewind: false,
   },
   codex: {
     provider: 'codex',
@@ -90,6 +97,7 @@ const PROVIDER_CAPABILITIES: Record<LLMProvider, ProviderCapabilities> = {
     supportsCompact: false,
     supportsFork: false,
     supportsClear: false,
+    supportsRewind: false,
   },
   opencode: {
     provider: 'opencode',
@@ -107,6 +115,7 @@ const PROVIDER_CAPABILITIES: Record<LLMProvider, ProviderCapabilities> = {
     supportsCompact: true,
     supportsFork: true,
     supportsClear: true,
+    supportsRewind: false,
   },
 };
 

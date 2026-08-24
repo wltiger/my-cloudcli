@@ -89,6 +89,7 @@ export function normalizedToChatMessages(messages: NormalizedMessage[]): ChatMes
       isLocalCommandStdout: msg.isLocalCommandStdout,
       isCompactSummary: msg.isCompactSummary,
       anchor: msg.anchor,
+      rewindAnchor: msg.rewindAnchor,
     };
 
     switch (msg.kind) {

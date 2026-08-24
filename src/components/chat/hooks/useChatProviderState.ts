@@ -59,6 +59,7 @@ type ProviderCapabilities = {
   supportsCompact?: boolean;
   supportsFork?: boolean;
   supportsClear?: boolean;
+  supportsRewind?: boolean;
 };
 
 type ProviderCapabilitiesApiResponse = {
@@ -311,6 +312,15 @@ export function useChatProviderState({ selectedSession, selectedProject: _select
   /** Same no-fallback rule again: hidden until the backend confirms it. */
   const getSupportsClearForProvider = useCallback((targetProvider: LLMProvider): boolean => (
     providerCapabilities?.[targetProvider]?.supportsClear === true
+  ), [providerCapabilities]);
+
+  /**
+   * Same no-fallback rule once more. Deliberately separate from Fork: OpenCode
+   * can fork today but cannot rewind until #26, so one flag would offer an
+   * entry that does nothing.
+   */
+  const getSupportsRewindForProvider = useCallback((targetProvider: LLMProvider): boolean => (
+    providerCapabilities?.[targetProvider]?.supportsRewind === true
   ), [providerCapabilities]);
 
   const pickStoredOrCurrent = (
@@ -774,6 +784,10 @@ export function useChatProviderState({ selectedSession, selectedProject: _select
     () => getSupportsClearForProvider(provider),
     [getSupportsClearForProvider, provider],
   );
+  const currentProviderSupportsRewind = useMemo(
+    () => getSupportsRewindForProvider(provider),
+    [getSupportsRewindForProvider, provider],
+  );
 
   const applyProviderCatalog = useCallback((
     targetProvider: LLMProvider,
@@ -903,6 +917,7 @@ export function useChatProviderState({ selectedSession, selectedProject: _select
     currentProviderSupportsCompact,
     currentProviderSupportsFork,
     currentProviderSupportsClear,
+    currentProviderSupportsRewind,
     opencodeModel,
     setOpenCodeModel,
     permissionMode,

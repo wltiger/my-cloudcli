@@ -22,6 +22,7 @@ import MessageCopyControl from './MessageCopyControl';
 import MessageFullscreenControl from './MessageFullscreenControl';
 import MessageSpeakControl from './MessageSpeakControl';
 import SessionForkControl from './SessionForkControl';
+import SessionRewindControl from './SessionRewindControl';
 
 type DiffLine = {
   type: string;
@@ -42,6 +43,10 @@ type MessageComponentProps = {
   provider: Provider | string;
   /** Opens the Fork dialog at a message's Anchor. Undefined whenever Fork must not be offered. */
   onForkMessage?: (anchor: string) => void;
+  /** Loads this message back into the composer. Undefined whenever Rewind must not be offered. */
+  onRewindMessage?: (anchor: string) => void;
+  /** True while a pending Rewind would drop this message from the context on send. */
+  isRewindDimmed?: boolean;
 };
 
 type InteractiveOption = {
@@ -52,7 +57,7 @@ type InteractiveOption = {
 
 const COPY_HIDDEN_TOOL_NAMES = new Set(['Bash', 'Edit', 'Write', 'ApplyPatch']);
 
-const MessageComponent = memo(({ message, prevMessage, createDiff, onFileOpen, showRawParameters, showThinking, selectedProject, provider, onForkMessage }: MessageComponentProps) => {
+const MessageComponent = memo(({ message, prevMessage, createDiff, onFileOpen, showRawParameters, showThinking, selectedProject, provider, onForkMessage, onRewindMessage, isRewindDimmed }: MessageComponentProps) => {
   const { t } = useTranslation('chat');
   const spacingClasses = useChatSpacing();
   const widthClasses = useChatWidthClasses();
@@ -88,6 +93,9 @@ const MessageComponent = memo(({ message, prevMessage, createDiff, onFileOpen, s
   // Empty for every message the backend could not resolve an Anchor for, which
   // is what keeps the entry off pre-compaction history and live-streamed turns.
   const forkAnchor = typeof message.anchor === 'string' ? message.anchor : '';
+  // A separate Anchor from the one above: Fork takes a turn's last row, Rewind
+  // the row before the message. Empty on every message that cannot be rewound to.
+  const rewindAnchor = typeof message.rewindAnchor === 'string' ? message.rewindAnchor : '';
 
   const formattedTime = useMemo(() => new Date(message.timestamp).toLocaleTimeString(), [message.timestamp]);
   const shouldHideThinkingMessage = Boolean(message.isThinking && !showThinking);
@@ -100,7 +108,7 @@ const MessageComponent = memo(({ message, prevMessage, createDiff, onFileOpen, s
     <div
       ref={messageRef}
       data-message-timestamp={message.timestamp || undefined}
-      className={`chat-message ${message.type} ${isGrouped ? 'grouped' : ''} ${message.type === 'user' ? 'flex justify-end' : ''} ${spacingClasses.row}`}
+      className={`chat-message ${message.type} ${isGrouped ? 'grouped' : ''} ${message.type === 'user' ? 'flex justify-end' : ''} ${spacingClasses.row} ${isRewindDimmed ? 'opacity-40 transition-opacity' : ''}`}
     >
       {message.type === 'user' ? (
         /* User turn on the right: claude.ai-style attachment cards above the bubble */
@@ -126,6 +134,9 @@ const MessageComponent = memo(({ message, prevMessage, createDiff, onFileOpen, s
                   </Markdown>
                 </div>
                 <div className="mt-1 flex items-center justify-end gap-1 text-xs text-muted-foreground">
+                  {onRewindMessage && rewindAnchor && (
+                    <SessionRewindControl anchor={rewindAnchor} onRewind={onRewindMessage} />
+                  )}
                   {onForkMessage && forkAnchor && (
                     <SessionForkControl anchor={forkAnchor} messageType="user" onFork={onForkMessage} />
                   )}

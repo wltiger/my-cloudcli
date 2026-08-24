@@ -297,6 +297,17 @@ export type NormalizedMessage = {
    * case the frontend simply offers no entry.
    */
   anchor?: string;
+  /**
+   * The Anchor this message can be Rewound at. A **second** anchor rather than
+   * a reuse of `anchor` above, because the same gesture on the same provider
+   * lands on a different row: `forkSession` is inclusive of a turn's last row,
+   * while `resumeSessionAt` is inclusive of the row it names, so rewinding *to*
+   * a message means anchoring on the row **before** it. Absent on every message
+   * a Rewind cannot be performed on — anything that is not the reader's own,
+   * the first message of a session, and anything at or before the last
+   * compaction boundary. Opaque to the frontend, exactly like `anchor`.
+   */
+  rewindAnchor?: string;
   [key: string]: unknown;
 };
 

@@ -3,7 +3,7 @@ import fsp from 'node:fs/promises';
 import path from 'node:path';
 import readline from 'node:readline';
 
-import { forkSession as forkClaudeSession } from '@anthropic-ai/claude-agent-sdk';
+import { forkSession as forkClaudeSession, getSessionMessages } from '@anthropic-ai/claude-agent-sdk';
 
 import type { IProviderSessions } from '@/shared/interfaces.js';
 import type { AnyRecord, FetchHistoryOptions, FetchHistoryResult, NormalizedMessage } from '@/shared/types.js';
@@ -12,6 +12,7 @@ import { createNormalizedMessage, generateMessageId, readObjectRecord, sliceTail
 import { sessionsDb } from '@/modules/database/index.js';
 
 import { buildClaudeAnchorIndex } from './claude-anchors.js';
+import { buildClaudeRewindAnchorIndex, filterClaudeAbandonedBranchRows } from './claude-rewind.js';
 
 const PROVIDER = 'claude';
 
@@ -104,6 +105,38 @@ async function parseAgentTools(filePath: string): Promise<AnyRecord[]> {
   }
 
   return tools;
+}
+
+/**
+ * Uuids of the session's active branch, as the SDK's own branch-aware reader
+ * resolves them.
+ *
+ * A Rewind appends the new turn to the same transcript with its `parentUuid`
+ * pointing back at the anchor, so the file becomes a tree and the abandoned
+ * branch is still physically present. This is the only reader that knows which
+ * side is live. Note it returns a plain array, not an async iterable.
+ *
+ * Returns an empty set when the branch cannot be read, which
+ * `filterClaudeAbandonedBranchRows` treats as "filter nothing".
+ */
+async function readClaudeActiveBranchUuids(
+  sessionId: string,
+  providerSessionId: string,
+): Promise<Set<string>> {
+  try {
+    // `dir` is the workspace path, the same value the session row stores as
+    // `project_path` -- not the ~/.claude/projects folder the JSONL sits in.
+    const projectPath = sessionsDb.getSessionById(sessionId)?.project_path;
+    const active = await getSessionMessages(
+      providerSessionId,
+      projectPath ? { dir: projectPath } : {},
+    );
+    return new Set(active.map((message) => message.uuid));
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.warn(`[ClaudeProvider] Failed to resolve active branch for ${sessionId}:`, message);
+    return new Set();
+  }
 }
 
 async function readClaudeTranscriptRows(
@@ -652,7 +685,13 @@ export class ClaudeSessionsProvider implements IProviderSessions {
       return { messages: [], total: 0, hasMore: false, offset: 0, limit: null };
     }
 
-    const rawMessages = Array.isArray(result) ? result : (result.messages || []);
+    // A Rewind leaves the branch it abandoned in the file, so a flat read would
+    // go on rendering it. Filtered before anything else looks at the rows, so
+    // anchors, tool results and pagination all count the same conversation.
+    const rawMessages = filterClaudeAbandonedBranchRows(
+      Array.isArray(result) ? result : (result.messages || []),
+      await readClaudeActiveBranchUuids(sessionId, providerSessionId),
+    );
 
     const toolResultMap = new Map<string, ClaudeToolResult>();
     for (const raw of rawMessages) {
@@ -674,12 +713,18 @@ export class ClaudeSessionsProvider implements IProviderSessions {
     // one agent turn spans several rows, and the ids emitted below are
     // CloudCLI composites the provider would not accept back.
     const anchors = buildClaudeAnchorIndex(rawMessages);
+    const rewindAnchors = buildClaudeRewindAnchorIndex(rawMessages);
     const normalized: NormalizedMessage[] = [];
     for (const raw of rawMessages) {
-      const anchor = typeof raw.uuid === 'string' ? anchors.get(raw.uuid) : undefined;
+      const uuid = typeof raw.uuid === 'string' ? raw.uuid : '';
+      const anchor = uuid ? anchors.get(uuid) : undefined;
+      const rewindAnchor = uuid ? rewindAnchors.get(uuid) : undefined;
       for (const message of this.normalizeMessage(raw, sessionId)) {
         if (anchor) {
           message.anchor = anchor;
+        }
+        if (rewindAnchor) {
+          message.rewindAnchor = rewindAnchor;
         }
         normalized.push(message);
       }

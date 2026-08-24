@@ -28,13 +28,7 @@ import type { AnyRecord } from '@/shared/types.js';
  * @returns Row uuid -> anchor uuid. A row absent from the map has no anchor.
  */
 export function buildClaudeAnchorIndex(rows: AnyRecord[]): Map<string, string> {
-  let lastCompactBoundaryIndex = -1;
-  for (let index = rows.length - 1; index >= 0; index--) {
-    if (rows[index].type === 'system' && rows[index].subtype === 'compact_boundary') {
-      lastCompactBoundaryIndex = index;
-      break;
-    }
-  }
+  const lastCompactBoundaryIndex = findLastCompactBoundaryIndex(rows);
 
   // Last row wins, so a plain forward pass leaves each turn pointing at its end.
   const turnLastRowUuid = new Map<string, string>();
@@ -58,6 +52,23 @@ export function buildClaudeAnchorIndex(rows: AnyRecord[]): Map<string, string> {
   }
 
   return anchors;
+}
+
+/**
+ * Index of the last compaction boundary row, or -1 when the session has never
+ * been compacted.
+ *
+ * Also consumed by `claude-rewind.ts`: every rule in this folder that decides
+ * what a message may still be anchored on, or which rows a branch filter may
+ * touch, turns on the same boundary, and two copies of that scan would drift.
+ */
+export function findLastCompactBoundaryIndex(rows: AnyRecord[]): number {
+  for (let index = rows.length - 1; index >= 0; index--) {
+    if (rows[index].type === 'system' && rows[index].subtype === 'compact_boundary') {
+      return index;
+    }
+  }
+  return -1;
 }
 
 /**

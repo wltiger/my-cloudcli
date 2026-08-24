@@ -27,6 +27,8 @@ interface ToolGroupContainerProps {
   showThinking?: boolean;
   selectedProject?: Project | null;
   provider: Provider | string;
+  /** True while a pending Rewind would drop this whole tool group from the context on send. */
+  isRewindDimmed?: boolean;
 }
 
 function parseToolInput(toolInput: unknown): unknown {
@@ -70,6 +72,7 @@ export default function ToolGroupContainer({
   showThinking,
   selectedProject,
   provider,
+  isRewindDimmed,
 }: ToolGroupContainerProps) {
   const [isExpanded, setIsExpanded] = useState(false);
   const spacingClasses = useChatSpacing();
@@ -96,7 +99,7 @@ export default function ToolGroupContainer({
   }, [group.messages]);
 
   return (
-    <div className={`chat-message tool ${spacingClasses.row}`} data-message-timestamp={group.timestamp || undefined}>
+    <div className={`chat-message tool ${spacingClasses.row} ${isRewindDimmed ? 'opacity-40 transition-opacity' : ''}`} data-message-timestamp={group.timestamp || undefined}>
       <button
         type="button"
         className={`group flex w-full items-center gap-2 border-l-2 ${borderClass} rounded-r-md bg-muted/25 px-3 py-2 text-left transition-colors hover:bg-muted/40 dark:bg-muted/10 dark:hover:bg-muted/20`}

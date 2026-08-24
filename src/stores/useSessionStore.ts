@@ -79,6 +79,8 @@ export interface NormalizedMessage {
   compactPostTokens?: number;
   /** The Anchor a Fork of this message is taken at. Absent when it cannot be forked. */
   anchor?: string;
+  /** The Anchor a Rewind to this message is taken at. Absent when it cannot be rewound to. */
+  rewindAnchor?: string;
   images?: Array<{ path?: string; data?: string; name?: string }>;
   files?: Array<{ path?: string; name?: string; mimeType?: string; size?: number }>;
   toolName?: string;

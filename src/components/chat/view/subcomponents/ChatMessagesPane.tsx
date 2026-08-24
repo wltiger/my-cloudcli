@@ -32,6 +32,13 @@ interface ChatMessagesPaneProps {
   hasActivityIndicator?: boolean;
   /** Opens the Fork dialog at a message's Anchor. Undefined whenever Fork must not be offered. */
   onForkMessage?: (anchor: string) => void;
+  /** Loads a message back into the composer. Undefined whenever Rewind must not be offered. */
+  onRewindMessage?: (anchor: string) => void;
+  /**
+   * Messages a pending Rewind would drop from the context on send. Identity-based
+   * so it can be handed to every row without recomputing a position per row.
+   */
+  rewindDimmedMessages?: Set<ChatMessage> | null;
   chatMessages: ChatMessage[];
   selectedSession: ProjectSession | null;
   currentSessionId: string | null;
@@ -82,6 +89,8 @@ function ChatMessagesPane({
   isProcessing = false,
   hasActivityIndicator = false,
   onForkMessage,
+  onRewindMessage,
+  rewindDimmedMessages,
   chatMessages,
   selectedSession,
   currentSessionId,
@@ -284,6 +293,7 @@ function ChatMessagesPane({
                     showThinking={showThinking}
                     selectedProject={selectedProject}
                     provider={provider}
+                    isRewindDimmed={rewindDimmedMessages?.has(item.messages[0])}
                   />
                 );
               }
@@ -305,6 +315,8 @@ function ChatMessagesPane({
                   selectedProject={selectedProject}
                   provider={provider}
                   onForkMessage={onForkMessage}
+                  onRewindMessage={onRewindMessage}
+                  isRewindDimmed={rewindDimmedMessages?.has(item)}
                 />
               );
             });

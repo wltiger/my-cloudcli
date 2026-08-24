@@ -262,6 +262,16 @@ function mapCliOptionsToSDK(options = {}) {
   // The SDK resumes with the provider-native session id, never the app id.
   if (providerSessionId) {
     sdkOptions.resume = providerSessionId;
+
+    // A Rewind: resume only up to and including this transcript row, so
+    // everything after the message being re-sent leaves the context. The value
+    // is an Anchor this same backend put on that message, handed back
+    // unchanged; it is meaningless without a resume target, and the SDK fails
+    // the run outright if it cannot resolve the uuid.
+    const rewindAnchor = options.resumeSessionAt;
+    if (typeof rewindAnchor === 'string' && rewindAnchor.trim()) {
+      sdkOptions.resumeSessionAt = rewindAnchor.trim();
+    }
   }
 
   return sdkOptions;

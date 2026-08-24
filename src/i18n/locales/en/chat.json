@@ -43,6 +43,14 @@
   "clear": {
     "description": "Archive this conversation and continue in a new, empty session."
   },
+  "rewind": {
+    "action": "Send again from here",
+    "label": "Rewind",
+    "escToCancel": "Esc to cancel",
+    "cancel": "Cancel rewind",
+    "leavingContext_one": "Sending will take the conversation back to this message. 1 message leaves the context.",
+    "leavingContext_other": "Sending will take the conversation back to this message. {{count}} messages leave the context."
+  },
   "tools": {
     "settings": "Tool Settings",
     "error": "Tool Error",

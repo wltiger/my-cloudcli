@@ -11,6 +11,7 @@ import { useChatSessionState } from '../hooks/useChatSessionState';
 import { useChatRealtimeHandlers } from '../hooks/useChatRealtimeHandlers';
 import { useChatComposerState } from '../hooks/useChatComposerState';
 import { useSessionClear } from '../hooks/useSessionClear';
+import { useRewindComposerPrefill, useSessionRewind } from '../hooks/useSessionRewind';
 import { useSessionFork } from '../hooks/useSessionFork';
 import { useSessionStore } from '../../../stores/useSessionStore';
 import { getSessionTitle } from '../../../utils/pageTitle';
@@ -19,6 +20,7 @@ import ChatMessagesPane from './subcomponents/ChatMessagesPane';
 import ChatComposer from './subcomponents/ChatComposer';
 import CommandResultModal from './subcomponents/CommandResultModal';
 import SessionForkDialog from './subcomponents/SessionForkDialog';
+import SessionRewindNotice from './subcomponents/SessionRewindNotice';
 
 function ChatInterface({
   isActive,
@@ -80,6 +82,7 @@ function ChatInterface({
     currentProviderSupportsCompact,
     currentProviderSupportsFork,
     currentProviderSupportsClear,
+    currentProviderSupportsRewind,
     opencodeModel,
     setOpenCodeModel,
     permissionMode,
@@ -193,6 +196,21 @@ function ChatInterface({
     onCleared: handleSessionCleared,
   });
 
+  // Rewind has no operation of its own (ADR 0006): this only holds the message
+  // that will be re-sent, and the send below is what performs it.
+  const {
+    onRewindMessage,
+    rewindDraft,
+    rewindAnchor,
+    rewindDimmedMessages,
+    rewindLeavingCount,
+    clearRewind,
+  } = useSessionRewind({
+    sessionId: currentSessionId || selectedSession?.id || null,
+    canRewind: currentProviderSupportsRewind && !isProcessing,
+    chatMessages,
+  });
+
   const {
     input,
     setInput,
@@ -233,6 +251,7 @@ function ChatInterface({
     handleTextareaInput,
     syncInputOverlayScroll,
     handleClearInput,
+    setComposerDraft,
     handleAbortSession,
     handlePermissionDecision,
     handleGrantToolPermission,
@@ -254,6 +273,8 @@ function ChatInterface({
     currentProviderSupportsCompact,
     currentProviderSupportsClear,
     onClearSession: clearSession,
+    rewindAnchor,
+    onRewindConsumed: clearRewind,
     isLoading: isProcessing,
     processingSessions,
     canAbortSession,
@@ -270,6 +291,18 @@ function ChatInterface({
     setIsUserScrolledUp,
     setPendingPermissionRequests,
     resolvePermissionModeForProvider,
+  });
+
+  // Split out of useSessionRewind purely for hook ordering: the draft has to
+  // exist before the composer runs so its Anchor rides along with the send,
+  // while the setters it writes through only exist afterwards.
+  const cancelRewind = useRewindComposerPrefill({
+    rewindDraft,
+    clearRewind,
+    input,
+    attachedFiles,
+    setComposerDraft,
+    setAttachedFiles,
   });
 
   // Shown as the header of anything this session opens fullscreen (currently
@@ -403,6 +436,8 @@ function ChatInterface({
           isProcessing={isProcessing}
           hasActivityIndicator={hasActivityIndicator}
           onForkMessage={onForkMessage}
+          onRewindMessage={onRewindMessage}
+          rewindDimmedMessages={rewindDimmedMessages}
           chatMessages={chatMessages}
           selectedSession={selectedSession}
           currentSessionId={currentSessionId}
@@ -458,6 +493,10 @@ function ChatInterface({
                 <ArrowDownIcon className="h-4 w-4" aria-hidden />
               </button>
             </div>
+          )}
+
+          {rewindDraft && (
+            <SessionRewindNotice leavingCount={rewindLeavingCount} onCancel={cancelRewind} />
           )}
 
           <ChatComposer

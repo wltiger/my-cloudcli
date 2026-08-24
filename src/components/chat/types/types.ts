@@ -67,6 +67,8 @@ export interface ChatMessage {
   compactPostTokens?: number;
   /** The Anchor a Fork of this message is taken at. Absent when it cannot be forked. */
   anchor?: string;
+  /** The Anchor a Rewind to this message is taken at. Absent when it cannot be rewound to. */
+  rewindAnchor?: string;
   isSubagentContainer?: boolean;
   subagentState?: {
     childTools: SubagentChildTool[];

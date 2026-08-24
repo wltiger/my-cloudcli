@@ -49,6 +49,14 @@ interface UseChatComposerStateArgs {
    */
   currentProviderModel: string;
   currentProviderEffort: string;
+  /**
+   * Anchor of a pending Rewind, or null. Rides along on the next send as
+   * `resumeSessionAt`, which is what performs the Rewind -- there is no rewind
+   * operation of its own (ADR 0006).
+   */
+  rewindAnchor?: string | null;
+  /** Called once the pending Rewind has been sent, so its notice can be dismissed. */
+  onRewindConsumed?: () => void;
   /** Whether the active provider can run Compact; gates the `/compact` completion entry. */
   currentProviderSupportsCompact: boolean;
   /** Whether the active provider offers Clear; gates the `/clear` completion entry. */
@@ -248,6 +256,8 @@ export function useChatComposerState({
   currentProviderSupportsCompact,
   currentProviderSupportsClear,
   onClearSession,
+  rewindAnchor,
+  onRewindConsumed,
   isLoading,
   processingSessions,
   canAbortSession,
@@ -694,6 +704,10 @@ export function useChatComposerState({
       toolsSettings,
       skipPermissions: toolsSettings?.skipPermissions || false,
       sessionSummary: getNotificationSessionSummary(selectedSession, currentInput),
+      // Present only while a Rewind is pending. Snapshotted with the rest of
+      // the options so a queued send still rewinds to the point it was
+      // composed at.
+      ...(rewindAnchor ? { resumeSessionAt: rewindAnchor } : {}),
     };
   }, [
     currentProviderEffort,
@@ -701,6 +715,7 @@ export function useChatComposerState({
     permissionMode,
     provider,
     resolvePermissionModeForProvider,
+    rewindAnchor,
     selectedSession,
   ]);
 
@@ -964,6 +979,8 @@ export function useChatComposerState({
       setUploadingFiles(new Map());
       setFileErrors(new Map());
       setIsTextareaExpanded(false);
+      // The send above is the Rewind, so the pending one is now spent.
+      onRewindConsumed?.();
 
       if (textareaRef.current) {
         textareaRef.current.style.height = 'auto';
@@ -978,6 +995,7 @@ export function useChatComposerState({
       currentSessionId,
       executeCommand,
       isLoading,
+      onRewindConsumed,
       onSessionProcessing,
       onSessionEstablished,
       provider,
@@ -1238,6 +1256,20 @@ export function useChatComposerState({
     setIsTextareaExpanded(false);
   }, [resetCommandMenuState]);
 
+  /**
+   * Replaces the composer's text from outside the composer.
+   *
+   * `handleSubmit` reads `inputValueRef`, not `input`, so a caller that only
+   * called `setInput` would send the text the composer held before the
+   * replacement. Both are written here so external prefills (Rewind) cannot hit
+   * that.
+   */
+  const setComposerDraft = useCallback((value: string) => {
+    setInput(value);
+    inputValueRef.current = value;
+    textareaRef.current?.focus();
+  }, []);
+
   const handleAbortSession = useCallback(() => {
     if (!canAbortSession) {
       return;
@@ -1346,6 +1378,7 @@ export function useChatComposerState({
     handleTextareaInput,
     syncInputOverlayScroll,
     handleClearInput,
+    setComposerDraft,
     handleAbortSession,
     handlePermissionDecision,
     handleGrantToolPermission,
