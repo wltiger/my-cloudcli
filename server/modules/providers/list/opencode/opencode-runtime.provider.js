@@ -11,6 +11,8 @@ import {
 import { notifyRunFailed, notifyRunStopped } from '@/modules/notifications/index.js';
 import { createCompleteMessage, createNormalizedMessage, flattenPromptForWindowsShell, getOpenCodeDatabasePath } from '@/shared/utils.js';
 
+import { OPENCODE_SESSION_END_ANCHOR } from './opencode-anchors.js';
+
 // cross-spawn resolves .cmd shims/PATHEXT on Windows and delegates to
 // child_process.spawn everywhere else.
 const spawnFunction = crossSpawn;
@@ -129,6 +131,9 @@ const OPENCODE_SERVE_READY_TIMEOUT_MS = 15_000;
 // Compaction summarizes the whole context, so it can run well past a typical
 // request (issue #18 measured ~20s on a real session).
 const OPENCODE_COMPACT_REQUEST_TIMEOUT_MS = 120_000;
+// Fork copies rows and runs no model, so it answers in well under a second;
+// this only stops a wedged server from hanging the request that awaits it.
+const OPENCODE_FORK_REQUEST_TIMEOUT_MS = 30_000;
 // A kill must not outlive this: on POSIX it is the SIGTERM -> SIGKILL
 // escalation window, on Windows the cap on `taskkill` itself.
 const OPENCODE_KILL_ESCALATE_MS = 5_000;
@@ -426,6 +431,76 @@ async function runOpenCodeCompactSideChannel(options, ws, context) {
     }
   } finally {
     activeOpenCodeProcesses.delete(sessionId);
+    await killOpenCodeProcessTree(serveHandle.process);
+  }
+}
+
+/** Parses a response body as JSON, or undefined when it is not JSON at all. */
+async function readOpenCodeJsonBody(response) {
+  try {
+    return JSON.parse(await response.text());
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Forks an OpenCode session at an Anchor and returns the new session's id.
+ *
+ * Consumed by `opencode-sessions.provider.ts`, whose `forkSession` facet method
+ * is this call and nothing else. It lives here because fork, like Compact, is
+ * only reachable through OpenCode's HTTP server — the one-shot `run` CLI has no
+ * equivalent — and this file owns the short-lived headless server that reaches
+ * it. There must only ever be one of those.
+ *
+ * OpenCode's fork is **exclusive**, so `anchor` already names the message
+ * *after* the turn to keep (see `buildOpenCodeAnchorIndex`). The session-end
+ * anchor has no message to name and is sent as no `messageID` at all, which
+ * copies the session whole. The server is shut down before returning on every
+ * path, success, failure and throw alike.
+ */
+export async function forkOpenCodeSession(providerSessionId, { cwd, anchor, title }) {
+  const serveHandle = await startOpenCodeServeProcess(cwd || process.cwd());
+
+  try {
+    const response = await fetch(
+      `${serveHandle.baseUrl}/session/${encodeURIComponent(providerSessionId)}/fork`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(anchor === OPENCODE_SESSION_END_ANCHOR ? {} : { messageID: anchor }),
+        signal: AbortSignal.timeout(OPENCODE_FORK_REQUEST_TIMEOUT_MS),
+      }
+    );
+
+    // Same trap Compact hit: the prefixed `/api/session/{id}/fork` is not a
+    // route and falls through to the web UI's HTML catch-all, answering 200
+    // with an HTML body. Only a session id read out of the body proves the
+    // legacy unprefixed route actually forked anything.
+    const forkedSessionId = (await readOpenCodeJsonBody(response))?.id;
+    if (!response.ok || typeof forkedSessionId !== 'string' || !forkedSessionId) {
+      throw new Error(`OpenCode fork failed (HTTP ${response.status}).`);
+    }
+
+    // The fork endpoint takes no title — OpenCode names the copy with a suffix
+    // of its own — so the fork's name is a second call.
+    const renameResponse = await fetch(
+      `${serveHandle.baseUrl}/session/${encodeURIComponent(forkedSessionId)}`,
+      {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title }),
+        signal: AbortSignal.timeout(OPENCODE_FORK_REQUEST_TIMEOUT_MS),
+      }
+    );
+    if ((await readOpenCodeJsonBody(renameResponse))?.title !== title) {
+      // Not worth losing the fork over: CloudCLI shows its own name for it
+      // regardless, and only OpenCode's own CLI would still read the suffix.
+      console.warn(`[OpenCode] Forked session ${forkedSessionId} kept OpenCode's own title (HTTP ${renameResponse.status}).`);
+    }
+
+    return forkedSessionId;
+  } finally {
     await killOpenCodeProcessTree(serveHandle.process);
   }
 }

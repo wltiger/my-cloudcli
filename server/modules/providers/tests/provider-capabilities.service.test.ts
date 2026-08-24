@@ -33,8 +33,8 @@ test('the full capability list carries supportsCompact for every provider', () =
 });
 
 // Seam: this is what the per-message Fork entry gates on. Codex must withhold
-// it per ADR 0008 (docs/adr/0008-no-codex-rewind-or-fork.md); OpenCode flips to
-// true with its own fork in #23.
+// it per ADR 0008 (docs/adr/0008-no-codex-rewind-or-fork.md); OpenCode forks
+// through the same side channel Compact uses (#23).
 test('Claude reports Fork support', () => {
   assert.equal(providerCapabilitiesService.getProviderCapabilities('claude').supportsFork, true);
 });
@@ -47,8 +47,8 @@ test('Cursor withholds Fork support for now', () => {
   assert.equal(providerCapabilitiesService.getProviderCapabilities('cursor').supportsFork, false);
 });
 
-test('OpenCode withholds Fork support until #23 lands', () => {
-  assert.equal(providerCapabilitiesService.getProviderCapabilities('opencode').supportsFork, false);
+test('OpenCode reports Fork support via the side channel (#23)', () => {
+  assert.equal(providerCapabilitiesService.getProviderCapabilities('opencode').supportsFork, true);
 });
 
 test('the full capability list carries supportsFork for every provider', () => {

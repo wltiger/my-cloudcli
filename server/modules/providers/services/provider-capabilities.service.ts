@@ -39,9 +39,9 @@ type ProviderCapabilities = {
  * - Claude and OpenCode support Compact; see ADR 0004 for why Codex does not,
  *   and issue #21 for OpenCode's side-channel implementation. Cursor is
  *   unsupported — not investigated.
- * - only Claude supports Fork so far; see ADR 0008 for why Codex never will,
- *   and issue #23 for OpenCode's own fork. Cursor is unsupported — not
- *   investigated.
+ * - Claude and OpenCode support Fork; see ADR 0008 for why Codex never will,
+ *   and issue #23 for OpenCode's own, which forks through the same side channel
+ *   Compact uses. Cursor is unsupported — not investigated.
  */
 const PROVIDER_CAPABILITIES: Record<LLMProvider, ProviderCapabilities> = {
   claude: {
@@ -97,7 +97,7 @@ const PROVIDER_CAPABILITIES: Record<LLMProvider, ProviderCapabilities> = {
     supportsTokenUsage: true,
     supportsEffort: true,
     supportsCompact: true,
-    supportsFork: false,
+    supportsFork: true,
   },
 };
 

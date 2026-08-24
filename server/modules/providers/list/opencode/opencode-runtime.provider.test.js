@@ -4,7 +4,9 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
+import { OPENCODE_SESSION_END_ANCHOR } from './opencode-anchors.js';
 import {
+  forkOpenCodeSession,
   isOpenCodeCompactCommand,
   isOpenCodeSessionActive,
   opencodeRuntime,
@@ -63,6 +65,8 @@ for (const event of events) {
  * readiness parsing is exercised for real. `POST .../summarize` responds
  * according to OPENCODE_SUMMARIZE_BEHAVIOR so tests can exercise the success
  * shape, the HTML-catch-all trap, and a 503 without touching a real server.
+ * `POST .../fork` and the `PATCH` that renames its result answer the same way,
+ * under OPENCODE_FORK_BEHAVIOR.
  */
 async function createFakeOpenCodeServeExecutable(binDir) {
   const scriptPath = path.join(binDir, 'opencode.js');
@@ -89,6 +93,36 @@ const server = http.createServer((req, res) => {
   let body = '';
   req.on('data', (chunk) => { body += chunk; });
   req.on('end', () => {
+    const forkCapturePath = process.env.OPENCODE_FORK_CAPTURE;
+    if (req.url.indexOf('/fork') !== -1) {
+      if (forkCapturePath) {
+        require('node:fs').writeFileSync(forkCapturePath, JSON.stringify({
+          method: req.method,
+          url: req.url,
+          body: body,
+        }));
+      }
+      if (process.env.OPENCODE_FORK_BEHAVIOR === 'html-trap') {
+        res.writeHead(200, { 'Content-Type': 'text/html' });
+        res.end('<!doctype html><html><body>CloudCLI</body></html>');
+        return;
+      }
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ id: 'ses_forked', title: 'source (fork #1)' }));
+      return;
+    }
+    if (req.method === 'PATCH') {
+      if (process.env.OPENCODE_RENAME_CAPTURE) {
+        require('node:fs').writeFileSync(process.env.OPENCODE_RENAME_CAPTURE, JSON.stringify({
+          method: req.method,
+          url: req.url,
+          body: body,
+        }));
+      }
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ id: 'ses_forked', title: JSON.parse(body).title }));
+      return;
+    }
     const behavior = process.env.OPENCODE_SUMMARIZE_BEHAVIOR || 'success';
     if (requestCapturePath && req.url.indexOf('/summarize') !== -1) {
       require('node:fs').writeFileSync(requestCapturePath, JSON.stringify({
@@ -659,6 +693,115 @@ test('spawnOpenCode gives up cleanly when the ephemeral server never becomes rea
     } else {
       process.env.OPENCODE_SERVE_BEHAVIOR = previousServeBehavior;
     }
+    await rm(tempRoot, { recursive: true, force: true });
+  }
+});
+
+test('forkOpenCodeSession forks through the ephemeral server, renames the copy, and always shuts the server down', async () => {
+  const tempRoot = await mkdtemp(path.join(os.tmpdir(), 'opencode-cli-fork-'));
+  const pathKey = findEnvKey('PATH');
+  const pathExtKey = findEnvKey('PATHEXT');
+  const previousPath = process.env[pathKey];
+  const previousPathExt = process.env[pathExtKey];
+  const previousForkBehavior = process.env.OPENCODE_FORK_BEHAVIOR;
+  const previousForkCapture = process.env.OPENCODE_FORK_CAPTURE;
+  const previousRenameCapture = process.env.OPENCODE_RENAME_CAPTURE;
+  const previousPortCapture = process.env.OPENCODE_SERVE_PORT_CAPTURE;
+
+  try {
+    await createFakeOpenCodeServeExecutable(tempRoot);
+    process.env[pathKey] = `${tempRoot}${path.delimiter}${previousPath || ''}`;
+    if (process.platform === 'win32') {
+      process.env[pathExtKey] = previousPathExt?.toUpperCase().includes('.CMD')
+        ? previousPathExt
+        : `.COM;.EXE;.BAT;.CMD${previousPathExt ? `;${previousPathExt}` : ''}`;
+    }
+
+    const forkCapturePath = path.join(tempRoot, 'fork-request.json');
+    const renameCapturePath = path.join(tempRoot, 'rename-request.json');
+    const portCapturePath = path.join(tempRoot, 'serve-port.txt');
+    process.env.OPENCODE_FORK_CAPTURE = forkCapturePath;
+    process.env.OPENCODE_RENAME_CAPTURE = renameCapturePath;
+    process.env.OPENCODE_SERVE_PORT_CAPTURE = portCapturePath;
+
+    const forkedSessionId = await forkOpenCodeSession('ses_source', {
+      cwd: tempRoot,
+      anchor: 'msg_next_turn',
+      title: '[Fork] Write hi to hello.txt',
+    });
+
+    assert.equal(forkedSessionId, 'ses_forked');
+
+    // The legacy unprefixed route is the only one that forks; `/api/...` falls
+    // through to the web UI's HTML catch-all.
+    const forkRequest = JSON.parse(await readFile(forkCapturePath, 'utf8'));
+    assert.equal(forkRequest.method, 'POST');
+    assert.match(forkRequest.url, /^\/session\/ses_source\/fork$/);
+    assert.deepEqual(JSON.parse(forkRequest.body), { messageID: 'msg_next_turn' });
+
+    // The fork endpoint takes no title, so the `[Fork]` name is a second call.
+    const renameRequest = JSON.parse(await readFile(renameCapturePath, 'utf8'));
+    assert.match(renameRequest.url, /^\/session\/ses_forked$/);
+    assert.deepEqual(JSON.parse(renameRequest.body), { title: '[Fork] Write hi to hello.txt' });
+
+    let port = Number((await readFile(portCapturePath, 'utf8')).trim());
+    assert.ok(await waitUntilPortUnreachable(port, 3000), 'expected the server to be shut down after the fork');
+
+    // The newest turn has no message after it to name, so its anchor asks for
+    // the whole session — which OpenCode copies when sent no messageID at all.
+    await forkOpenCodeSession('ses_source', {
+      cwd: tempRoot,
+      anchor: OPENCODE_SESSION_END_ANCHOR,
+      title: '[Fork] Write hi to hello.txt (2)',
+    });
+    assert.deepEqual(JSON.parse(JSON.parse(await readFile(forkCapturePath, 'utf8')).body), {});
+
+    // A 200 carrying the HTML catch-all must read as failure, not as a fork.
+    process.env.OPENCODE_FORK_BEHAVIOR = 'html-trap';
+    await assert.rejects(
+      forkOpenCodeSession('ses_source', { cwd: tempRoot, anchor: 'msg_next_turn', title: '[Fork] trapped' }),
+      /OpenCode fork failed/,
+    );
+
+    port = Number((await readFile(portCapturePath, 'utf8')).trim());
+    assert.ok(await waitUntilPortUnreachable(port, 3000), 'expected the server to be shut down after the fork failed');
+  } finally {
+    if (previousPath === undefined) {
+      delete process.env[pathKey];
+    } else {
+      process.env[pathKey] = previousPath;
+    }
+
+    if (previousPathExt === undefined) {
+      delete process.env[pathExtKey];
+    } else {
+      process.env[pathExtKey] = previousPathExt;
+    }
+
+    if (previousForkBehavior === undefined) {
+      delete process.env.OPENCODE_FORK_BEHAVIOR;
+    } else {
+      process.env.OPENCODE_FORK_BEHAVIOR = previousForkBehavior;
+    }
+
+    if (previousForkCapture === undefined) {
+      delete process.env.OPENCODE_FORK_CAPTURE;
+    } else {
+      process.env.OPENCODE_FORK_CAPTURE = previousForkCapture;
+    }
+
+    if (previousRenameCapture === undefined) {
+      delete process.env.OPENCODE_RENAME_CAPTURE;
+    } else {
+      process.env.OPENCODE_RENAME_CAPTURE = previousRenameCapture;
+    }
+
+    if (previousPortCapture === undefined) {
+      delete process.env.OPENCODE_SERVE_PORT_CAPTURE;
+    } else {
+      process.env.OPENCODE_SERVE_PORT_CAPTURE = previousPortCapture;
+    }
+
     await rm(tempRoot, { recursive: true, force: true });
   }
 });

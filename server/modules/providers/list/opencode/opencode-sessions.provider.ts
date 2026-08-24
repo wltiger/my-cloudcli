@@ -17,6 +17,9 @@ import {
   unwrapJsonStringLiteral,
 } from '@/shared/utils.js';
 
+import { buildOpenCodeAnchorIndex } from './opencode-anchors.js';
+import { forkOpenCodeSession } from './opencode-runtime.provider.js';
+
 const PROVIDER = 'opencode';
 
 type OpenCodeHistoryRow = {
@@ -364,10 +367,22 @@ export class OpenCodeSessionsProvider implements IProviderSessions {
   }
 
   private normalizeHistoryRows(rows: OpenCodeHistoryRow[], sessionId: string): NormalizedMessage[] {
+    // Anchors are read off the raw rows rather than the normalized messages: an
+    // anchor names an OpenCode message, and one message becomes several
+    // messages here, each under an id of CloudCLI's own making.
+    const anchors = buildOpenCodeAnchorIndex(rows);
     const normalized: NormalizedMessage[] = [];
     const emittedMessageErrors = new Set<string>();
 
     for (const row of rows) {
+      // Every message this row produces is forkable at the same anchor.
+      const anchor = anchors.get(row.message_id);
+      const push = (message: NormalizedMessage) => {
+        if (anchor) {
+          message.anchor = anchor;
+        }
+        normalized.push(message);
+      };
       const timestamp = normalizeProviderTimestamp(row.part_time_created ?? row.message_time_created);
       const baseId = `${row.message_id}_${row.part_id ?? normalized.length}`;
       const messageInfo = readJsonRecord(row.message_data);
@@ -380,7 +395,7 @@ export class OpenCodeSessionsProvider implements IProviderSessions {
         && !emittedMessageErrors.has(row.message_id)
       ) {
         emittedMessageErrors.add(row.message_id);
-        normalized.push(createNormalizedMessage({
+        push(createNormalizedMessage({
           id: `${baseId}_error`,
           sessionId,
           timestamp,
@@ -415,7 +430,7 @@ export class OpenCodeSessionsProvider implements IProviderSessions {
           || parsedImages.attachments.length > 0
           || parsedFiles.attachments.length > 0
         ) {
-          normalized.push(createNormalizedMessage({
+          push(createNormalizedMessage({
             id: baseId,
             sessionId,
             timestamp,
@@ -433,7 +448,7 @@ export class OpenCodeSessionsProvider implements IProviderSessions {
       if (partType === 'reasoning') {
         const content = extractText(partData);
         if (content.trim()) {
-          normalized.push(createNormalizedMessage({
+          push(createNormalizedMessage({
             id: baseId,
             sessionId,
             timestamp,
@@ -466,12 +481,12 @@ export class OpenCodeSessionsProvider implements IProviderSessions {
           };
         }
 
-        normalized.push(toolMessage);
+        push(toolMessage);
         continue;
       }
 
       if (partType === 'step-finish') {
-        normalized.push(createNormalizedMessage({
+        push(createNormalizedMessage({
           id: baseId,
           sessionId,
           timestamp,
@@ -482,7 +497,7 @@ export class OpenCodeSessionsProvider implements IProviderSessions {
       }
 
       if (partType === 'patch' || partType === 'agent') {
-        normalized.push(createNormalizedMessage({
+        push(createNormalizedMessage({
           id: baseId,
           sessionId,
           timestamp,
@@ -503,7 +518,7 @@ export class OpenCodeSessionsProvider implements IProviderSessions {
        * it — only this boundary marker.
        */
       if (partType === 'compaction') {
-        normalized.push(createNormalizedMessage({
+        push(createNormalizedMessage({
           id: baseId,
           sessionId,
           timestamp,
@@ -518,5 +533,27 @@ export class OpenCodeSessionsProvider implements IProviderSessions {
     }
 
     return normalized;
+  }
+
+  /**
+   * Copies the conversation up to `anchor`'s turn into a new session.
+   *
+   * Runs through the same short-lived headless server Compact uses, because
+   * fork lives on OpenCode's HTTP API and nowhere else. The anchor already
+   * accounts for that endpoint being **exclusive** — it names the message after
+   * the turn to keep, which is one message further on than Claude's inclusive
+   * fork lands (see `buildOpenCodeAnchorIndex`).
+   */
+  async forkSession(options: {
+    providerSessionId: string;
+    projectPath: string;
+    anchor: string;
+    title: string;
+  }): Promise<string> {
+    return forkOpenCodeSession(options.providerSessionId, {
+      cwd: options.projectPath,
+      anchor: options.anchor,
+      title: options.title,
+    });
   }
 }
