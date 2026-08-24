@@ -231,10 +231,10 @@ export const api = {
   // Fork: the pre-filled dialog name, then the fork itself at a message's Anchor.
   forkSessionName: (sessionId) =>
     authenticatedFetch(`/api/providers/sessions/${encodeURIComponent(sessionId)}/fork-name`),
-  forkSession: (sessionId, anchor, summary) =>
+  forkSession: (sessionId, anchor, name) =>
     authenticatedFetch(`/api/providers/sessions/${encodeURIComponent(sessionId)}/fork`, {
       method: 'POST',
-      body: JSON.stringify({ anchor, summary }),
+      body: JSON.stringify({ anchor, name }),
     }),
   // Clear: retires the open conversation and opens an empty one beside it.
   clearSession: (sessionId) =>

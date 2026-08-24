@@ -6,13 +6,13 @@ import test from 'node:test';
 
 import { OPENCODE_SESSION_END_ANCHOR } from './opencode-anchors.js';
 import {
-  forkOpenCodeSession,
   isOpenCodeCompactCommand,
   isOpenCodeSessionActive,
   opencodeRuntime,
   resolveOpenCodePermissionOptions,
   splitOpenCodeModelId,
 } from './opencode-runtime.provider.js';
+import { forkOpenCodeSession, withOpenCodeServe } from './opencode-serve.js';
 import { OpenCodeSessionsProvider } from './opencode-sessions.provider.js';
 
 const sessionsProvider = new OpenCodeSessionsProvider();
@@ -693,6 +693,72 @@ test('spawnOpenCode gives up cleanly when the ephemeral server never becomes rea
     } else {
       process.env.OPENCODE_SERVE_BEHAVIOR = previousServeBehavior;
     }
+    await rm(tempRoot, { recursive: true, force: true });
+  }
+});
+
+test('withOpenCodeServe shuts the ephemeral server down on both success and throw', async () => {
+  const tempRoot = await mkdtemp(path.join(os.tmpdir(), 'opencode-cli-serve-'));
+  const pathKey = findEnvKey('PATH');
+  const pathExtKey = findEnvKey('PATHEXT');
+  const previousPath = process.env[pathKey];
+  const previousPathExt = process.env[pathExtKey];
+  const previousPortCapture = process.env.OPENCODE_SERVE_PORT_CAPTURE;
+
+  try {
+    await createFakeOpenCodeServeExecutable(tempRoot);
+    process.env[pathKey] = `${tempRoot}${path.delimiter}${previousPath || ''}`;
+    if (process.platform === 'win32') {
+      process.env[pathExtKey] = previousPathExt?.toUpperCase().includes('.CMD')
+        ? previousPathExt
+        : `.COM;.EXE;.BAT;.CMD${previousPathExt ? `;${previousPathExt}` : ''}`;
+    }
+
+    const portCapturePath = path.join(tempRoot, 'serve-port.txt');
+    process.env.OPENCODE_SERVE_PORT_CAPTURE = portCapturePath;
+
+    // The operation is handed a server that is already answering, and its own
+    // result comes straight back out.
+    const reachedServer = await withOpenCodeServe(
+      tempRoot,
+      (serveHandle) => isPortReachable(Number(new URL(serveHandle.baseUrl).port)),
+    );
+    assert.equal(reachedServer, true);
+
+    let port = Number((await readFile(portCapturePath, 'utf8')).trim());
+    assert.ok(await waitUntilPortUnreachable(port, 3000), 'expected the server to be shut down after the operation succeeded');
+
+    // An operation that throws leaves nothing listening either. This is the
+    // guarantee every Fork and Rewind call rests on, and the reason the
+    // start/use/shut-down bracket is written once rather than per caller.
+    await assert.rejects(
+      withOpenCodeServe(tempRoot, async () => {
+        throw new Error('operation failed');
+      }),
+      /operation failed/,
+    );
+
+    port = Number((await readFile(portCapturePath, 'utf8')).trim());
+    assert.ok(await waitUntilPortUnreachable(port, 3000), 'expected the server to be shut down after the operation threw');
+  } finally {
+    if (previousPath === undefined) {
+      delete process.env[pathKey];
+    } else {
+      process.env[pathKey] = previousPath;
+    }
+
+    if (previousPathExt === undefined) {
+      delete process.env[pathExtKey];
+    } else {
+      process.env[pathExtKey] = previousPathExt;
+    }
+
+    if (previousPortCapture === undefined) {
+      delete process.env.OPENCODE_SERVE_PORT_CAPTURE;
+    } else {
+      process.env.OPENCODE_SERVE_PORT_CAPTURE = previousPortCapture;
+    }
+
     await rm(tempRoot, { recursive: true, force: true });
   }
 });

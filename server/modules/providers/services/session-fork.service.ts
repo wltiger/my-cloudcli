@@ -4,10 +4,9 @@ import path from 'node:path';
 import { sessionsDb } from '@/modules/database/index.js';
 import { providerRegistry } from '@/modules/providers/provider.registry.js';
 import type { LLMProvider } from '@/shared/types.js';
-import { AppError } from '@/shared/utils.js';
+import { AppError, UNTITLED_SESSION_NAME } from '@/shared/utils.js';
 
 const FORK_NAME_PREFIX = '[Fork]';
-const UNTITLED_SESSION_NAME = 'Untitled Session';
 
 type ForkedSession = {
   sessionId: string;
@@ -62,7 +61,7 @@ export const sessionForkService = {
    * whether a name is already taken.
    */
   suggestForkName(sessionId: string): { suggestedName: string } {
-    const session = readForkableSession(sessionId);
+    const session = readSessionOrThrow(sessionId);
     const siblings = session.project_path
       ? sessionsDb.getSessionsByProjectPathIncludingArchived(session.project_path)
       : [];
@@ -79,7 +78,7 @@ export const sessionForkService = {
    * Forks one session at `anchor` and registers the copy as a new session.
    */
   async forkSession(sessionId: string, anchor: string, title: string): Promise<ForkedSession> {
-    const session = readForkableSession(sessionId);
+    const session = readSessionOrThrow(sessionId);
     const provider = session.provider as LLMProvider;
     const providerSessions = providerRegistry.resolveProvider(provider).sessions;
 
@@ -137,7 +136,7 @@ export const sessionForkService = {
   },
 };
 
-function readForkableSession(sessionId: string) {
+function readSessionOrThrow(sessionId: string) {
   const session = sessionsDb.getSessionById(sessionId);
   if (!session) {
     throw new AppError(`Session "${sessionId}" was not found.`, {

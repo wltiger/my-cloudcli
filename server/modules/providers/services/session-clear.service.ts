@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { sessionsDb } from '@/modules/database/index.js';
 import { providerCapabilitiesService } from '@/modules/providers/services/provider-capabilities.service.js';
 import type { LLMProvider } from '@/shared/types.js';
-import { AppError } from '@/shared/utils.js';
+import { AppError, UNTITLED_SESSION_NAME } from '@/shared/utils.js';
 
 /**
  * Fixed English literal, written into the retired session's name rather than
@@ -11,7 +11,6 @@ import { AppError } from '@/shared/utils.js';
  * the sidebar's existing inline rename has to be able to edit it afterwards.
  */
 const CLEARED_NAME_PREFIX = '[Cleared]';
-const UNTITLED_SESSION_NAME = 'Untitled Session';
 
 type ClearedSession = {
   /** The empty session that takes over. */

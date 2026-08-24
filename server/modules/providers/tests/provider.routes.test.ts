@@ -242,3 +242,80 @@ test('model routes expose immutable defaults and full custom model CRUD', async 
     );
   });
 });
+
+test('the fork route refuses a request with no anchor, and names the fork in its own error', async () => {
+  await withProviderServer(async (baseUrl, workspacePath) => {
+    sessionsDb.createAppSession('fork-source', 'claude', workspacePath, 'Wire up the sidebar');
+    sessionsDb.assignProviderSessionId('fork-source', 'claude-native-1');
+
+    const missingAnchorResponse = await fetch(
+      `${baseUrl}/api/providers/sessions/fork-source/fork`,
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ name: '[Fork] Wire up the sidebar' }),
+      },
+    );
+    const missingAnchorPayload = await missingAnchorResponse.json() as {
+      error: { code: string };
+    };
+    assert.equal(missingAnchorResponse.status, 400);
+    assert.equal(missingAnchorPayload.error.code, 'ANCHOR_REQUIRED');
+
+    // Fork parses its own payload rather than borrowing the rename route's:
+    // the reader sees this message when they clear the dialog's name, so it
+    // must name the fork's name and never a summary.
+    const missingNameResponse = await fetch(
+      `${baseUrl}/api/providers/sessions/fork-source/fork`,
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ anchor: 'anchor-uuid', name: '   ' }),
+      },
+    );
+    const missingNamePayload = await missingNameResponse.json() as {
+      error: { code: string; message: string };
+    };
+    assert.equal(missingNameResponse.status, 400);
+    assert.equal(missingNamePayload.error.code, 'INVALID_FORK_SESSION_NAME');
+    assert.match(missingNamePayload.error.message, /fork name/i);
+    assert.doesNotMatch(missingNamePayload.error.message, /summary/i);
+  });
+});
+
+test('the fork-name route answers with a name the project has not used', async () => {
+  await withProviderServer(async (baseUrl, workspacePath) => {
+    sessionsDb.createAppSession('fork-source', 'claude', workspacePath, 'Retry');
+    sessionsDb.createAppSession('earlier-fork', 'claude', workspacePath, '[Fork] Retry');
+
+    const response = await fetch(
+      `${baseUrl}/api/providers/sessions/fork-source/fork-name`,
+    );
+    const payload = await response.json() as { data: { suggestedName: string } };
+
+    assert.equal(response.status, 200);
+    assert.equal(payload.data.suggestedName, '[Fork] Retry (2)');
+  });
+});
+
+test('the clear route retires the open conversation and answers with the empty one', async () => {
+  await withProviderServer(async (baseUrl, workspacePath) => {
+    sessionsDb.createAppSession('clear-source', 'claude', workspacePath, 'Wire up the sidebar');
+    sessionsDb.assignProviderSessionId('clear-source', 'claude-native-1');
+
+    const response = await fetch(
+      `${baseUrl}/api/providers/sessions/clear-source/clear`,
+      { method: 'POST' },
+    );
+    const payload = await response.json() as {
+      data: { sessionId: string; retiredSessionId: string; retiredSessionName: string };
+    };
+
+    assert.equal(response.status, 201);
+    assert.equal(payload.data.retiredSessionId, 'clear-source');
+    assert.equal(payload.data.retiredSessionName, '[Cleared] Wire up the sidebar');
+    assert.notEqual(payload.data.sessionId, 'clear-source');
+    assert.equal(sessionsDb.getSessionById('clear-source')?.isArchived, 1);
+    assert.equal(sessionsDb.getSessionById(payload.data.sessionId)?.isArchived, 0);
+  });
+});

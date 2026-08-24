@@ -787,6 +787,19 @@ export function readProviderSkillMarkdownDefinitionFromContent(
 // ---------------------------
 //----------------- SESSION SYNCHRONIZER TITLE HELPERS ------------
 /**
+ * The name a session is shown under when it has none of its own.
+ *
+ * A fixed English literal rather than a translated string: it is written into
+ * the session's stored name (by `sessions.service.ts` when the first message
+ * yields no words, and behind the `[Fork]`/`[Cleared]` prefixes that
+ * `session-fork.service.ts` and `session-clear.service.ts` build), so it has to
+ * survive a language switch and stay editable by the sidebar's inline rename.
+ * One definition because all three must agree on what an unnamed session reads
+ * as.
+ */
+export const UNTITLED_SESSION_NAME = 'Untitled Session';
+
+/**
  * Produces a compact session title suitable for UI rendering and DB storage.
  *
  * Use this when converting provider-native names into a consistent title value.

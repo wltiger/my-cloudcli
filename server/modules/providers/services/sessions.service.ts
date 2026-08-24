@@ -11,7 +11,7 @@ import type {
   LLMProvider,
   NormalizedMessage,
 } from '@/shared/types.js';
-import { AppError } from '@/shared/utils.js';
+import { AppError, UNTITLED_SESSION_NAME } from '@/shared/utils.js';
 
 type CreateAppSessionResult = {
   sessionId: string;
@@ -67,7 +67,7 @@ const MAX_CLOUDCLI_SESSION_NAME_WORDS = 4;
 
 function buildCloudCliSessionName(initialMessage: string): string {
   const words = initialMessage.trim().split(/\s+/).filter(Boolean);
-  return words.slice(0, MAX_CLOUDCLI_SESSION_NAME_WORDS).join(' ') || 'Untitled Session';
+  return words.slice(0, MAX_CLOUDCLI_SESSION_NAME_WORDS).join(' ') || UNTITLED_SESSION_NAME;
 }
 
 /**

@@ -326,6 +326,33 @@ const parseSessionRenameSummary = (payload: unknown): string => {
   return summary;
 };
 
+/**
+ * The name a Fork is created under.
+ *
+ * Its own parser rather than the rename route's: the two routes carry different
+ * fields, and this error reaches the reader as the Fork dialog's own failure
+ * message, so it has to name the fork's name and not a summary.
+ */
+const parseForkSessionName = (payload: unknown): string => {
+  const body = (payload ?? {}) as Record<string, unknown>;
+  const name = typeof body.name === 'string' ? body.name.trim() : '';
+  if (!name) {
+    throw new AppError('Fork name is required.', {
+      code: 'INVALID_FORK_SESSION_NAME',
+      statusCode: 400,
+    });
+  }
+
+  if (name.length > 500) {
+    throw new AppError('Fork name must not exceed 500 characters.', {
+      code: 'INVALID_FORK_SESSION_NAME',
+      statusCode: 400,
+    });
+  }
+
+  return name;
+};
+
 const parseSessionSearchQuery = (value: unknown): string => {
   const query = readOptionalQueryString(value) ?? '';
   if (query.length < 2) {
@@ -849,7 +876,7 @@ router.post(
     const result = await sessionForkService.forkSession(
       sessionId,
       anchor,
-      parseSessionRenameSummary(body),
+      parseForkSessionName(body),
     );
     res.status(201).json(createApiSuccessResponse(result));
   }),

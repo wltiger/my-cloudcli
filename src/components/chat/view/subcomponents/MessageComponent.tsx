@@ -93,6 +93,17 @@ const MessageComponent = memo(({ message, prevMessage, createDiff, onFileOpen, s
   // Empty for every message the backend could not resolve an Anchor for, which
   // is what keeps the entry off pre-compaction history and live-streamed turns.
   const forkAnchor = typeof message.anchor === 'string' ? message.anchor : '';
+  // Fork stands on its own condition rather than the copy control's, which is
+  // named and shaped for copying and would silently move Fork with it. What
+  // Fork needs is an Anchor and one entry per turn: every bubble a turn is
+  // split into (its reasoning, each tool call, each block of text) carries the
+  // same Anchor, so the reasoning and tool bubbles are left out to keep the
+  // turn from offering the same fork several times over.
+  const shouldShowAssistantForkControl = Boolean(onForkMessage) &&
+    forkAnchor.length > 0 &&
+    message.type === 'assistant' &&
+    !message.isToolUse &&
+    !message.isThinking;
   // A separate Anchor from the one above: Fork takes a turn's last row, Rewind
   // the row before the message. Empty on every message that cannot be rewound to.
   const rewindAnchor = typeof message.rewindAnchor === 'string' ? message.rewindAnchor : '';
@@ -431,7 +442,7 @@ const MessageComponent = memo(({ message, prevMessage, createDiff, onFileOpen, s
               </div>
             )}
 
-            {(shouldShowAssistantCopyControl || !isGrouped) && (
+            {(shouldShowAssistantCopyControl || shouldShowAssistantForkControl || !isGrouped) && (
               <div className="mt-1 flex w-full items-center gap-2 text-[11px] text-gray-400 dark:text-gray-500">
                 {shouldShowAssistantCopyControl && (
                   <MessageCopyControl content={assistantCopyContent} messageType="assistant" />
@@ -442,7 +453,7 @@ const MessageComponent = memo(({ message, prevMessage, createDiff, onFileOpen, s
                 {shouldShowAssistantCopyControl && (
                   <MessageFullscreenControl content={assistantCopyContent} />
                 )}
-                {onForkMessage && forkAnchor && shouldShowAssistantCopyControl && !message.isToolUse && (
+                {shouldShowAssistantForkControl && onForkMessage && (
                   <SessionForkControl anchor={forkAnchor} messageType="assistant" onFork={onForkMessage} />
                 )}
                 {!isGrouped && <span>{formattedTime}</span>}

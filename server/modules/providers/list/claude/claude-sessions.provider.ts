@@ -6,7 +6,7 @@ import readline from 'node:readline';
 import { forkSession as forkClaudeSession, getSessionMessages } from '@anthropic-ai/claude-agent-sdk';
 
 import type { IProviderSessions } from '@/shared/interfaces.js';
-import type { AnyRecord, FetchHistoryOptions, FetchHistoryResult, NormalizedMessage } from '@/shared/types.js';
+import type { AnyRecord, FetchHistoryOptions, FetchHistoryResult, ForkSessionOptions, NormalizedMessage } from '@/shared/types.js';
 import { parseFilesInputTag } from '@/shared/image-attachments.js';
 import { createNormalizedMessage, generateMessageId, readObjectRecord, sliceTailPage } from '@/shared/utils.js';
 import { sessionsDb } from '@/modules/database/index.js';
@@ -775,12 +775,7 @@ export class ClaudeSessionsProvider implements IProviderSessions {
    * transcript is written next to the original, as `<newSessionId>.jsonl` in
    * the same project directory.
    */
-  async forkSession(options: {
-    providerSessionId: string;
-    projectPath: string;
-    anchor: string;
-    title: string;
-  }): Promise<string> {
+  async forkSession(options: ForkSessionOptions): Promise<string> {
     const result = await forkClaudeSession(options.providerSessionId, {
       dir: options.projectPath,
       upToMessageId: options.anchor,

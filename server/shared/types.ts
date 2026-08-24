@@ -394,6 +394,28 @@ export type FetchHistoryResult = {
 };
 
 // ---------------------------
+//----------------- PROVIDER SESSION FORK TYPES ------------
+/**
+ * Everything a provider needs to Fork one session at an Anchor.
+ *
+ * Shared by the `IProviderSessions.forkSession` contract, the application
+ * service that calls it (`session-fork.service.ts`) and every provider that
+ * implements it, so the four stay one shape rather than four hand-written ones.
+ *
+ * `anchor` is a value the same provider produced on a normalized message, so
+ * each implementation owns whether its own fork keeps or drops the named row —
+ * providers disagree, and no caller may compensate for that. `projectPath` is
+ * the working directory the fork is taken in, and `title` is the fork's name,
+ * passed on so the provider's own CLI shows it too.
+ */
+export type ForkSessionOptions = {
+  providerSessionId: string;
+  projectPath: string;
+  anchor: string;
+  title: string;
+};
+
+// ---------------------------
 //----------------- PROVIDER SKILL TYPES ------------
 /**
  * Scope where a provider skill definition was discovered.

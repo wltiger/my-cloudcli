@@ -4,7 +4,7 @@ import Database from 'better-sqlite3';
 
 import { parseFilesInputTag, parseImagesInputTag } from '@/shared/image-attachments.js';
 import type { IProviderSessions } from '@/shared/interfaces.js';
-import type { AnyRecord, FetchHistoryOptions, FetchHistoryResult, NormalizedMessage } from '@/shared/types.js';
+import type { AnyRecord, FetchHistoryOptions, FetchHistoryResult, ForkSessionOptions, NormalizedMessage } from '@/shared/types.js';
 import {
   createNormalizedMessage,
   generateMessageId,
@@ -19,7 +19,7 @@ import {
 
 import { buildOpenCodeAnchorIndex } from './opencode-anchors.js';
 import { buildOpenCodeRewindAnchorIndex, filterOpenCodeRevertedRows } from './opencode-rewind.js';
-import { forkOpenCodeSession } from './opencode-runtime.provider.js';
+import { forkOpenCodeSession } from './opencode-serve.js';
 
 const PROVIDER = 'opencode';
 
@@ -578,12 +578,7 @@ export class OpenCodeSessionsProvider implements IProviderSessions {
    * the turn to keep, which is one message further on than Claude's inclusive
    * fork lands (see `buildOpenCodeAnchorIndex`).
    */
-  async forkSession(options: {
-    providerSessionId: string;
-    projectPath: string;
-    anchor: string;
-    title: string;
-  }): Promise<string> {
+  async forkSession(options: ForkSessionOptions): Promise<string> {
     return forkOpenCodeSession(options.providerSessionId, {
       cwd: options.projectPath,
       anchor: options.anchor,

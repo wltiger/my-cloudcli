@@ -11,7 +11,7 @@ import {
 import { notifyRunFailed, notifyRunStopped } from '@/modules/notifications/index.js';
 import { createCompleteMessage, createNormalizedMessage, flattenPromptForWindowsShell, getOpenCodeDatabasePath } from '@/shared/utils.js';
 
-import { OPENCODE_SESSION_END_ANCHOR } from './opencode-anchors.js';
+import { readOpenCodeRewindAnchor, runOpenCodeRewindSend, withOpenCodeServe } from './opencode-serve.js';
 
 // cross-spawn resolves .cmd shims/PATHEXT on Windows and delegates to
 // child_process.spawn everywhere else.
@@ -131,12 +131,6 @@ const OPENCODE_SERVE_READY_TIMEOUT_MS = 15_000;
 // Compaction summarizes the whole context, so it can run well past a typical
 // request (issue #18 measured ~20s on a real session).
 const OPENCODE_COMPACT_REQUEST_TIMEOUT_MS = 120_000;
-// Fork copies rows and runs no model, so it answers in well under a second;
-// this only stops a wedged server from hanging the request that awaits it.
-const OPENCODE_FORK_REQUEST_TIMEOUT_MS = 30_000;
-// Revert and unrevert restore a git snapshot as well as the conversation, so
-// they do a little more work than fork does — still nowhere near a model call.
-const OPENCODE_REVERT_REQUEST_TIMEOUT_MS = 30_000;
 // A kill must not outlive this: on POSIX it is the SIGTERM -> SIGKILL
 // escalation window, on Windows the cap on `taskkill` itself.
 const OPENCODE_KILL_ESCALATE_MS = 5_000;
@@ -185,8 +179,11 @@ export function splitOpenCodeModelId(resolvedModel) {
  * `.kill('SIGTERM')` left the ephemeral server's port still listening).
  * `taskkill /T` kills the whole tree. POSIX has no such indirection, so a
  * plain SIGTERM already reaches the real process there.
+ *
+ * Exported for `opencode-serve.ts`, whose `withOpenCodeServe` is the one place
+ * the start/use/shut-down bracket around a headless server is written.
  */
-function killOpenCodeProcessTree(childProcess) {
+export function killOpenCodeProcessTree(childProcess) {
   if (!childProcess || !childProcess.pid) {
     return Promise.resolve();
   }
@@ -241,8 +238,11 @@ function killOpenCodeProcessTree(childProcess) {
  * Any failure to reach "listening" (spawn error, early exit, timeout) kills
  * the process itself before rejecting, so a caller never has to clean up a
  * process it was never handed.
+ *
+ * Exported for `opencode-serve.ts`, whose `withOpenCodeServe` pairs it with
+ * `killOpenCodeProcessTree` for every Fork and Rewind call.
  */
-function startOpenCodeServeProcess(cwd) {
+export function startOpenCodeServeProcess(cwd) {
   return new Promise((resolve, reject) => {
     const serveProcess = spawnFunction('opencode', ['serve', '--port', '0', '--hostname', '127.0.0.1'], {
       cwd,
@@ -373,303 +373,71 @@ async function runOpenCodeCompactSideChannel(options, ws, context) {
     notifyRunStopped({ ...notifyPayload, stopReason: 'completed' });
   };
 
-  try {
-    serveHandle = await startOpenCodeServeProcess(workingDir);
-  } catch (error) {
-    const errorContent = error instanceof Error ? error.message : String(error);
-    console.error('[OpenCode] Compact failed to start the headless server:', errorContent);
-    activeOpenCodeProcesses.delete(sessionId);
-    if (!compactHandle.aborted) {
-      sendError(`OpenCode Compact could not start: ${errorContent}`);
-      notifyTerminalState(errorContent);
-    }
-    finish(false, { aborted: compactHandle.aborted });
-    return;
-  }
+  // Tells a server that never started apart from a request that failed: both
+  // leave withOpenCodeServe as a throw, and the reader is told which happened.
+  let serveStarted = false;
 
   try {
-    const response = await fetch(
-      `${serveHandle.baseUrl}/session/${encodeURIComponent(providerSessionId)}/summarize`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ providerID: modelIds.providerID, modelID: modelIds.modelID }),
-        signal: AbortSignal.timeout(OPENCODE_COMPACT_REQUEST_TIMEOUT_MS),
+    await withOpenCodeServe(workingDir, async (handle) => {
+      serveHandle = handle;
+      serveStarted = true;
+
+      const response = await fetch(
+        `${serveHandle.baseUrl}/session/${encodeURIComponent(providerSessionId)}/summarize`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ providerID: modelIds.providerID, modelID: modelIds.modelID }),
+          signal: AbortSignal.timeout(OPENCODE_COMPACT_REQUEST_TIMEOUT_MS),
+        }
+      );
+
+      const responseText = await response.text();
+      let parsedBody;
+      try {
+        parsedBody = JSON.parse(responseText);
+      } catch {
+        parsedBody = undefined;
       }
-    );
 
-    const responseText = await response.text();
-    let parsedBody;
-    try {
-      parsedBody = JSON.parse(responseText);
-    } catch {
-      parsedBody = undefined;
-    }
-
-    // The published `/api/session/{id}/compact` is unimplemented (503) and
-    // `/api/session/{id}/summarize` is not a route at all — it falls through
-    // to the web UI's HTML catch-all and answers 200 with an HTML body. Only
-    // the legacy unprefixed route works, so the body — not just the status —
-    // has to confirm the summarize call actually ran. See #18/#21.
-    if (!response.ok || parsedBody !== true) {
-      sendError(`OpenCode Compact failed (HTTP ${response.status}).`);
-      notifyTerminalState(`OpenCode Compact failed (HTTP ${response.status}).`);
-      finish(false);
-      return;
-    }
-
-    notifyTerminalState(null);
-    finish(true);
-  } catch (error) {
-    const errorContent = error instanceof Error ? error.message : String(error);
-    console.error('[OpenCode] Compact request failed:', errorContent);
-    // An abort tears the server down mid-request, so the resulting fetch
-    // failure is expected rather than something to report as a failure.
-    if (compactHandle.aborted) {
-      finish(false, { aborted: true });
-    } else {
-      sendError(`OpenCode Compact failed: ${errorContent}`);
-      notifyTerminalState(errorContent);
-      finish(false);
-    }
-  } finally {
-    activeOpenCodeProcesses.delete(sessionId);
-    await killOpenCodeProcessTree(serveHandle.process);
-  }
-}
-
-/** Parses a response body as JSON, or undefined when it is not JSON at all. */
-async function readOpenCodeJsonBody(response) {
-  try {
-    return JSON.parse(await response.text());
-  } catch {
-    return undefined;
-  }
-}
-
-/**
- * Forks an OpenCode session at an Anchor and returns the new session's id.
- *
- * Consumed by `opencode-sessions.provider.ts`, whose `forkSession` facet method
- * is this call and nothing else. It lives here because fork, like Compact, is
- * only reachable through OpenCode's HTTP server — the one-shot `run` CLI has no
- * equivalent — and this file owns the short-lived headless server that reaches
- * it. There must only ever be one of those.
- *
- * OpenCode's fork is **exclusive**, so `anchor` already names the message
- * *after* the turn to keep (see `buildOpenCodeAnchorIndex`). The session-end
- * anchor has no message to name and is sent as no `messageID` at all, which
- * copies the session whole. The server is shut down before returning on every
- * path, success, failure and throw alike.
- */
-export async function forkOpenCodeSession(providerSessionId, { cwd, anchor, title }) {
-  const serveHandle = await startOpenCodeServeProcess(cwd || process.cwd());
-
-  try {
-    const response = await fetch(
-      `${serveHandle.baseUrl}/session/${encodeURIComponent(providerSessionId)}/fork`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(anchor === OPENCODE_SESSION_END_ANCHOR ? {} : { messageID: anchor }),
-        signal: AbortSignal.timeout(OPENCODE_FORK_REQUEST_TIMEOUT_MS),
+      // The published `/api/session/{id}/compact` is unimplemented (503) and
+      // `/api/session/{id}/summarize` is not a route at all — it falls through
+      // to the web UI's HTML catch-all and answers 200 with an HTML body. Only
+      // the legacy unprefixed route works, so the body — not just the status —
+      // has to confirm the summarize call actually ran. See #18/#21.
+      if (!response.ok || parsedBody !== true) {
+        sendError(`OpenCode Compact failed (HTTP ${response.status}).`);
+        notifyTerminalState(`OpenCode Compact failed (HTTP ${response.status}).`);
+        finish(false);
+        return;
       }
-    );
 
-    // Same trap Compact hit: the prefixed `/api/session/{id}/fork` is not a
-    // route and falls through to the web UI's HTML catch-all, answering 200
-    // with an HTML body. Only a session id read out of the body proves the
-    // legacy unprefixed route actually forked anything.
-    const forkedSessionId = (await readOpenCodeJsonBody(response))?.id;
-    if (!response.ok || typeof forkedSessionId !== 'string' || !forkedSessionId) {
-      throw new Error(`OpenCode fork failed (HTTP ${response.status}).`);
-    }
-
-    // The fork endpoint takes no title — OpenCode names the copy with a suffix
-    // of its own — so the fork's name is a second call.
-    const renameResponse = await fetch(
-      `${serveHandle.baseUrl}/session/${encodeURIComponent(forkedSessionId)}`,
-      {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ title }),
-        signal: AbortSignal.timeout(OPENCODE_FORK_REQUEST_TIMEOUT_MS),
-      }
-    );
-    if ((await readOpenCodeJsonBody(renameResponse))?.title !== title) {
-      // Not worth losing the fork over: CloudCLI shows its own name for it
-      // regardless, and only OpenCode's own CLI would still read the suffix.
-      console.warn(`[OpenCode] Forked session ${forkedSessionId} kept OpenCode's own title (HTTP ${renameResponse.status}).`);
-    }
-
-    return forkedSessionId;
-  } finally {
-    await killOpenCodeProcessTree(serveHandle.process);
-  }
-}
-
-/**
- * Rewinds a session to `anchor`, rolling its tracked files back with it.
- *
- * Starts and shuts down the same short-lived headless server Compact and fork
- * use, never a second implementation. The revert and the unrevert below each
- * get their own, because the revert happens at send time and the unrevert only
- * if that send later fails, with the whole run in between.
- */
-async function revertOpenCodeSession(providerSessionId, cwd, anchor) {
-  const serveHandle = await startOpenCodeServeProcess(cwd || process.cwd());
-
-  try {
-    const response = await fetch(
-      `${serveHandle.baseUrl}/session/${encodeURIComponent(providerSessionId)}/revert`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ messageID: anchor }),
-        signal: AbortSignal.timeout(OPENCODE_REVERT_REQUEST_TIMEOUT_MS),
-      }
-    );
-
-    // The third time this trap has bitten the feature, and the most expensive:
-    // the published `/api/session/{id}/revert` is not a route, falls through to
-    // the web UI's HTML catch-all and answers 200 with an HTML body having
-    // changed nothing at all (measured — the file it should have rolled back
-    // was untouched). Only the recorded revert, read *out of the body* of the
-    // legacy unprefixed route, proves anything ran.
-    const session = await readOpenCodeJsonBody(response);
-    if (!response.ok || session?.revert?.messageID !== anchor) {
-      throw new Error(`OpenCode revert failed (HTTP ${response.status}).`);
-    }
-  } finally {
-    await killOpenCodeProcessTree(serveHandle.process);
-  }
-}
-
-/**
- * Puts a Rewind back after the send that carried it failed.
- *
- * Deliberately not a bare `unrevert`, because of one measured fact:
- * `opencode run` **commits** an outstanding revert the moment it appends its
- * own user message, deleting every reverted message for good — which happens
- * before the model call that most failures come from. By then there is nothing
- * left to undo, and `unrevert` still answers 200 with an empty `revert`, which
- * is indistinguishable from having restored something. So the session is read
- * first and only a revert still standing at this Anchor is undone; the caller
- * needs the difference because it has to tell the reader the truth about their
- * working tree.
- *
- * @returns true when the conversation and the files were actually put back.
- */
-async function undoOpenCodeRewind(providerSessionId, cwd, anchor) {
-  const serveHandle = await startOpenCodeServeProcess(cwd || process.cwd());
-  const sessionUrl = `${serveHandle.baseUrl}/session/${encodeURIComponent(providerSessionId)}`;
-
-  try {
-    const current = await readOpenCodeJsonBody(await fetch(sessionUrl, {
-      signal: AbortSignal.timeout(OPENCODE_REVERT_REQUEST_TIMEOUT_MS),
-    }));
-    if (current?.revert?.messageID !== anchor) {
-      return false;
-    }
-
-    const response = await fetch(`${sessionUrl}/unrevert`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: '{}',
-      signal: AbortSignal.timeout(OPENCODE_REVERT_REQUEST_TIMEOUT_MS),
+      notifyTerminalState(null);
+      finish(true);
     });
-    const session = await readOpenCodeJsonBody(response);
-    if (!response.ok || typeof session?.id !== 'string' || session.revert) {
-      throw new Error(`OpenCode unrevert failed (HTTP ${response.status}).`);
-    }
-
-    return true;
-  } finally {
-    await killOpenCodeProcessTree(serveHandle.process);
-  }
-}
-
-/**
- * The Anchor a pending Rewind put on this send, or null when there is none.
- *
- * The frontend snapshots it into the send options under the name Claude's SDK
- * option uses, so it arrives here for free — `chat-websocket.service.ts`
- * spreads unknown client options straight through. It is meaningless without a
- * session to revert.
- */
-function readOpenCodeRewindAnchor(options) {
-  const anchor = options?.resumeSessionAt;
-  return typeof anchor === 'string' && anchor.trim() ? anchor.trim() : null;
-}
-
-/**
- * Performs a Rewind and then the send that carries it.
- *
- * Unlike Claude's, this cannot ride inside the send: `resumeSessionAt` is an
- * option on the SDK query, but OpenCode's revert is an immediate call of its
- * own, so a Rewind here is **two** operations and the atomicity Claude gets for
- * free has to be built. The revert is inclusive of the Anchor it names (see
- * `buildOpenCodeRewindAnchorIndex`) and restores tracked files along with the
- * conversation, which is why the composer warns about the files first.
- *
- * If the send fails after the revert succeeded, the reader would be left with
- * rolled-back files and nothing to show for it, so the revert is undone where
- * OpenCode still allows it (see `undoOpenCodeRewind` for when it does not) and
- * they are told either way — their working tree moved, and silence about that
- * is not an option.
- */
-async function runOpenCodeRewindSend(command, options, ws, context, anchor) {
-  const { sessionId, projectPath, cwd } = options;
-  const workingDir = cwd || projectPath || process.cwd();
-  const providerSessionId = context.resolveProviderSessionId(sessionId);
-
-  const sendError = (content) => {
-    ws.send(createNormalizedMessage({
-      kind: 'error',
-      content,
-      sessionId: sessionId || null,
-      provider: 'opencode',
-    }));
-  };
-  const finishFailed = () => {
-    ws.send(createCompleteMessage({
-      provider: 'opencode',
-      sessionId: sessionId || null,
-      exitCode: 1,
-    }));
-  };
-
-  if (!providerSessionId) {
-    sendError('Nothing to rewind to yet — start a conversation first.');
-    finishFailed();
-    return;
-  }
-
-  try {
-    await revertOpenCodeSession(providerSessionId, workingDir, anchor);
   } catch (error) {
     const errorContent = error instanceof Error ? error.message : String(error);
-    console.error('[OpenCode] Rewind failed before the send:', errorContent);
-    sendError(`Rewind failed, so nothing was sent: ${errorContent}`);
-    finishFailed();
-    return;
-  }
-
-  try {
-    // An ordinary send from here on, minus the Anchor that brought it here —
-    // dropping it is what stops this branch from being taken a second time.
-    return await spawnOpenCode(command, { ...options, resumeSessionAt: undefined }, ws, context);
-  } catch (error) {
-    try {
-      sendError(await undoOpenCodeRewind(providerSessionId, workingDir, anchor)
-        ? 'The send failed, so the Rewind was undone — the conversation and your files are back where they were.'
-        : 'The send failed, and OpenCode had already applied the Rewind by then — the earlier messages are gone and your files are still rolled back to that point.');
-    } catch (undoError) {
-      const undoContent = undoError instanceof Error ? undoError.message : String(undoError);
-      console.error('[OpenCode] Rewind could not be undone after a failed send:', undoContent);
-      sendError(`The send failed and the Rewind could not be undone (${undoContent}). Your files are still rolled back to the earlier point.`);
+    if (!serveStarted) {
+      console.error('[OpenCode] Compact failed to start the headless server:', errorContent);
+      if (!compactHandle.aborted) {
+        sendError(`OpenCode Compact could not start: ${errorContent}`);
+        notifyTerminalState(errorContent);
+      }
+      finish(false, { aborted: compactHandle.aborted });
+    } else {
+      console.error('[OpenCode] Compact request failed:', errorContent);
+      // An abort tears the server down mid-request, so the resulting fetch
+      // failure is expected rather than something to report as a failure.
+      if (compactHandle.aborted) {
+        finish(false, { aborted: true });
+      } else {
+        sendError(`OpenCode Compact failed: ${errorContent}`);
+        notifyTerminalState(errorContent);
+        finish(false);
+      }
     }
-    throw error;
+  } finally {
+    activeOpenCodeProcesses.delete(sessionId);
   }
 }
 

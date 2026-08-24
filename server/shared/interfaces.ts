@@ -2,6 +2,7 @@ import type {
   AnyRecord,
   FetchHistoryOptions,
   FetchHistoryResult,
+  ForkSessionOptions,
   LLMProvider,
   McpScope,
   NormalizedMessage,
@@ -157,20 +158,13 @@ export interface IProviderSessions {
   /**
    * Forks one session at an Anchor, returning the new provider-native session id.
    *
-   * `anchor` is a value this same provider produced on a normalized message, so
-   * each implementation owns whether its own fork keeps or drops the named row
-   * — providers disagree, and callers must not compensate for that here.
-   * `title` is the fork's name, passed on so the provider's own CLI shows it too.
+   * See `ForkSessionOptions` for what each field means and for why the caller
+   * must not compensate for providers disagreeing about the anchored row.
    *
    * Optional: a provider that cannot branch a session at a point omits this and
    * reports `supportsFork: false` in the capability matrix.
    */
-  forkSession?(options: {
-    providerSessionId: string;
-    projectPath: string;
-    anchor: string;
-    title: string;
-  }): Promise<string>;
+  forkSession?(options: ForkSessionOptions): Promise<string>;
 }
 
 // ---------------------------
