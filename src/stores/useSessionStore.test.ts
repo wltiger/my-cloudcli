@@ -282,3 +282,60 @@ test('sending a Rewind discards what it leaves behind straight away', async () =
     restore();
   }
 });
+
+test('the reply starting does not undo the Rewind', async () => {
+  const before = range(1, 60);
+  // At this point the provider has been asked to resume from message 41 but has
+  // not written anything yet, so the transcript still describes the whole
+  // conversation -- abandoned branch and all.
+  const restore = serveTranscript(() => before);
+  try {
+    const store = mountStore();
+    store.setActiveSession(SESSION_ID);
+    await store.fetchFromServer(SESSION_ID, { limit: PAGE, offset: 0 });
+    await store.fetchMore(SESSION_ID, { limit: PAGE });
+
+    store.dropRewoundMessages(SESSION_ID, 'row-40');
+    assert.equal(store.getMessages(SESSION_ID).at(-1)?.id, 'm40');
+
+    // The reply starts coming back.
+    store.appendRealtime(SESSION_ID, {
+      ...persisted(41), id: 'echo', timestamp: at(200),
+      anchor: undefined, rewindAnchor: undefined,
+    } as NormalizedMessage);
+    store.updateStreaming(SESSION_ID, 'thinking...', 'claude');
+    await store.refreshLatestFromServer(SESSION_ID, { limit: PAGE });
+
+    const visible = store.getMessages(SESSION_ID);
+    assert.deepEqual(
+      visible.filter((message) => /^m(4[1-9]|5\d|60)$/.test(message.id)).map((m) => m.id),
+      [],
+    );
+  } finally {
+    restore();
+  }
+});
+
+test('a Rewind whose send never landed is undone when the run ends', async () => {
+  const before = range(1, 60);
+  const restore = serveTranscript(() => before);
+  try {
+    const store = mountStore();
+    store.setActiveSession(SESSION_ID);
+    await store.fetchFromServer(SESSION_ID, { limit: PAGE, offset: 0 });
+    await store.fetchMore(SESSION_ID, { limit: PAGE });
+
+    store.dropRewoundMessages(SESSION_ID, 'row-40');
+    assert.equal(store.getMessages(SESSION_ID).at(-1)?.id, 'm40');
+
+    // The run ends without the transcript ever changing: the send failed, so
+    // nothing was rewound. Hiding those messages until the reader reloads would
+    // be the same class of lie the cut exists to avoid.
+    store.settleRewind(SESSION_ID);
+    await store.refreshLatestFromServer(SESSION_ID, { limit: PAGE });
+
+    assert.equal(store.getMessages(SESSION_ID).at(-1)?.id, 'm60');
+  } finally {
+    restore();
+  }
+});

@@ -264,6 +264,10 @@ export function useChatRealtimeHandlers({
           // before the first send), so the only follow-up is syncing the
           // viewed conversation with the now-persisted transcript.
           if (sid && sid === activeViewSessionId) {
+            // Ordered: the run is over either way, so the transcript is
+            // authoritative again before it is read. A Rewind that landed is
+            // confirmed by the refresh; one whose send failed is undone by it.
+            sessionStore.settleRewind(sid);
             void requestLatestMessages(sid, isActiveRef.current);
           }
 

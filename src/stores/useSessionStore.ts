@@ -131,6 +131,12 @@ export interface SessionSlot {
   hasMore: boolean;
   offset: number;
   tokenUsage: unknown;
+  /**
+   * Set while a Rewind has been sent but the provider has not written it yet.
+   * Until it does, the transcript still describes the conversation the reader
+   * discarded, so the server's view must not be allowed to overwrite the cut.
+   */
+  rewindCutTime: number | null;
 }
 
 const EMPTY: NormalizedMessage[] = [];
@@ -149,6 +155,7 @@ function createEmptySlot(): SessionSlot {
     hasMore: false,
     offset: 0,
     tokenUsage: null,
+    rewindCutTime: null,
     _historyMutationQueue: Promise.resolve(),
   };
 }
@@ -522,6 +529,19 @@ async function refreshLatestSlotFromServer(
   let nextHasMore = previousHasMore;
   const historyTruncated = serverHistoryShrank(previousTotal, latestPage.total);
 
+  // A Rewind is sent long before the provider writes it, and every refresh in
+  // between fetches a transcript that still contains the messages the reader
+  // just discarded -- stitching them straight back on screen mid-reply. Nothing
+  // in the response distinguishes "not written yet" from "never happening", so
+  // the cut is trusted until the count proves the write landed. `settleRewind`
+  // is how the run's end gives the decision back to the server.
+  if (slot.rewindCutTime !== null && !historyTruncated) {
+    return { applied: false, changed: false, deferred: true };
+  }
+  if (historyTruncated) {
+    slot.rewindCutTime = null;
+  }
+
   // A page with no older rows is the complete authoritative transcript. This
   // also removes cached rows after a provider-side truncation.
   if (!latestPage.hasMore) {
@@ -697,6 +717,7 @@ export function useSessionStore() {
 
       try {
         const data = await requestSessionHistoryPage(sessionId, requestOptions);
+        slot.rewindCutTime = null;
         slot.serverMessages = data.messages;
         slot.total = data.total;
         slot.hasMore = data.hasMore;
@@ -979,9 +1000,26 @@ export function useSessionStore() {
       });
     }
     slot.offset = slot.serverMessages.length;
+    slot.rewindCutTime = cutTime;
     recomputeMergedIfNeeded(slot);
     notify(sessionId);
   }, [notify]);
+
+  /**
+   * Hands the decision back to the server once the run is over.
+   *
+   * Called when the run ends, whichever way it ended. If the Rewind landed the
+   * refresh that follows sees a shorter transcript and agrees with the cut; if
+   * the send never reached the provider it sees the original conversation and
+   * restores it, which is correct -- nothing was rewound. Without this a failed
+   * send would hide those messages until the reader reloaded the page.
+   */
+  const settleRewind = useCallback((sessionId: string) => {
+    const slot = storeRef.current.get(sessionId);
+    if (slot) {
+      slot.rewindCutTime = null;
+    }
+  }, []);
 
   /**
    * Get merged messages for a session (for rendering).
@@ -1012,13 +1050,14 @@ export function useSessionStore() {
     finalizeStreaming,
     clearRealtime,
     dropRewoundMessages,
+    settleRewind,
     getMessages,
     getSessionSlot,
   }), [
     getSlot, has, fetchFromServer, fetchMore,
     appendRealtime, appendRealtimeBatch, refreshLatestFromServer,
     setActiveSession, setStatus, isStale, updateStreaming, finalizeStreaming,
-    clearRealtime, dropRewoundMessages, getMessages, getSessionSlot,
+    clearRealtime, dropRewoundMessages, settleRewind, getMessages, getSessionSlot,
   ]);
 }
 
