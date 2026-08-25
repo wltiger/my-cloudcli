@@ -223,3 +223,62 @@ test('a Rewind also drops the abandoned turns that were watched live', async () 
   const abandoned = visible.filter((message) => /^(live-|m(4[3-9]|5\d|60)$)/.test(message.id));
   assert.deepEqual(abandoned.map((message) => message.id), []);
 });
+
+test('sending a Rewind discards what it leaves behind straight away', async () => {
+  const before = range(1, 60);
+  let transcript = before;
+  const restore = serveTranscript(() => transcript);
+  try {
+    const store = mountStore();
+    store.setActiveSession(SESSION_ID);
+    await store.fetchFromServer(SESSION_ID, { limit: PAGE, offset: 0 });
+    await store.fetchMore(SESSION_ID, { limit: PAGE });
+    for (const number of [57, 58, 59, 60]) {
+      store.appendRealtime(SESSION_ID, {
+        ...persisted(number),
+        id: `live-${number}`,
+        anchor: undefined,
+        rewindAnchor: undefined,
+      } as NormalizedMessage);
+    }
+    assert.ok(store.getMessages(SESSION_ID).some((message) => message.id === 'm41'));
+
+    // The reader Rewinds to message 41 and presses send. Nothing has come back
+    // yet and the transcript on disk is untouched.
+    store.dropRewoundMessages(SESSION_ID, 'row-40');
+
+    const visible = store.getMessages(SESSION_ID);
+    assert.deepEqual(
+      visible
+        .filter((message) => /^(live-|m(4[1-9]|5\d|60)$)/.test(message.id))
+        .map((message) => message.id),
+      [],
+    );
+    assert.equal(visible.at(-1)?.id, 'm40');
+
+    // The echo of the message just sent is appended after the cut, so it has to
+    // survive it -- the whole reason the composer consumes the Rewind first.
+    store.appendRealtime(SESSION_ID, {
+      ...persisted(41),
+      id: 'echo',
+      timestamp: at(200),
+      anchor: undefined,
+      rewindAnchor: undefined,
+    } as NormalizedMessage);
+    assert.equal(store.getMessages(SESSION_ID).at(-1)?.id, 'echo');
+
+    // The reply lands and the persisted tail is reconciled against a transcript
+    // that is now shorter. The cut above left `total` alone precisely so this
+    // still recognises the truncation.
+    transcript = [...before.slice(0, 40),
+      { ...persisted(41), id: 'm41b', timestamp: at(200) },
+      { ...persisted(42), id: 'm42b', timestamp: at(201), content: 'reply after the rewind' }];
+    await store.refreshLatestFromServer(SESSION_ID, { limit: PAGE });
+
+    const settled = store.getMessages(SESSION_ID);
+    assert.deepEqual(settled.filter((message) => !message.anchor), []);
+    assert.equal(settled.at(-1)?.content, 'reply after the rewind');
+  } finally {
+    restore();
+  }
+});

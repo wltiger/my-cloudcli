@@ -946,6 +946,44 @@ export function useSessionStore() {
   }, [notify]);
 
   /**
+   * Drops what a Rewind leaves behind, at the moment it is sent.
+   *
+   * Without this those messages stay on screen for the whole run and only go
+   * when the reply lands and the persisted tail is reconciled -- the reader
+   * watches an answer arrive underneath the messages they just discarded. The
+   * send is what performs a Rewind (ADR 0006), so this is when they leave.
+   *
+   * `total` is deliberately left as it was. The server remains the authority
+   * on it, and leaving it high is exactly what lets the reconciliation that
+   * follows recognise the truncation and re-anchor the cache.
+   */
+  const dropRewoundMessages = useCallback((sessionId: string, anchor: string) => {
+    const slot = storeRef.current.get(sessionId);
+    if (!slot) return;
+
+    // Located in `serverMessages`, never in `merged`: merging drops rows that
+    // duplicate one another, so a live row can be missing from the merged view
+    // while still sitting in the buffer -- and it reappears the moment the
+    // server copy suppressing it is cut away.
+    const cutIndex = slot.serverMessages.findIndex((message) => message.rewindAnchor === anchor);
+    if (cutIndex < 0) return;
+
+    const cutTime = readMessageTime(slot.serverMessages[cutIndex]);
+    slot.serverMessages = slot.serverMessages.slice(0, cutIndex);
+    if (cutTime !== null) {
+      slot.realtimeMessages = slot.realtimeMessages.filter((message) => {
+        const time = readMessageTime(message);
+        // Unreadable timestamps are kept, the same way the truncation prune
+        // keeps them: erasing a row this cannot place is the worse mistake.
+        return time === null || time < cutTime;
+      });
+    }
+    slot.offset = slot.serverMessages.length;
+    recomputeMergedIfNeeded(slot);
+    notify(sessionId);
+  }, [notify]);
+
+  /**
    * Get merged messages for a session (for rendering).
    */
   const getMessages = useCallback((sessionId: string): NormalizedMessage[] => {
@@ -973,13 +1011,14 @@ export function useSessionStore() {
     updateStreaming,
     finalizeStreaming,
     clearRealtime,
+    dropRewoundMessages,
     getMessages,
     getSessionSlot,
   }), [
     getSlot, has, fetchFromServer, fetchMore,
     appendRealtime, appendRealtimeBatch, refreshLatestFromServer,
     setActiveSession, setStatus, isStale, updateStreaming, finalizeStreaming,
-    clearRealtime, getMessages, getSessionSlot,
+    clearRealtime, dropRewoundMessages, getMessages, getSessionSlot,
   ]);
 }
 

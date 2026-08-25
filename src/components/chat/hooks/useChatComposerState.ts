@@ -947,6 +947,16 @@ export function useChatComposerState({
         timestamp: new Date(),
       };
 
+      // Read before the Rewind is consumed below. The Anchor rides in here, so
+      // building these after the draft is cleared would send the message
+      // without it and the Rewind would silently not happen.
+      const sendOptions = queuedSubmission?.options ?? buildSendOptions(messageContent);
+
+      // The send above is the Rewind, so the pending one is now spent -- and
+      // what it leaves behind goes now rather than when the reply lands. It has
+      // to run *before* the echo below, which must survive the cut.
+      onRewindConsumed?.();
+
       addMessage(userMessage);
       // Mark this request as processing in the per-session activity map (the
       // single source of truth the indicator derives from). The id is always
@@ -967,7 +977,7 @@ export function useChatComposerState({
         sessionId: targetSessionId,
         content: messageContent,
         options: {
-          ...(queuedSubmission?.options ?? buildSendOptions(messageContent)),
+          ...sendOptions,
           attachments: uploadedAttachments,
         },
       });
@@ -979,8 +989,6 @@ export function useChatComposerState({
       setUploadingFiles(new Map());
       setFileErrors(new Map());
       setIsTextareaExpanded(false);
-      // The send above is the Rewind, so the pending one is now spent.
-      onRewindConsumed?.();
 
       if (textareaRef.current) {
         textareaRef.current.style.height = 'auto';

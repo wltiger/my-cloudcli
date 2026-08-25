@@ -990,5 +990,6 @@ export function useChatSessionState({
     isNearBottom,
     handleScroll,
     requestLatestMessages,
+    dropRewoundMessages: sessionStore.dropRewoundMessages,
   };
 }

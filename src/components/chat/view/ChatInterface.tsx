@@ -133,6 +133,7 @@ function ChatInterface({
     scrollToBottomAndReset,
     handleScroll,
     requestLatestMessages,
+    dropRewoundMessages,
   } = useChatSessionState({
     isActive,
     selectedProject,
@@ -212,6 +213,17 @@ function ChatInterface({
     chatMessages,
   });
 
+  // A Rewind is performed by sending, so the messages it discards leave with
+  // the send instead of waiting for the reply to land and the transcript to
+  // reconcile. Declared above the composer hook because it is one of its args.
+  const handleRewindConsumed = useCallback(() => {
+    const sessionId = currentSessionId || selectedSession?.id || null;
+    if (sessionId && rewindAnchor) {
+      dropRewoundMessages(sessionId, rewindAnchor);
+    }
+    clearRewind();
+  }, [clearRewind, currentSessionId, dropRewoundMessages, rewindAnchor, selectedSession]);
+
   const {
     input,
     setInput,
@@ -275,7 +287,7 @@ function ChatInterface({
     currentProviderSupportsClear,
     onClearSession: clearSession,
     rewindAnchor,
-    onRewindConsumed: clearRewind,
+    onRewindConsumed: handleRewindConsumed,
     isLoading: isProcessing,
     processingSessions,
     canAbortSession,
