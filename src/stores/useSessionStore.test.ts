@@ -157,3 +157,69 @@ test('the resent turn keeps its Rewind and Fork anchors', async () => {
     [],
   );
 });
+
+/**
+ * The same Rewind, but reached the way a reader actually reaches it: by
+ * chatting. The turns that get abandoned streamed in over the socket first, so
+ * the store holds them twice -- once persisted, once live.
+ */
+async function rewindAfterChattingLive(): Promise<NormalizedMessage[]> {
+  const before = range(1, 60);
+  const resentTurn: NormalizedMessage[] = [
+    { ...persisted(41), id: 'm41b', timestamp: at(200) },
+    { ...persisted(42), id: 'm42b', timestamp: at(201), content: 'reply after the rewind' },
+  ];
+  const after = [...before.slice(0, 40), ...resentTurn];
+
+  let transcript = before;
+  const restore = serveTranscript(() => transcript);
+  try {
+    const store = mountStore();
+    store.setActiveSession(SESSION_ID);
+    await store.fetchFromServer(SESSION_ID, { limit: PAGE, offset: 0 });
+    await store.fetchMore(SESSION_ID, { limit: PAGE });
+
+    // Turns 57..60 were watched live. The socket's ids are its own, so these do
+    // not collide with the persisted rows they duplicate.
+    for (const number of [57, 58, 59, 60]) {
+      store.appendRealtime(SESSION_ID, {
+        ...persisted(number),
+        id: `live-${number}`,
+        anchor: undefined,
+        rewindAnchor: undefined,
+      } as NormalizedMessage);
+    }
+    await store.refreshLatestFromServer(SESSION_ID, { limit: PAGE });
+    // Guards the assertions below: they are only meaningful if the turns about
+    // to be abandoned really are on screen, in both of their two copies.
+    const beforeRewind = store.getMessages(SESSION_ID);
+    assert.ok(beforeRewind.some((message) => message.id === 'm60'), 'persisted copy missing');
+    assert.ok(beforeRewind.some((message) => message.id === 'live-57'), 'live copy missing');
+
+    transcript = after;
+    for (const message of resentTurn) {
+      store.appendRealtime(SESSION_ID, {
+        ...message,
+        anchor: undefined,
+        rewindAnchor: undefined,
+      } as NormalizedMessage);
+    }
+    await store.refreshLatestFromServer(SESSION_ID, { limit: PAGE });
+
+    return store.getMessages(SESSION_ID);
+  } finally {
+    restore();
+  }
+}
+
+test('a Rewind also drops the abandoned turns that were watched live', async () => {
+  const visible = await rewindAfterChattingLive();
+
+  // Pruning only removes live rows the server still has, so rows the Rewind
+  // deleted are exactly the ones it cannot recognise: they come straight back
+  // as `extra` and the reader keeps seeing messages that no longer exist.
+  // Matched by id, not by text: the resent message is a *re-send*, so it
+  // legitimately carries the same words as the one the Rewind dropped.
+  const abandoned = visible.filter((message) => /^(live-|m(4[3-9]|5\d|60)$)/.test(message.id));
+  assert.deepEqual(abandoned.map((message) => message.id), []);
+});

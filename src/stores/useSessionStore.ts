@@ -396,6 +396,36 @@ function pruneRealtimeSupersededByServer(
   });
 }
 
+/**
+ * Drops the live rows a server-side truncation invalidated.
+ *
+ * `pruneRealtimeSupersededByServer` cannot do this. It removes live rows the
+ * server still holds, which is the one thing a deleted row is not -- so the
+ * turns a Rewind abandoned survive pruning and are merged straight back in,
+ * even once the persisted copy is gone.
+ *
+ * Everything the server has already written past is therefore dropped: if it
+ * were real, it would be in the transcript. Only rows newer than the server's
+ * last one are kept, which is exactly a run still streaming.
+ */
+function dropRealtimeOlderThanServerTail(
+  serverMessages: NormalizedMessage[],
+  realtimeMessages: NormalizedMessage[],
+): NormalizedMessage[] {
+  const newestServer = serverMessages[serverMessages.length - 1];
+  const newestServerTime = newestServer ? readMessageTime(newestServer) : null;
+  if (newestServerTime === null) {
+    return realtimeMessages;
+  }
+
+  return realtimeMessages.filter((message) => {
+    const time = readMessageTime(message);
+    // An unreadable timestamp is kept: dropping a row this cannot place would
+    // erase a turn the reader is watching arrive.
+    return time === null || time > newestServerTime;
+  });
+}
+
 function computeMerged(server: NormalizedMessage[], realtime: NormalizedMessage[]): NormalizedMessage[] {
   if (realtime.length === 0) {
     return dedupeAdjacentAssistantEchoes(server);
@@ -490,6 +520,7 @@ async function refreshLatestSlotFromServer(
 
   let nextServerMessages: NormalizedMessage[] | null = null;
   let nextHasMore = previousHasMore;
+  const historyTruncated = serverHistoryShrank(previousTotal, latestPage.total);
 
   // A page with no older rows is the complete authoritative transcript. This
   // also removes cached rows after a provider-side truncation.
@@ -499,7 +530,7 @@ async function refreshLatestSlotFromServer(
   } else if (previousServerMessages.length === 0) {
     nextServerMessages = latestPage.messages;
     nextHasMore = true;
-  } else if (serverHistoryShrank(previousTotal, latestPage.total)) {
+  } else if (historyTruncated) {
     // A Rewind deleted rows this cache still holds, so there is nothing left to
     // stitch onto: the fetched page replaces the cache outright rather than
     // being merged into it. Older pages dropped here come back the ordinary
@@ -591,7 +622,9 @@ async function refreshLatestSlotFromServer(
   slot.fetchedAt = Date.now();
   slot.realtimeMessages = pruneRealtimeSupersededByServer(
     slot.serverMessages,
-    slot.realtimeMessages,
+    historyTruncated
+      ? dropRealtimeOlderThanServerTail(slot.serverMessages, slot.realtimeMessages)
+      : slot.realtimeMessages,
   );
   recomputeMergedIfNeeded(slot);
 
