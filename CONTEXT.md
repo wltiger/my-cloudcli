@@ -57,3 +57,21 @@ _Avoid_: Line, entry, event
 **Anchor**:
 The transcript row a Rewind or Fork is taken at, named the way its provider names it. Chosen by pointing at a message but never derivable from one: providers disagree about which row the same gesture lands on, and even about whether the named row is kept or dropped — OpenCode's own fork excludes it while its own revert includes it. A message with no anchor is one the operation cannot be performed on at all.
 _Avoid_: Checkpoint, cut point, target
+
+**Session archive** (session):
+A reversible visibility state for a session. Archiving removes it from active
+session lists while preserving its transcript and metadata; restoring puts it
+back into active lists. It is not permanent deletion.
+_Avoid_: Delete, hide, remove
+
+**Permanent session deletion** (session):
+An irreversible operation that removes the session record and its persisted
+transcript when the provider storage allows it. It is a separate capability
+from Session archive and requires explicit confirmation from an agent tool.
+_Avoid_: Archive, clear, reset
+
+**Agent session manager**:
+An agent-facing MCP interface over CloudCLI's existing session APIs. It exposes
+session metadata, normalized history, search, safe lifecycle mutations, and
+export without accepting provider file paths or rewriting transcript rows.
+_Avoid_: Transcript editor, provider storage clone
