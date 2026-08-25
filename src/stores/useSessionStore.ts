@@ -20,6 +20,7 @@ import {
   mergeOlderServerPage,
   planLatestPageBridge,
   resolveLatestPagePagination,
+  serverHistoryShrank,
   SESSION_MESSAGES_PAGE_SIZE,
 } from './sessionMessagePagination';
 import type { SessionMessagesRequestOptions } from './sessionMessagePagination';
@@ -496,6 +497,13 @@ async function refreshLatestSlotFromServer(
     nextServerMessages = latestPage.messages;
     nextHasMore = false;
   } else if (previousServerMessages.length === 0) {
+    nextServerMessages = latestPage.messages;
+    nextHasMore = true;
+  } else if (serverHistoryShrank(previousTotal, latestPage.total)) {
+    // A Rewind deleted rows this cache still holds, so there is nothing left to
+    // stitch onto: the fetched page replaces the cache outright rather than
+    // being merged into it. Older pages dropped here come back the ordinary
+    // way, by scrolling up.
     nextServerMessages = latestPage.messages;
     nextHasMore = true;
   } else {

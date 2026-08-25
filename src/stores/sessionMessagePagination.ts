@@ -237,6 +237,24 @@ export function mergeOlderServerPage(
   };
 }
 
+/**
+ * True when the server holds fewer messages than it did when the cached window
+ * was taken. Stitching a fresh tail onto the cache assumes history only ever
+ * grows; a Rewind breaks that assumption by dropping the branch it abandoned.
+ *
+ * Overlap detection cannot notice this by itself. The rows it would anchor on
+ * are exactly the ones the Rewind deleted, so it finds no overlap, spends its
+ * bridge budget reaching for one, and keeps the cached suffix -- leaving
+ * abandoned messages on screen until a reload. `total` is the signal that
+ * survives, because the server recounts it after filtering that branch out.
+ */
+export function serverHistoryShrank(
+  previousTotal: number,
+  latestTotal: number,
+): boolean {
+  return latestTotal < previousTotal;
+}
+
 /** Preserves the cached oldest-page boundary after a successful tail stitch. */
 export function resolveLatestPagePagination(
   previousMessageCount: number,

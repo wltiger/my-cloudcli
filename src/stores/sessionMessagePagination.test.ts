@@ -10,6 +10,7 @@ import {
   mergeOlderServerPage,
   planLatestPageBridge,
   resolveLatestPagePagination,
+  serverHistoryShrank,
 } from './sessionMessagePagination';
 
 function message(
@@ -175,4 +176,27 @@ test('offset counts loaded persisted rows even when renderable total excludes to
 
   assert.equal(pagination.offset, 23);
   assert.ok(pagination.offset > renderableTotal);
+});
+
+test('a Rewind that shortens the transcript is caught by total, not by overlap', () => {
+  // What the reader had open: rows 21..60 of a 60-message session.
+  const cached = range(21, 60);
+  // The Rewind dropped 41..60 and the resent turn landed, so the newest page is
+  // rows 23..40 of the surviving conversation plus that new turn.
+  const latest = [...range(23, 40), message(101), message(102)];
+
+  // The stitch this module normally relies on has nothing to anchor on: the
+  // cached tail it would match against is exactly what the Rewind deleted.
+  assert.equal(mergeLatestServerPage(cached, latest).overlapLength, 0);
+
+  // `total` is the signal that survives, because the server recounts it after
+  // filtering the abandoned branch away. Without this the stitch gives up and
+  // keeps showing deleted messages until the reader reloads the page.
+  assert.equal(serverHistoryShrank(60, 42), true);
+});
+
+test('a transcript that only grows is never mistaken for a truncation', () => {
+  assert.equal(serverHistoryShrank(60, 60), false);
+  assert.equal(serverHistoryShrank(60, 61), false);
+  assert.equal(serverHistoryShrank(0, 0), false);
 });
