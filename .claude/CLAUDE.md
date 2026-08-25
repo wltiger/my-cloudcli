@@ -31,6 +31,8 @@ npm run desktop:dev         # Electron shell against a running local dev server
 
 `npm test` and `npm run test:client` are separate suites — running only `npm test` skips every frontend test. Legacy `src/**/*.test.js` files (e.g. `src/utils/api.test.js`) match neither glob and are plain assertion scripts nothing runs.
 
+`test:client` runs under a plain `tsx` runner with no Vite, so a module that reads `import.meta.env` at module scope cannot be imported from a test at all — and neither can anything importing it, which is most of `src/`. Guard such reads with `?.` (see `src/shared/utils.ts`); Vite still replaces them statically.
+
 `postinstall` runs `scripts/fix-node-pty.js` (native module patch). `prepare` installs husky hooks; pre-commit runs `lint-staged` (eslint on staged `src/**` and `server/**` files), commit-msg enforces Conventional Commits via commitlint.
 
 ## Local UI testing (dev server / browser automation)
