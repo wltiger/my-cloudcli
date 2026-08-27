@@ -243,22 +243,16 @@ function mapCliOptionsToSDK(options = {}) {
   sdkOptions.disallowedTools = settings.disallowedTools || [];
 
   sdkOptions.model = options.model || CLAUDE_PREDEFINED_MODELS.DEFAULT;
+  const modelsDefinition = options.effortModels || CLAUDE_PREDEFINED_MODELS;
 
-  const resolvedEffort = resolveClaudeEffort(
-    sdkOptions.model,
-    effort,
-    options.effortModels || CLAUDE_PREDEFINED_MODELS,
-  );
+  const resolvedEffort = resolveClaudeEffort(sdkOptions.model, effort, modelsDefinition);
   if (resolvedEffort) {
     sdkOptions.effort = resolvedEffort;
   }
 
   // A Claude custom model with its own Base URL/API Key routes this call to
   // that endpoint instead of the logged-in subscription. See fork-customizations.md.
-  const customEndpointEnv = resolveClaudeCustomEndpointEnv(
-    sdkOptions.model,
-    options.effortModels || CLAUDE_PREDEFINED_MODELS,
-  );
+  const customEndpointEnv = resolveClaudeCustomEndpointEnv(sdkOptions.model, modelsDefinition);
   if (customEndpointEnv) {
     Object.assign(sdkOptions.env, customEndpointEnv);
   }

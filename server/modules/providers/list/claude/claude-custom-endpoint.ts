@@ -10,6 +10,7 @@ export type ClaudeCustomEndpointEnv = {
  * URL/API Key, using the same catalog-lookup pattern the runtime already
  * uses to resolve per-model effort. Returns null for every built-in model
  * and every plain custom model, leaving the SDK's environment untouched.
+ * Used by `claude-runtime.provider.js`.
  */
 export function resolveClaudeCustomEndpointEnv(
   model: string | undefined,

@@ -256,6 +256,21 @@ test('editing a custom model can add or clear its base URL/API key', async () =>
   assert.equal(clearedAgain.model.apiKey, undefined);
 });
 
+test('deleting a custom model with a base URL/API key works like deleting any other', async () => {
+  const { service } = createTestService();
+  const created = await service.createCustomModel('claude', {
+    model: 'My Local Model',
+    id: 'local-model',
+    baseUrl: 'http://localhost:11434',
+    apiKey: 'sk-local-123',
+  });
+  const recordId = created.model.recordId as number;
+
+  const removed = await service.deleteCustomModel('claude', recordId);
+  assert.equal(removed.model.value, 'local-model');
+  assert.equal(removed.models.OPTIONS.some((option) => option.recordId === recordId), false);
+});
+
 test('duplicate model ids are rejected within one provider', async () => {
   const { service } = createTestService();
   await service.createCustomModel('cursor', { model: 'First', id: 'custom-id' });
