@@ -182,6 +182,9 @@ CREATE TABLE IF NOT EXISTS provider_models (
     -- every other row). Stored unmasked by design -- see fork-customizations.md.
     base_url TEXT,
     api_key TEXT,
+    -- JSON array of reasoning-effort levels this custom endpoint accepts (e.g.
+    -- '["low","medium","xhigh"]'), or NULL to leave effort unavailable for it.
+    effort_levels TEXT,
     UNIQUE(provider, model_id)
 );
 `;

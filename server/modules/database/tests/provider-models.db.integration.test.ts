@@ -37,6 +37,7 @@ test('provider model repository stores custom rows only and maintains session re
       'updated_at',
       'base_url',
       'api_key',
+      'effort_levels',
     ]);
     assert.deepEqual(providerModelsDb.listCustomProviderModels('codex'), []);
 
@@ -57,12 +58,18 @@ test('provider model repository stores custom rows only and maintains session re
       id: 'local-model',
       baseUrl: 'http://localhost:11434',
       apiKey: 'sk-local-123',
+      effortLevels: ['low', 'medium', 'xhigh'],
     });
     assert.equal(claudeCustom.baseUrl, 'http://localhost:11434');
     assert.equal(claudeCustom.apiKey, 'sk-local-123');
+    assert.deepEqual(claudeCustom.effortLevels, ['low', 'medium', 'xhigh']);
     assert.equal(
       providerModelsDb.getCustomProviderModel('claude', claudeCustom.recordId)?.baseUrl,
       'http://localhost:11434',
+    );
+    assert.deepEqual(
+      providerModelsDb.getCustomProviderModel('claude', claudeCustom.recordId)?.effortLevels,
+      ['low', 'medium', 'xhigh'],
     );
 
     const db = getConnection();

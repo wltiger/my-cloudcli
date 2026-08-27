@@ -10,13 +10,18 @@ export type ClaudeCustomEndpointValue = {
   enabled: boolean;
   baseUrl: string;
   apiKey: string;
+  effortLevels: string[];
 };
 
 export const EMPTY_CUSTOM_ENDPOINT: ClaudeCustomEndpointValue = {
   enabled: false,
   baseUrl: '',
   apiKey: '',
+  effortLevels: [],
 };
+
+/** Must match `CUSTOM_MODEL_EFFORT_LEVELS` in `custom-model-endpoint.ts` on the server. */
+const KNOWN_EFFORT_LEVELS = ['low', 'medium', 'high', 'xhigh', 'max'];
 
 export const readClaudeCustomEndpointFromOption = (
   provider: LLMProvider,
@@ -26,18 +31,23 @@ export const readClaudeCustomEndpointFromOption = (
     return EMPTY_CUSTOM_ENDPOINT;
   }
 
-  return { enabled: true, baseUrl: option.baseUrl, apiKey: option.apiKey ?? '' };
+  return {
+    enabled: true,
+    baseUrl: option.baseUrl,
+    apiKey: option.apiKey ?? '',
+    effortLevels: option.effort?.values.map((level) => level.value) ?? [],
+  };
 };
 
 export const buildClaudeCustomEndpointPayload = (
   provider: LLMProvider,
   value: ClaudeCustomEndpointValue,
-): { baseUrl?: string; apiKey?: string } => {
+): { baseUrl?: string; apiKey?: string; effortLevels?: string[] } => {
   if (provider !== 'claude' || !value.enabled) {
     return {};
   }
 
-  return { baseUrl: value.baseUrl.trim(), apiKey: value.apiKey.trim() };
+  return { baseUrl: value.baseUrl.trim(), apiKey: value.apiKey.trim(), effortLevels: value.effortLevels };
 };
 
 type ClaudeCustomEndpointFieldsProps = {
@@ -46,6 +56,13 @@ type ClaudeCustomEndpointFieldsProps = {
 };
 
 export default function ClaudeCustomEndpointFields({ value, onChange }: ClaudeCustomEndpointFieldsProps) {
+  const toggleEffortLevel = (level: string) => {
+    const effortLevels = value.effortLevels.includes(level)
+      ? value.effortLevels.filter((existing) => existing !== level)
+      : [...value.effortLevels, level];
+    onChange({ ...value, effortLevels });
+  };
+
   return (
     <div className="mt-4 rounded-xl border border-border/70 bg-background p-3">
       <div className="flex items-center justify-between gap-3">
@@ -91,6 +108,25 @@ export default function ClaudeCustomEndpointFields({ value, onChange }: ClaudeCu
               spellCheck={false}
               className="mt-1.5 h-10 rounded-xl bg-background font-mono"
             />
+          </div>
+          <div>
+            <p className="text-xs font-semibold text-foreground">Reasoning effort (optional)</p>
+            <p className="mt-0.5 text-[11px] leading-4 text-muted-foreground">
+              Levels this endpoint accepts. Leave all unchecked to hide the Reasoning picker for this model.
+            </p>
+            <div className="mt-1.5 flex flex-wrap gap-x-4 gap-y-1.5">
+              {KNOWN_EFFORT_LEVELS.map((level) => (
+                <label key={level} className="flex items-center gap-1.5 text-xs text-foreground">
+                  <input
+                    type="checkbox"
+                    checked={value.effortLevels.includes(level)}
+                    onChange={() => toggleEffortLevel(level)}
+                    className="h-3.5 w-3.5 rounded border-border accent-primary"
+                  />
+                  {level}
+                </label>
+              ))}
+            </div>
           </div>
           <p className="text-[11px] leading-4 text-muted-foreground">
             Stored and returned unmasked. The endpoint must already speak the Anthropic Messages API —

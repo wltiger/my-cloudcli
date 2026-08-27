@@ -71,6 +71,7 @@ const createCatalogStore = () => {
         sortOrder: readRows(provider).length,
         baseUrl: input.baseUrl ?? null,
         apiKey: input.apiKey ?? null,
+        effortLevels: input.effortLevels ?? null,
       };
       rows.set(provider, [...readRows(provider), record]);
       return record;
@@ -90,6 +91,7 @@ const createCatalogStore = () => {
         model: input.model,
         baseUrl: input.baseUrl ?? null,
         apiKey: input.apiKey ?? null,
+        effortLevels: input.effortLevels ?? null,
       };
       rows.set(provider, readRows(provider).map((record) => (
         record.recordId === recordId ? updated : record
@@ -190,6 +192,62 @@ test('a Claude custom model\'s base URL and API key round-trip through create, m
   const stored = claudeModels.OPTIONS.find((option) => option.value === 'local-model');
   assert.equal(stored?.baseUrl, 'http://localhost:11434');
   assert.equal(stored?.apiKey, 'sk-local-123');
+});
+
+test('a custom model\'s declared effort levels become its Reasoning options, medium preferred as default', async () => {
+  const { service } = createTestService();
+  const created = await service.createCustomModel('claude', {
+    model: 'My Local Model',
+    id: 'local-model',
+    baseUrl: 'http://localhost:11434',
+    apiKey: 'sk-local-123',
+    effortLevels: ['low', 'medium', 'xhigh'],
+  });
+
+  assert.deepEqual(created.model.effort, {
+    default: 'medium',
+    values: [{ value: 'low' }, { value: 'medium' }, { value: 'xhigh' }],
+  });
+});
+
+test('a custom model\'s default effort falls back to the first declared level when medium is absent', async () => {
+  const { service } = createTestService();
+  const created = await service.createCustomModel('claude', {
+    model: 'My Local Model',
+    id: 'local-model',
+    baseUrl: 'http://localhost:11434',
+    apiKey: 'sk-local-123',
+    effortLevels: ['low', 'xhigh'],
+  });
+
+  assert.equal(created.model.effort?.default, 'low');
+});
+
+test('a custom model with no declared effort levels has no Reasoning options', async () => {
+  const { service } = createTestService();
+  const created = await service.createCustomModel('claude', {
+    model: 'My Local Model',
+    id: 'local-model',
+    baseUrl: 'http://localhost:11434',
+    apiKey: 'sk-local-123',
+  });
+
+  assert.equal(created.model.effort, undefined);
+});
+
+test('an unknown effort level is rejected', async () => {
+  const { service } = createTestService();
+
+  await assert.rejects(
+    () => service.createCustomModel('claude', {
+      model: 'My Local Model',
+      id: 'local-model',
+      baseUrl: 'http://localhost:11434',
+      apiKey: 'sk-local-123',
+      effortLevels: ['low', 'ultra'],
+    }),
+    (error) => error instanceof AppError && error.statusCode === 400,
+  );
 });
 
 test('base URL/API key never leak into another provider\'s option list', async () => {

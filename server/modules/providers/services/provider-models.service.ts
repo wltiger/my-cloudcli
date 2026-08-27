@@ -1,6 +1,10 @@
 import { providerModelsDb, sessionsDb } from '@/modules/database/index.js';
 import { providerRegistry } from '@/modules/providers/provider.registry.js';
-import { assertCustomModelEndpointFieldsPaired } from '@/modules/providers/services/custom-model-endpoint.js';
+import {
+  assertCustomModelEndpointFieldsPaired,
+  assertValidEffortLevels,
+  buildCustomModelEffort,
+} from '@/modules/providers/services/custom-model-endpoint.js';
 import type { IProvider } from '@/shared/interfaces.js';
 import type {
   CustomProviderModelInput,
@@ -46,6 +50,7 @@ const toCustomProviderModelOption = (
   isCustom: true,
   baseUrl: record.baseUrl ?? undefined,
   apiKey: record.apiKey ?? undefined,
+  effort: buildCustomModelEffort(record.effortLevels),
 });
 
 const mergeProviderModels = (
@@ -65,12 +70,14 @@ const normalizeCustomModelInput = (input: CustomProviderModelInput): CustomProvi
   const baseUrl = input.baseUrl?.trim() || undefined;
   const apiKey = input.apiKey?.trim() || undefined;
   assertCustomModelEndpointFieldsPaired(baseUrl, apiKey);
+  assertValidEffortLevels(input.effortLevels);
 
   return {
     id: input.id.trim(),
     model: input.model.trim(),
     baseUrl,
     apiKey,
+    effortLevels: input.effortLevels,
   };
 };
 

@@ -485,6 +485,9 @@ const parseCustomProviderModelPayload = (payload: unknown): CustomProviderModelI
   const id = readOptionalQueryString(body.id);
   const baseUrl = readOptionalQueryString(body.baseUrl);
   const apiKey = readOptionalQueryString(body.apiKey);
+  const effortLevels = Array.isArray(body.effortLevels)
+    ? body.effortLevels.filter((level): level is string => typeof level === 'string')
+    : undefined;
   if (!model) {
     throw new AppError('model is required.', {
       code: 'MODEL_NAME_REQUIRED',
@@ -510,7 +513,7 @@ const parseCustomProviderModelPayload = (payload: unknown): CustomProviderModelI
     });
   }
 
-  return { model, id, baseUrl, apiKey };
+  return { model, id, baseUrl, apiKey, effortLevels };
 };
 
 router.get(

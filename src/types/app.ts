@@ -28,6 +28,7 @@ export type CustomProviderModelInput = {
   id: string;
   baseUrl?: string;
   apiKey?: string;
+  effortLevels?: string[];
 };
 
 export type ProviderModelActions = {

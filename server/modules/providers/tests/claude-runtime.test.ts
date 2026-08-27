@@ -14,6 +14,14 @@ const CUSTOM_ENDPOINT_CATALOG: ProviderModelsDefinition = {
       baseUrl: 'http://localhost:11434',
       apiKey: 'sk-local-123',
     },
+    {
+      value: 'local-model-with-effort',
+      label: 'My Local Model (custom effort)',
+      isCustom: true,
+      baseUrl: 'http://localhost:11434',
+      apiKey: 'sk-local-123',
+      effort: { default: 'medium', values: [{ value: 'low' }, { value: 'medium' }, { value: 'xhigh' }] },
+    },
   ],
   DEFAULT: 'default',
 };
@@ -88,6 +96,30 @@ test('Claude runtime environment overrides', async (t) => {
     const call = calls.at(-1);
     assert.equal(call?.options.env.ANTHROPIC_BASE_URL, undefined);
     assert.equal(call?.options.env.ANTHROPIC_API_KEY, undefined);
+  });
+
+  await t.test('forwards a custom model\'s declared reasoning effort to the SDK', async () => {
+    await queryClaudeSDK(
+      'hello',
+      { sessionId: 'session-4', model: 'local-model-with-effort', effort: 'xhigh', images: [], files: [] },
+      createFakeWs(),
+      createFakeContext(CUSTOM_ENDPOINT_CATALOG),
+    );
+
+    const call = calls.at(-1);
+    assert.equal(call?.options.effort, 'xhigh');
+  });
+
+  await t.test('drops a reasoning effort the custom model did not declare', async () => {
+    await queryClaudeSDK(
+      'hello',
+      { sessionId: 'session-5', model: 'local-model-with-effort', effort: 'max', images: [], files: [] },
+      createFakeWs(),
+      createFakeContext(CUSTOM_ENDPOINT_CATALOG),
+    );
+
+    const call = calls.at(-1);
+    assert.equal(call?.options.effort, undefined);
   });
 
   await t.test('leaves a plain custom model\'s environment unchanged (no regression)', async () => {

@@ -120,6 +120,8 @@ export type CustomProviderModelRecord = {
   /** Claude-only endpoint override, or null for every other row. */
   baseUrl: string | null;
   apiKey: string | null;
+  /** Claude-only reasoning-effort levels this custom endpoint accepts, or null. */
+  effortLevels: string[] | null;
 };
 
 /**
@@ -135,6 +137,8 @@ export type CustomProviderModelInput = {
   /** Claude-only endpoint override; must be set together or omitted together. */
   baseUrl?: string;
   apiKey?: string;
+  /** Claude-only reasoning-effort levels this custom endpoint accepts. */
+  effortLevels?: string[];
 };
 
 // ---------------------------
