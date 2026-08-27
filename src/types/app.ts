@@ -13,6 +13,9 @@ export type ProviderModelOption = {
       description?: string;
     }[];
   };
+  /** Claude-only endpoint override, set together or not at all. */
+  baseUrl?: string;
+  apiKey?: string;
 };
 
 export type ProviderModelsDefinition = {
@@ -23,6 +26,8 @@ export type ProviderModelsDefinition = {
 export type CustomProviderModelInput = {
   model: string;
   id: string;
+  baseUrl?: string;
+  apiKey?: string;
 };
 
 export type ProviderModelActions = {

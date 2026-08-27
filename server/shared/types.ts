@@ -86,6 +86,13 @@ export type ProviderModelOption = {
       description?: string;
     }[];
   };
+  /**
+   * Claude-only endpoint override (set together or not at all). When present,
+   * the Claude runtime routes that model's sessions to this endpoint instead
+   * of the logged-in subscription. See fork-customizations.md.
+   */
+  baseUrl?: string;
+  apiKey?: string;
 };
 
 /**
@@ -110,6 +117,9 @@ export type CustomProviderModelRecord = {
   modelId: string;
   model: string;
   sortOrder: number;
+  /** Claude-only endpoint override, or null for every other row. */
+  baseUrl: string | null;
+  apiKey: string | null;
 };
 
 /**
@@ -122,6 +132,9 @@ export type CustomProviderModelRecord = {
 export type CustomProviderModelInput = {
   id: string;
   model: string;
+  /** Claude-only endpoint override; must be set together or omitted together. */
+  baseUrl?: string;
+  apiKey?: string;
 };
 
 // ---------------------------

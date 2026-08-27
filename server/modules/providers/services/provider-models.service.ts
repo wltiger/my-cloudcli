@@ -1,5 +1,6 @@
 import { providerModelsDb, sessionsDb } from '@/modules/database/index.js';
 import { providerRegistry } from '@/modules/providers/provider.registry.js';
+import { assertCustomModelEndpointFieldsPaired } from '@/modules/providers/services/custom-model-endpoint.js';
 import type { IProvider } from '@/shared/interfaces.js';
 import type {
   CustomProviderModelInput,
@@ -43,6 +44,8 @@ const toCustomProviderModelOption = (
   label: record.model,
   recordId: record.recordId,
   isCustom: true,
+  baseUrl: record.baseUrl ?? undefined,
+  apiKey: record.apiKey ?? undefined,
 });
 
 const mergeProviderModels = (
@@ -58,10 +61,18 @@ const mergeProviderModels = (
   };
 };
 
-const normalizeCustomModelInput = (input: CustomProviderModelInput): CustomProviderModelInput => ({
-  id: input.id.trim(),
-  model: input.model.trim(),
-});
+const normalizeCustomModelInput = (input: CustomProviderModelInput): CustomProviderModelInput => {
+  const baseUrl = input.baseUrl?.trim() || undefined;
+  const apiKey = input.apiKey?.trim() || undefined;
+  assertCustomModelEndpointFieldsPaired(baseUrl, apiKey);
+
+  return {
+    id: input.id.trim(),
+    model: input.model.trim(),
+    baseUrl,
+    apiKey,
+  };
+};
 
 const isUniqueConstraintError = (error: unknown): boolean => (
   error !== null

@@ -19,6 +19,13 @@ import type {
 } from '../../../../types/app';
 import LLMProviderLogo from '../../../llm-provider-logo/LLMProviderLogo';
 
+import ClaudeCustomEndpointFields, {
+  buildClaudeCustomEndpointPayload,
+  EMPTY_CUSTOM_ENDPOINT,
+  readClaudeCustomEndpointFromOption,
+  type ClaudeCustomEndpointValue,
+} from './ClaudeCustomEndpointFields';
+
 const PROVIDERS: Array<{ id: LLMProvider; label: string }> = [
   { id: 'claude', label: 'Claude' },
   { id: 'codex', label: 'Codex' },
@@ -43,6 +50,7 @@ export default function ModelLibraryPanel({
   const [editing, setEditing] = useState<ProviderModelOption | null>(null);
   const [model, setModel] = useState('');
   const [modelId, setModelId] = useState('');
+  const [customEndpoint, setCustomEndpoint] = useState<ClaudeCustomEndpointValue>(EMPTY_CUSTOM_ENDPOINT);
   const [saving, setSaving] = useState(false);
   const [deletingRecordId, setDeletingRecordId] = useState<number | null>(null);
   const [confirmDeleteRecordId, setConfirmDeleteRecordId] = useState<number | null>(null);
@@ -70,6 +78,7 @@ export default function ModelLibraryPanel({
     setEditing(null);
     setModel('');
     setModelId('');
+    setCustomEndpoint(EMPTY_CUSTOM_ENDPOINT);
     setError(null);
   };
 
@@ -84,6 +93,7 @@ export default function ModelLibraryPanel({
     setEditing(option);
     setModel(option.label);
     setModelId(option.value);
+    setCustomEndpoint(readClaudeCustomEndpointFromOption(selectedProvider, option));
     setConfirmDeleteRecordId(null);
     setNotice(null);
     setError(null);
@@ -102,6 +112,8 @@ export default function ModelLibraryPanel({
       return;
     }
 
+    const endpointPayload = buildClaudeCustomEndpointPayload(selectedProvider, customEndpoint);
+
     setSaving(true);
     setError(null);
     setNotice(null);
@@ -110,12 +122,14 @@ export default function ModelLibraryPanel({
         await actions.update(selectedProvider, editing, {
           model: normalizedModel,
           id: normalizedId,
+          ...endpointPayload,
         });
         setNotice(`${normalizedModel} was updated.`);
       } else {
         await actions.create(selectedProvider, {
           model: normalizedModel,
           id: normalizedId,
+          ...endpointPayload,
         });
         setNotice(`${normalizedModel} was added.`);
       }
@@ -252,6 +266,10 @@ export default function ModelLibraryPanel({
           <p className="mt-1.5 text-[11px] leading-4 text-muted-foreground">
             Use the exact identifier accepted by the provider CLI. IDs cannot contain spaces.
           </p>
+
+          {selectedProvider === 'claude' && (
+            <ClaudeCustomEndpointFields value={customEndpoint} onChange={setCustomEndpoint} />
+          )}
 
           {error && (
             <div role="alert" className="mt-3 rounded-xl border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive">

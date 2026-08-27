@@ -35,6 +35,8 @@ test('provider model repository stores custom rows only and maintains session re
       'sort_order',
       'created_at',
       'updated_at',
+      'base_url',
+      'api_key',
     ]);
     assert.deepEqual(providerModelsDb.listCustomProviderModels('codex'), []);
 
@@ -43,9 +45,24 @@ test('provider model repository stores custom rows only and maintains session re
       id: 'gateway/model-v1',
     });
     assert.equal(custom.modelId, 'gateway/model-v1');
+    assert.equal(custom.baseUrl, null);
+    assert.equal(custom.apiKey, null);
     assert.equal(
       providerModelsDb.findCustomProviderModelByModelId('codex', 'gateway/model-v1')?.recordId,
       custom.recordId,
+    );
+
+    const claudeCustom = providerModelsDb.createCustomProviderModel('claude', {
+      model: 'My Local Model',
+      id: 'local-model',
+      baseUrl: 'http://localhost:11434',
+      apiKey: 'sk-local-123',
+    });
+    assert.equal(claudeCustom.baseUrl, 'http://localhost:11434');
+    assert.equal(claudeCustom.apiKey, 'sk-local-123');
+    assert.equal(
+      providerModelsDb.getCustomProviderModel('claude', claudeCustom.recordId)?.baseUrl,
+      'http://localhost:11434',
     );
 
     const db = getConnection();

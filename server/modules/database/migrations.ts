@@ -430,6 +430,21 @@ const addSessionEffortColumn = (db: Database): void => {
   addColumnToTableIfNotExists(db, 'sessions', columnNames, 'effort', 'TEXT');
 };
 
+/**
+ * Adds the `base_url`/`api_key` columns that let a Claude custom model
+ * override the SDK's endpoint/credential for its own sessions.
+ *
+ * Left NULL for every pre-existing row (and every non-Claude row going
+ * forward): the runtime only overrides the SDK environment when both are set.
+ */
+const addProviderModelCustomEndpointColumns = (db: Database): void => {
+  const providerModelsTableInfo = getTableInfo(db, 'provider_models');
+  const columnNames = providerModelsTableInfo.map((column) => column.name);
+
+  addColumnToTableIfNotExists(db, 'provider_models', columnNames, 'base_url', 'TEXT');
+  addColumnToTableIfNotExists(db, 'provider_models', columnNames, 'api_key', 'TEXT');
+};
+
 const ensureProjectsForSessionPaths = (db: Database): void => {
   if (!tableExists(db, 'sessions')) {
     return;
@@ -473,6 +488,7 @@ export const runMigrations = (db: Database) => {
     db.exec('CREATE INDEX IF NOT EXISTS idx_notification_channel_endpoints_user_channel ON notification_channel_endpoints(user_id, channel)');
     db.exec('CREATE INDEX IF NOT EXISTS idx_notification_channel_endpoints_enabled ON notification_channel_endpoints(enabled)');
     db.exec(PROVIDER_MODELS_TABLE_SCHEMA_SQL);
+    addProviderModelCustomEndpointColumns(db);
     db.exec(`
       CREATE INDEX IF NOT EXISTS idx_provider_models_provider_order
       ON provider_models(provider, sort_order, id)

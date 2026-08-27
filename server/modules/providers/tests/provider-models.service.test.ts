@@ -69,6 +69,8 @@ const createCatalogStore = () => {
         modelId: input.id,
         model: input.model,
         sortOrder: readRows(provider).length,
+        baseUrl: input.baseUrl ?? null,
+        apiKey: input.apiKey ?? null,
       };
       rows.set(provider, [...readRows(provider), record]);
       return record;
@@ -82,7 +84,13 @@ const createCatalogStore = () => {
       if (!existing) {
         return null;
       }
-      const updated = { ...existing, modelId: input.id, model: input.model };
+      const updated = {
+        ...existing,
+        modelId: input.id,
+        model: input.model,
+        baseUrl: input.baseUrl ?? null,
+        apiKey: input.apiKey ?? null,
+      };
       rows.set(provider, readRows(provider).map((record) => (
         record.recordId === recordId ? updated : record
       )));
@@ -163,6 +171,89 @@ test('custom models can be created, edited, and deleted', async () => {
   const removed = await service.deleteCustomModel('claude', recordId);
   assert.equal(removed.model.value, 'claude-my-model-v2');
   assert.equal(removed.models.OPTIONS.some((option) => option.recordId === recordId), false);
+});
+
+test('a Claude custom model\'s base URL and API key round-trip through create, merge, and read', async () => {
+  const { service } = createTestService();
+  const created = await service.createCustomModel('claude', {
+    model: 'My Local Model',
+    id: 'local-model',
+    baseUrl: 'http://localhost:11434',
+    apiKey: 'sk-local-123',
+  });
+
+  assert.equal(created.model.baseUrl, 'http://localhost:11434');
+  assert.equal(created.model.apiKey, 'sk-local-123');
+  assert.equal(created.models.OPTIONS.at(-1)?.baseUrl, 'http://localhost:11434');
+
+  const claudeModels = await service.getProviderModels('claude');
+  const stored = claudeModels.OPTIONS.find((option) => option.value === 'local-model');
+  assert.equal(stored?.baseUrl, 'http://localhost:11434');
+  assert.equal(stored?.apiKey, 'sk-local-123');
+});
+
+test('base URL/API key never leak into another provider\'s option list', async () => {
+  const { service } = createTestService();
+  await service.createCustomModel('claude', {
+    model: 'My Local Model',
+    id: 'local-model',
+    baseUrl: 'http://localhost:11434',
+    apiKey: 'sk-local-123',
+  });
+
+  const codexModels = await service.getProviderModels('codex');
+  assert.equal(codexModels.OPTIONS.some((option) => 'baseUrl' in option || 'apiKey' in option), false);
+});
+
+test('a plain Claude custom model (no toggle) has no base URL/API key', async () => {
+  const { service } = createTestService();
+  const created = await service.createCustomModel('claude', { model: 'Plain', id: 'plain-model' });
+
+  assert.equal(created.model.baseUrl, undefined);
+  assert.equal(created.model.apiKey, undefined);
+});
+
+test('setting only one of base URL/API key is rejected', async () => {
+  const { service } = createTestService();
+
+  await assert.rejects(
+    () => service.createCustomModel('claude', {
+      model: 'Half configured',
+      id: 'half-model',
+      baseUrl: 'http://localhost:11434',
+    }),
+    (error) => error instanceof AppError && error.statusCode === 400,
+  );
+
+  await assert.rejects(
+    () => service.createCustomModel('claude', {
+      model: 'Half configured',
+      id: 'half-model-2',
+      apiKey: 'sk-local-123',
+    }),
+    (error) => error instanceof AppError && error.statusCode === 400,
+  );
+});
+
+test('editing a custom model can add or clear its base URL/API key', async () => {
+  const { service } = createTestService();
+  const created = await service.createCustomModel('claude', { model: 'Plain', id: 'plain-model' });
+  const recordId = created.model.recordId as number;
+
+  const withEndpoint = await service.updateCustomModel('claude', recordId, {
+    model: 'Plain',
+    id: 'plain-model',
+    baseUrl: 'http://localhost:11434',
+    apiKey: 'sk-local-123',
+  });
+  assert.equal(withEndpoint.model.baseUrl, 'http://localhost:11434');
+
+  const clearedAgain = await service.updateCustomModel('claude', recordId, {
+    model: 'Plain',
+    id: 'plain-model',
+  });
+  assert.equal(clearedAgain.model.baseUrl, undefined);
+  assert.equal(clearedAgain.model.apiKey, undefined);
 });
 
 test('duplicate model ids are rejected within one provider', async () => {

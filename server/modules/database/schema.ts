@@ -178,6 +178,10 @@ CREATE TABLE IF NOT EXISTS provider_models (
     sort_order INTEGER NOT NULL DEFAULT 0,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    -- Optional per-model endpoint override (Claude custom models only; NULL for
+    -- every other row). Stored unmasked by design -- see fork-customizations.md.
+    base_url TEXT,
+    api_key TEXT,
     UNIQUE(provider, model_id)
 );
 `;

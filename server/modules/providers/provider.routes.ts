@@ -483,6 +483,8 @@ const parseCustomProviderModelPayload = (payload: unknown): CustomProviderModelI
   const body = payload as Record<string, unknown>;
   const model = readOptionalQueryString(body.model);
   const id = readOptionalQueryString(body.id);
+  const baseUrl = readOptionalQueryString(body.baseUrl);
+  const apiKey = readOptionalQueryString(body.apiKey);
   if (!model) {
     throw new AppError('model is required.', {
       code: 'MODEL_NAME_REQUIRED',
@@ -508,7 +510,7 @@ const parseCustomProviderModelPayload = (payload: unknown): CustomProviderModelI
     });
   }
 
-  return { model, id };
+  return { model, id, baseUrl, apiKey };
 };
 
 router.get(

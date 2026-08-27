@@ -11,7 +11,11 @@ type CustomProviderModelRow = {
   model_id: string;
   model_name: string;
   sort_order: number;
+  base_url: string | null;
+  api_key: string | null;
 };
+
+const CUSTOM_PROVIDER_MODEL_COLUMNS = 'id, provider, model_id, model_name, sort_order, base_url, api_key';
 
 const toCustomProviderModelRecord = (
   row: CustomProviderModelRow,
@@ -21,6 +25,8 @@ const toCustomProviderModelRecord = (
   modelId: row.model_id,
   model: row.model_name,
   sortOrder: row.sort_order,
+  baseUrl: row.base_url,
+  apiKey: row.api_key,
 });
 
 const readCustomProviderModelRow = (
@@ -28,7 +34,7 @@ const readCustomProviderModelRow = (
   recordId: number,
 ): CustomProviderModelRow | null => {
   const row = getConnection().prepare(`
-    SELECT id, provider, model_id, model_name, sort_order
+    SELECT ${CUSTOM_PROVIDER_MODEL_COLUMNS}
     FROM provider_models
     WHERE provider = ? AND id = ?
   `).get(provider, recordId) as CustomProviderModelRow | undefined;
@@ -47,7 +53,7 @@ const readCustomProviderModelRow = (
 export const providerModelsDb = {
   listCustomProviderModels(provider: LLMProvider): CustomProviderModelRecord[] {
     const rows = getConnection().prepare(`
-      SELECT id, provider, model_id, model_name, sort_order
+      SELECT ${CUSTOM_PROVIDER_MODEL_COLUMNS}
       FROM provider_models
       WHERE provider = ?
       ORDER BY sort_order ASC, lower(model_name) ASC, id ASC
@@ -69,7 +75,7 @@ export const providerModelsDb = {
     modelId: string,
   ): CustomProviderModelRecord | null {
     const row = getConnection().prepare(`
-      SELECT id, provider, model_id, model_name, sort_order
+      SELECT ${CUSTOM_PROVIDER_MODEL_COLUMNS}
       FROM provider_models
       WHERE provider = ? AND model_id = ?
     `).get(provider, modelId) as CustomProviderModelRow | undefined;
@@ -89,9 +95,9 @@ export const providerModelsDb = {
     `).get(provider) as { next_order: number };
 
     const result = db.prepare(`
-      INSERT INTO provider_models (provider, model_id, model_name, sort_order)
-      VALUES (?, ?, ?, ?)
-    `).run(provider, input.id, input.model, nextOrder.next_order);
+      INSERT INTO provider_models (provider, model_id, model_name, sort_order, base_url, api_key)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `).run(provider, input.id, input.model, nextOrder.next_order, input.baseUrl ?? null, input.apiKey ?? null);
 
     const row = readCustomProviderModelRow(provider, Number(result.lastInsertRowid));
     if (!row) {
@@ -115,9 +121,9 @@ export const providerModelsDb = {
 
       db.prepare(`
         UPDATE provider_models
-        SET model_id = ?, model_name = ?, updated_at = CURRENT_TIMESTAMP
+        SET model_id = ?, model_name = ?, base_url = ?, api_key = ?, updated_at = CURRENT_TIMESTAMP
         WHERE provider = ? AND id = ?
-      `).run(input.id, input.model, provider, recordId);
+      `).run(input.id, input.model, input.baseUrl ?? null, input.apiKey ?? null, provider, recordId);
 
       if (previous.model_id !== input.id) {
         db.prepare(`
