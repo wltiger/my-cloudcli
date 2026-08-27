@@ -14,7 +14,7 @@ export const assertCustomModelEndpointFieldsPaired = (
   }
 
   throw new AppError(
-    baseUrl ? 'apiKey is required when baseUrl is set.' : 'baseUrl is required when apiKey is set.',
+    baseUrl ? 'API Key is required when Base URL is set.' : 'Base URL is required when API Key is set.',
     {
       code: baseUrl ? 'MODEL_API_KEY_REQUIRED' : 'MODEL_BASE_URL_REQUIRED',
       statusCode: 400,
