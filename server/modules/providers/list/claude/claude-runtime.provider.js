@@ -24,6 +24,7 @@ import {
   buildClaudeUserContent,
   normalizeImageDescriptors
 } from '@/shared/image-attachments.js';
+import { resolveClaudeCustomEndpointEnv } from '@/modules/providers/list/claude/claude-custom-endpoint.js';
 import { CLAUDE_PREDEFINED_MODELS } from '@/modules/providers/list/claude/claude-models.provider.js';
 import { resolveClaudeCodeExecutablePath } from '@/shared/claude-cli-path.js';
 import {
@@ -250,6 +251,16 @@ function mapCliOptionsToSDK(options = {}) {
   );
   if (resolvedEffort) {
     sdkOptions.effort = resolvedEffort;
+  }
+
+  // A Claude custom model with its own Base URL/API Key routes this call to
+  // that endpoint instead of the logged-in subscription. See fork-customizations.md.
+  const customEndpointEnv = resolveClaudeCustomEndpointEnv(
+    sdkOptions.model,
+    options.effortModels || CLAUDE_PREDEFINED_MODELS,
+  );
+  if (customEndpointEnv) {
+    Object.assign(sdkOptions.env, customEndpointEnv);
   }
 
   sdkOptions.systemPrompt = {

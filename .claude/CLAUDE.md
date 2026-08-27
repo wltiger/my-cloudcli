@@ -29,6 +29,8 @@ npx tsx --tsconfig server/tsconfig.json --test server/modules/git/tests/git.test
 npm run desktop:dev         # Electron shell against a running local dev server
 ```
 
+A test file that calls `node:test`'s `mock.module()` (e.g. `server/modules/providers/tests/claude-runtime.test.ts`, which mocks the Claude Agent SDK's `query` export) needs the `--experimental-test-module-mocks` flag — already in `npm test`'s script, but add it by hand when running such a file directly via the single-file command above.
+
 `npm test` and `npm run test:client` are separate suites — running only `npm test` skips every frontend test. Legacy `src/**/*.test.js` files (e.g. `src/utils/api.test.js`) match neither glob and are plain assertion scripts nothing runs.
 
 `test:client` runs under a plain `tsx` runner with no Vite, so a module that reads `import.meta.env` at module scope cannot be imported from a test at all — and neither can anything importing it, which is most of `src/`. Guard such reads with `?.` (see `src/shared/utils.ts`); Vite still replaces them statically.
