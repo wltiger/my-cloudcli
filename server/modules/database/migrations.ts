@@ -11,6 +11,7 @@ import {
   USER_NOTIFICATION_PREFERENCES_TABLE_SCHEMA_SQL,
   VAPID_KEYS_TABLE_SCHEMA_SQL,
 } from '@/modules/database/schema.js';
+import { normalizeProjectPath } from '@/shared/utils.js';
 
 const SQLITE_UUID_SQL = `
 lower(hex(randomblob(4))) || '-' ||
@@ -464,6 +465,108 @@ const ensureProjectsForSessionPaths = (db: Database): void => {
   `);
 };
 
+type ProjectMergeRow = {
+  project_id: string;
+  project_path: string;
+  custom_project_name: string | null;
+  isStarred: number;
+  isArchived: number;
+};
+
+/**
+ * Merges `projects` rows that differ only by path casing into one row.
+ *
+ * Before `normalizeProjectPath` case-folded Windows-style paths, the same
+ * directory could be indexed under two spellings — e.g. a `D:` drive letter
+ * reported by one provider's CLI and `d:` by another's — producing two
+ * `projects` rows (and two disconnected sidebar entries) for one real
+ * directory. This collapses any such existing duplicates into the
+ * now-canonical (case-folded) path so upgraded installs self-heal.
+ */
+const mergeCaseInsensitiveDuplicateProjectPaths = (db: Database): void => {
+  if (!tableExists(db, 'projects')) {
+    return;
+  }
+
+  const rows = db.prepare(`
+    SELECT project_id, project_path, custom_project_name, isStarred, isArchived
+    FROM projects
+  `).all() as ProjectMergeRow[];
+
+  const groupsByCanonicalPath = new Map<string, ProjectMergeRow[]>();
+  for (const row of rows) {
+    const canonicalPath = normalizeProjectPath(row.project_path);
+    if (!canonicalPath) {
+      continue;
+    }
+    const group = groupsByCanonicalPath.get(canonicalPath);
+    if (group) {
+      group.push(row);
+    } else {
+      groupsByCanonicalPath.set(canonicalPath, [row]);
+    }
+  }
+
+  const duplicateGroups = [...groupsByCanonicalPath.entries()].filter(([, group]) => group.length > 1);
+  if (duplicateGroups.length === 0) {
+    return;
+  }
+
+  console.log(`Running migration: Merging ${duplicateGroups.length} case-duplicate project path group(s)`);
+
+  const countSessionsByPath = db.prepare('SELECT COUNT(*) AS count FROM sessions WHERE project_path = ?');
+  const repointSessions = db.prepare('UPDATE sessions SET project_path = ? WHERE project_path = ?');
+  const renameProject = db.prepare('UPDATE projects SET project_path = ? WHERE project_id = ?');
+  const updateProjectMeta = db.prepare(`
+    UPDATE projects
+    SET custom_project_name = ?, isStarred = ?, isArchived = ?
+    WHERE project_id = ?
+  `);
+  const deleteProject = db.prepare('DELETE FROM projects WHERE project_id = ?');
+
+  const mergeGroup = db.transaction((canonicalPath: string, group: ProjectMergeRow[]) => {
+    const sessionCountOf = (row: ProjectMergeRow) =>
+      (countSessionsByPath.get(row.project_path) as { count: number }).count;
+
+    const keeper = [...group].sort((a, b) => {
+      const aIsCanonical = a.project_path === canonicalPath ? 1 : 0;
+      const bIsCanonical = b.project_path === canonicalPath ? 1 : 0;
+      if (aIsCanonical !== bIsCanonical) {
+        return bIsCanonical - aIsCanonical;
+      }
+      return sessionCountOf(b) - sessionCountOf(a);
+    })[0];
+
+    const mergedIsStarred = group.some((row) => row.isStarred) ? 1 : 0;
+    const mergedIsArchived = group.every((row) => row.isArchived) ? 1 : 0;
+    const mergedCustomName = group.find((row) => row.custom_project_name)?.custom_project_name ?? null;
+
+    // Move the keeper to the canonical path first (and manually repoint its
+    // sessions, since this connection does not run with `PRAGMA foreign_keys
+    // = ON`, so `ON UPDATE CASCADE` does not fire) so the canonical path
+    // always resolves to a live project row before any duplicate is deleted.
+    if (keeper.project_path !== canonicalPath) {
+      const previousPath = keeper.project_path;
+      renameProject.run(canonicalPath, keeper.project_id);
+      repointSessions.run(canonicalPath, previousPath);
+    }
+
+    for (const row of group) {
+      if (row.project_id === keeper.project_id) {
+        continue;
+      }
+      repointSessions.run(canonicalPath, row.project_path);
+      deleteProject.run(row.project_id);
+    }
+
+    updateProjectMeta.run(mergedCustomName, mergedIsStarred, mergedIsArchived, keeper.project_id);
+  });
+
+  for (const [canonicalPath, group] of duplicateGroups) {
+    mergeGroup(canonicalPath, group);
+  }
+};
+
 export const runMigrations = (db: Database) => {
   try {
     const usersTableInfo = db.prepare('PRAGMA table_info(users)').all() as { name: string }[];
@@ -504,6 +607,7 @@ export const runMigrations = (db: Database) => {
     addSessionModelColumn(db);
     addSessionEffortColumn(db);
     ensureProjectsForSessionPaths(db);
+    mergeCaseInsensitiveDuplicateProjectPaths(db);
 
     db.exec('CREATE INDEX IF NOT EXISTS idx_session_ids_lookup ON sessions(session_id)');
     db.exec('CREATE INDEX IF NOT EXISTS idx_sessions_provider_session_id ON sessions(provider_session_id)');

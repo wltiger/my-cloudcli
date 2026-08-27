@@ -180,6 +180,8 @@ function shouldUseWindowsPathNormalization(inputPath: string): boolean {
  * - trim whitespace
  * - strip Windows long-path prefixes (`\\?\` and `\\?\UNC\`)
  * - normalize path separators and dot segments
+ * - case-fold Windows-style paths (drive-letter/UNC), since NTFS is
+ *   case-insensitive but case-preserving
  * - trim trailing separators except for filesystem roots
  */
 export function normalizeProjectPath(inputPath: string): string {
@@ -202,13 +204,18 @@ export function normalizeProjectPath(inputPath: string): string {
     return '';
   }
 
+  // Different providers' CLIs can report the same directory with different
+  // drive-letter/segment casing (e.g. `D:\...` vs `d:\...`). Fold case here
+  // so both land on the same DB key instead of creating two `projects` rows.
+  const caseFolded = useWindowsPathRules ? normalized.toLowerCase() : normalized;
+
   const parser = useWindowsPathRules ? path.win32 : path.posix;
-  const root = parser.parse(normalized).root;
-  if (normalized === root) {
-    return normalized;
+  const root = parser.parse(caseFolded).root;
+  if (caseFolded === root) {
+    return caseFolded;
   }
 
-  return normalized.replace(/[\\/]+$/, '');
+  return caseFolded.replace(/[\\/]+$/, '');
 }
 
 /**

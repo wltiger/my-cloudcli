@@ -10,6 +10,7 @@ import { closeConnection, initializeDatabase, sessionsDb } from '@/modules/datab
 import { OpenCodeSessionSynchronizer } from '@/modules/providers/list/opencode/opencode-session-synchronizer.provider.js';
 import { OpenCodeSessionsProvider } from '@/modules/providers/list/opencode/opencode-sessions.provider.js';
 import { appendImagesInputTag } from '@/shared/image-attachments.js';
+import { normalizeProjectPath } from '@/shared/utils.js';
 
 const patchHomeDir = (nextHomeDir: string) => {
   const original = os.homedir;
@@ -262,7 +263,7 @@ test('OpenCode session synchronizer indexes sqlite sessions without deletable tr
         assert.equal(count, 1);
         const indexed = sessionsDb.getSessionById('open-session-1');
         assert.equal(indexed?.provider, 'opencode');
-        assert.equal(indexed?.project_path, workspacePath);
+        assert.equal(indexed?.project_path, normalizeProjectPath(workspacePath));
         assert.equal(indexed?.custom_name, 'OpenCode indexed title');
         assert.equal(indexed?.jsonl_path, null);
       });

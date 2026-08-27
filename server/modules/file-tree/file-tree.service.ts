@@ -289,7 +289,10 @@ export function createFileTreeService(dependencies: FileTreeServiceDependencies)
       // directories (e.g. /proc, /sys) — they're never valid project roots,
       // and /proc in particular can contain thousands of virtual entries
       // that make traversal from a broad root (e.g. "/") pathologically slow.
-      const isForbiddenSystemDir = FORBIDDEN_WORKSPACE_PATHS.includes(normalizeProjectPath(itemPath));
+      const normalizedItemPath = normalizeProjectPath(itemPath);
+      const isForbiddenSystemDir = FORBIDDEN_WORKSPACE_PATHS.some(
+        (forbiddenPath) => normalizeProjectPath(forbiddenPath) === normalizedItemPath
+      );
 
       if (entry.isDirectory() && currentDepth < maximumDepth && !isForbiddenSystemDir) {
         item.children = await buildFileTree(
