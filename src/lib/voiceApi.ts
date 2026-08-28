@@ -1,7 +1,9 @@
 import { authenticatedFetch } from '../utils/api';
 import { readVoiceConfig, voiceConfigHeaders } from '../hooks/useVoiceConfig';
 
-function directUrl(baseUrl: string, path: string): string {
+import { readVoiceStreamConfig } from './voiceStream/config';
+
+export function directUrl(baseUrl: string, path: string): string {
   return `${baseUrl.replace(/\/$/, '')}${path}`;
 }
 
@@ -35,6 +37,7 @@ export function synthesizeVoice(text: string, signal: AbortSignal): Promise<Resp
   const config = readVoiceConfig();
 
   if (config.baseUrl.trim()) {
+    const instructions = readVoiceStreamConfig().instructions.trim();
     return fetch(directUrl(config.baseUrl.trim(), '/audio/speech'), {
       method: 'POST',
       headers: {
@@ -46,6 +49,7 @@ export function synthesizeVoice(text: string, signal: AbortSignal): Promise<Resp
         voice: config.ttsVoice || 'alloy',
         input: text,
         ...(config.ttsFormat.trim() ? { response_format: config.ttsFormat.trim() } : {}),
+        ...(instructions ? { instructions } : {}),
       }),
       signal,
     });

@@ -1,22 +1,17 @@
 import { Volume2, Loader2, Square } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 
-import { useTts } from '../../hooks/useTts';
-import { useVoiceAvailable } from '../../hooks/useVoiceAvailable';
-import { useStreamingEnabled } from '../../../../lib/voiceStream/config';
+import { useStreamingTts } from '../../hooks/useStreamingTts';
 
-import StreamingSpeakControl from './StreamingSpeakControl';
-
-// Tap-to-speak button beside the copy control on assistant messages.
-// Renders nothing unless the optional voice feature is enabled.
-const MessageSpeakControl = ({ content }: { content: string }) => {
+// Streaming counterpart to MessageSpeakControl: identical markup and the
+// same chat.voice.* labels/idle-loading-playing states, backed by
+// streamingVoicePlayer instead of the upstream voicePlayer. Rendered by
+// MessageSpeakControl in place of its own body when streaming is enabled —
+// kept as a separate component rather than branching inside
+// MessageSpeakControl's body, see docs/fork-customizations.md.
+const StreamingSpeakControl = ({ content }: { content: string }) => {
   const { t } = useTranslation('chat');
-  const available = useVoiceAvailable();
-  const streamingEnabled = useStreamingEnabled();
-  const { state, toggle, error } = useTts(() => content);
-
-  if (!available) return null;
-  if (streamingEnabled) return <StreamingSpeakControl content={content} />;
+  const { state, toggle, error } = useStreamingTts(() => content);
 
   const title =
     state === 'playing' ? t('voice.stopSpeaking') : state === 'loading' ? t('voice.loading') : t('voice.speak');
@@ -47,4 +42,4 @@ const MessageSpeakControl = ({ content }: { content: string }) => {
   );
 };
 
-export default MessageSpeakControl;
+export default StreamingSpeakControl;

@@ -1,9 +1,12 @@
 import type { InputHTMLAttributes } from 'react';
 import { useTranslation } from 'react-i18next';
+
 import SettingsSection from '../SettingsSection';
 import SettingsToggle from '../SettingsToggle';
 import { useUiPreferences } from '../../../../hooks/useUiPreferences';
 import { useVoiceConfig } from '../../../../hooks/useVoiceConfig';
+
+import VoiceStreamingSection from './VoiceStreamingSection';
 
 const inputClass =
   'w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring';
@@ -74,6 +77,7 @@ export default function VoiceSettingsTab() {
                 placeholder="alloy"
                 value={config.ttsVoice}
                 onChange={(e) => update({ ttsVoice: e.target.value })}
+                list="voiceStreamVoiceSuggestions"
               />
               <Field
                 label={t('voiceSettings.format')}
@@ -86,6 +90,8 @@ export default function VoiceSettingsTab() {
           </div>
         </SettingsSection>
       )}
+
+      {voiceEnabled && <VoiceStreamingSection baseUrl={config.baseUrl} apiKey={config.apiKey} />}
     </div>
   );
 }

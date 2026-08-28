@@ -80,8 +80,7 @@ class VoicePlayer {
     this.unlocked = true;
   }
 
-  toggle(content: string) {
-    const id = voiceId(content);
+  toggle(content: string, id: string = voiceId(content)) {
     if (this.currentId === id && (this.state === 'playing' || this.state === 'loading')) {
       this.stop();
       return;

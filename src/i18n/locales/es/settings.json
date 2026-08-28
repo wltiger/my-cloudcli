@@ -65,6 +65,21 @@
     "format": "Formato de audio",
     "note": "Una URL base personalizada la llama directamente tu navegador y debe permitir solicitudes CORS. Déjala en blanco para usar el backend configurado en el servidor."
   },
+  "voiceStreaming": {
+    "title": "Streaming y estilo",
+    "description": "Opciones adicionales para un backend personalizado llamado directamente (URL base arriba) que admita estas extensiones, como Qwen3-TTS.",
+    "streamEnabled": "Este backend admite streaming",
+    "streamEnabledDescription": "Empieza a reproducir audio desde el primer fragmento en lugar de esperar la respuesta completa. Desactivado por defecto; actívalo solo si tu backend lo admite.",
+    "instructions": "Instrucciones de estilo",
+    "instructionsPlaceholder": "p. ej. habla despacio y con suavidad, con voz cálida",
+    "fetchVoices": "Obtener voces",
+    "fetchingVoices": "Obteniendo…",
+    "fetchVoicesError": "No se pudo obtener la lista de voces. Aún puedes escribir un nombre de voz.",
+    "fetchVoicesSuccess": "Se encontraron {{count}} voces — elige una de las sugerencias del campo Voz.",
+    "testLabel": "Probar lectura",
+    "testButton": "Probar",
+    "testDefaultText": "Hola, esta es una prueba de lectura en voz alta."
+  },
   "quickSettings": {
     "title": "Ajustes rápidos",
     "sections": {

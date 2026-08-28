@@ -65,6 +65,21 @@
     "format": "오디오 형식",
     "note": "사용자 지정 기본 URL은 브라우저에서 직접 호출되므로 브라우저 CORS 요청을 허용해야 합니다. 비워두면 서버에 설정된 백엔드를 사용합니다."
   },
+  "voiceStreaming": {
+    "title": "스트리밍 및 스타일",
+    "description": "Qwen3-TTS와 같이 이러한 확장 기능을 지원하는, 직접 호출되는 사용자 지정 백엔드(위의 기본 URL)를 위한 추가 옵션입니다.",
+    "streamEnabled": "이 백엔드는 스트리밍을 지원합니다",
+    "streamEnabledDescription": "전체 응답을 기다리지 않고 첫 번째 청크부터 오디오 재생을 시작합니다. 기본적으로 꺼져 있으며, 백엔드가 지원하는 경우에만 켜세요.",
+    "instructions": "스타일 지시문",
+    "instructionsPlaceholder": "예: 부드럽고 천천히, 따뜻한 목소리로 말하기",
+    "fetchVoices": "음성 목록 가져오기",
+    "fetchingVoices": "가져오는 중…",
+    "fetchVoicesError": "음성 목록을 가져오지 못했습니다. 음성 이름은 계속 직접 입력할 수 있습니다.",
+    "fetchVoicesSuccess": "{{count}}개의 음성을 찾았습니다 — 위 음성 입력란의 제안에서 선택하세요.",
+    "testLabel": "읽기 테스트",
+    "testButton": "테스트",
+    "testDefaultText": "안녕하세요, 읽기 테스트입니다."
+  },
   "quickSettings": {
     "title": "빠른 설정",
     "sections": {

@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
+
 import { voicePlayer, voiceId, type VoiceSnapshot } from '../../../lib/voicePlayer';
+import { voiceCacheSignature } from '../../../lib/voiceStream/config';
 
 export type TtsState = VoiceSnapshot['state'];
 
@@ -10,7 +12,7 @@ export type TtsState = VoiceSnapshot['state'];
  */
 export function useTts(getText: () => string) {
   const content = getText();
-  const id = voiceId(content);
+  const id = voiceId(content, voiceCacheSignature());
 
   const [snap, setSnap] = useState<VoiceSnapshot>(() => voicePlayer.getSnapshot(id));
 
@@ -26,8 +28,8 @@ export function useTts(getText: () => string) {
 
   const toggle = useCallback(() => {
     voicePlayer.unlock(); // synchronous, within the click gesture (iOS)
-    voicePlayer.toggle(content);
-  }, [content]);
+    voicePlayer.toggle(content, id);
+  }, [content, id]);
 
   return { state: snap.state, toggle, error: snap.error };
 }
