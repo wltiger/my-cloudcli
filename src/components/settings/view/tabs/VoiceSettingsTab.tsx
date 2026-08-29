@@ -6,6 +6,7 @@ import SettingsToggle from '../SettingsToggle';
 import { useUiPreferences } from '../../../../hooks/useUiPreferences';
 import { useVoiceConfig } from '../../../../hooks/useVoiceConfig';
 
+import VoiceComboBoxField from './VoiceComboBoxField';
 import VoiceStreamingSection from './VoiceStreamingSection';
 
 const inputClass =
@@ -72,12 +73,11 @@ export default function VoiceSettingsTab() {
                 value={config.ttsModel}
                 onChange={(e) => update({ ttsModel: e.target.value })}
               />
-              <Field
+              <VoiceComboBoxField
                 label={t('voiceSettings.voice')}
                 placeholder="alloy"
                 value={config.ttsVoice}
-                onChange={(e) => update({ ttsVoice: e.target.value })}
-                list="voiceStreamVoiceSuggestions"
+                onChange={(voice) => update({ ttsVoice: voice })}
               />
               <Field
                 label={t('voiceSettings.format')}

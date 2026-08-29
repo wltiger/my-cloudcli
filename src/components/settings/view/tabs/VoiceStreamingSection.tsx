@@ -4,6 +4,7 @@ import { useTranslation } from 'react-i18next';
 import SettingsSection from '../SettingsSection';
 import SettingsToggle from '../SettingsToggle';
 import { useVoiceStreamConfig } from '../../../../lib/voiceStream/config';
+import { setFetchedVoices, useFetchedVoices } from '../../../../lib/voiceStream/fetchedVoicesStore';
 import { fetchVoiceList } from '../../../../lib/voiceStream/voicesApi';
 
 import VoiceTestReadControl from './VoiceTestReadControl';
@@ -16,13 +17,14 @@ type VoiceStreamingSectionProps = {
 // Fork-owned extensions for a directly-called custom voice backend that
 // supports more than the plain OpenAI-compatible /audio/speech contract
 // (e.g. Qwen3-TTS): style instructions and voice-list fetch here, streaming
-// playback added by a later ticket. Mounted into VoiceSettingsTab. The
-// fetched voices render as a <datalist> whose id the upstream Voice field
-// wires up via a plain `list=` attribute, not a new duplicate input here.
+// playback added by a later ticket. Mounted into VoiceSettingsTab. Fetched
+// voices are written to the shared fetchedVoicesStore, which the upstream
+// Voice field's combobox (VoiceComboBoxField, swapped in for that field in
+// VoiceSettingsTab) reads independently.
 export default function VoiceStreamingSection({ baseUrl, apiKey }: VoiceStreamingSectionProps) {
   const { t } = useTranslation('settings');
   const { config, update } = useVoiceStreamConfig();
-  const [voices, setVoices] = useState<string[]>([]);
+  const voices = useFetchedVoices();
   const [fetchState, setFetchState] = useState<'idle' | 'loading' | 'error'>('idle');
 
   const handleFetchVoices = async () => {
@@ -30,7 +32,7 @@ export default function VoiceStreamingSection({ baseUrl, apiKey }: VoiceStreamin
     setFetchState('loading');
     try {
       const result = await fetchVoiceList(baseUrl.trim(), apiKey);
-      setVoices(result);
+      setFetchedVoices(result);
       setFetchState('idle');
     } catch {
       setFetchState('error');
@@ -69,11 +71,6 @@ export default function VoiceStreamingSection({ baseUrl, apiKey }: VoiceStreamin
               {t('voiceStreaming.fetchVoicesSuccess', { count: voices.length })}
             </p>
           )}
-          <datalist id="voiceStreamVoiceSuggestions">
-            {voices.map((voice) => (
-              <option key={voice} value={voice} />
-            ))}
-          </datalist>
         </div>
 
         <label className="block space-y-1">
