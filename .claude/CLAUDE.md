@@ -37,6 +37,22 @@ A test file that calls `node:test`'s `mock.module()` (e.g. `server/modules/provi
 
 `postinstall` runs `scripts/fix-node-pty.js` (native module patch). `prepare` installs husky hooks; pre-commit runs `lint-staged` (eslint on staged `src/**` and `server/**` files), commit-msg enforces Conventional Commits via commitlint.
 
+## Shell gotchas (Windows + Git Bash)
+
+The Bash tool is Git Bash. It rewrites `/d/...`-style paths into Windows paths **only in a program's argv**, which
+produces two silent failure modes:
+
+- **Inside a heredoc'd script body a Git Bash path is just a string.** `gh --body-file /d/tmp/map.md` works, but the
+  same literal inside a `python - <<'PY'` or `node` heredoc raises ``FileNotFoundError: 'd:\c\Users\...'``. Write
+  Windows paths (`d:/tmp/map.md`, `C:/Users/...`) in any script body.
+- **Argv rewriting also mangles `rev:path` arguments.** `git cat-file -e upstream/main:.claude/CLAUDE.md` arrives as
+  ``upstream\main;.claude\CLAUDE.md`` and fails with a bogus error, so the fork-ownership check this file mandates
+  silently answers the wrong question. Use `MSYS_NO_PATHCONV=1 git cat-file -e "upstream/main:<path>"`.
+
+Chain a rewrite and its publish with `&&`. A script that dies after `gh issue view ... > file` leaves the *unedited*
+file in place, and an unchained `gh issue edit --body-file` then republishes the unmodified body - a no-op that reads
+as success.
+
 ## Local UI testing (dev server / browser automation)
 
 The default auth DB lives at `~/.cloudcli/auth.db` and is shared with any other CloudCLI install (official npm package, other clones) on this machine — it holds the real user account and session data. **Never test against it.**
