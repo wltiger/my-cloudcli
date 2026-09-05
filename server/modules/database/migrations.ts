@@ -432,6 +432,20 @@ const addSessionEffortColumn = (db: Database): void => {
 };
 
 /**
+ * Adds the `permission_mode` column that records a session's permission-mode
+ * choice.
+ *
+ * Existing rows stay NULL so a scheduled trigger inherits the provider
+ * default until the user sends a turn whose mode gets recorded.
+ */
+const addSessionPermissionModeColumn = (db: Database): void => {
+  const sessionsTableInfo = getTableInfo(db, 'sessions');
+  const columnNames = sessionsTableInfo.map((column) => column.name);
+
+  addColumnToTableIfNotExists(db, 'sessions', columnNames, 'permission_mode', 'TEXT');
+};
+
+/**
  * Adds the `base_url`/`api_key`/`effort_levels` columns that let a Claude
  * custom model override the SDK's endpoint/credential and declare which
  * reasoning-effort levels its own sessions can use.
@@ -609,6 +623,7 @@ export const runMigrations = (db: Database) => {
     addProviderSessionIdMapping(db);
     addSessionModelColumn(db);
     addSessionEffortColumn(db);
+    addSessionPermissionModeColumn(db);
     ensureProjectsForSessionPaths(db);
     mergeCaseInsensitiveDuplicateProjectPaths(db);
 

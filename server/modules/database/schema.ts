@@ -114,6 +114,11 @@ CREATE TABLE IF NOT EXISTS sessions (
     -- restores its exact runtime configuration instead of provider defaults.
     model TEXT,
     effort TEXT,
+    -- Permission mode this session runs with (each provider has its own
+    -- vocabulary; the client only sends provider-valid modes). Written on
+    -- every send, so a scheduled trigger fired later can inherit the mode the
+    -- user most recently sent with instead of starting on the provider default.
+    permission_mode TEXT,
     isArchived BOOLEAN DEFAULT 0,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,

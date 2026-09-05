@@ -202,6 +202,11 @@ async function handleChatSend(
   if (typeof clientOptions.effort === 'string' && clientOptions.effort.trim()) {
     providerModelsService.setSessionEffort(provider, sessionId, clientOptions.effort);
   }
+  // The permission mode is recorded too: a scheduled trigger fired later
+  // inherits it so the run behaves like a command the user typed.
+  if (typeof clientOptions.permissionMode === 'string' && clientOptions.permissionMode.trim()) {
+    sessionsDb.setSessionPermissionMode(sessionId, clientOptions.permissionMode.trim());
+  }
 
   const attachmentCandidates = [
     ...normalizeAttachmentDescriptors(clientOptions.images),

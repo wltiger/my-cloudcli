@@ -13,6 +13,11 @@ type SessionRow = {
   model: string | null;
   /** Reasoning effort this session runs with; NULL until the app records one. */
   effort: string | null;
+  /**
+   * Permission mode this session runs with (provider-specific vocabulary);
+   * NULL until the app records one. Scheduled triggers inherit it at fire time.
+   */
+  permission_mode: string | null;
   isArchived: number;
   created_at: string;
   updated_at: string;
@@ -24,7 +29,7 @@ type RecentSessionsPage = {
 };
 
 const SESSION_ROW_COLUMNS =
-  'session_id, provider, provider_session_id, project_path, jsonl_path, custom_name, model, effort, isArchived, created_at, updated_at';
+  'session_id, provider, provider_session_id, project_path, jsonl_path, custom_name, model, effort, permission_mode, isArchived, created_at, updated_at';
 
 const SQLITE_UTC_TIMESTAMP_REGEX = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/;
 
@@ -264,6 +269,22 @@ export const sessionsDb = {
        SET effort = ?
        WHERE session_id = ?`
     ).run(effort, sessionId);
+  },
+
+  /**
+   * Records the permission mode one session runs with.
+   *
+   * Called on every send, so the row always reflects the mode the session
+   * last ran with. A scheduled trigger fired later inherits this value, which
+   * is what makes a scheduled run behave like a command the user typed.
+   */
+  setSessionPermissionMode(sessionId: string, permissionMode: string): void {
+    const db = getConnection();
+    db.prepare(
+      `UPDATE sessions
+       SET permission_mode = ?
+       WHERE session_id = ?`
+    ).run(permissionMode, sessionId);
   },
 
   updateSessionCustomName(sessionId: string, customName: string): void {

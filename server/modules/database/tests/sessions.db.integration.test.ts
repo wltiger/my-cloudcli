@@ -4,8 +4,9 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
-import { closeConnection } from '@/modules/database/connection.js';
+import { closeConnection, getConnection } from '@/modules/database/connection.js';
 import { initializeDatabase } from '@/modules/database/init-db.js';
+import { runMigrations } from '@/modules/database/migrations.js';
 import { projectsDb } from '@/modules/database/repositories/projects.db.js';
 import { sessionsDb } from '@/modules/database/repositories/sessions.db.js';
 
@@ -112,5 +113,50 @@ test('recent sessions are globally ordered, paginated, and limited to visible co
       secondPage.sessions.map((session) => session.session_id),
       ['session-middle', 'session-oldest'],
     );
+  });
+});
+
+test('permission mode is recorded on the session row and read back', async () => {
+  await withIsolatedDatabase(() => {
+    sessionsDb.createAppSession('session-mode', 'claude', '/workspace/demo-project');
+
+    assert.equal(sessionsDb.getSessionById('session-mode')?.permission_mode, null);
+
+    sessionsDb.setSessionPermissionMode('session-mode', 'acceptEdits');
+    assert.equal(sessionsDb.getSessionById('session-mode')?.permission_mode, 'acceptEdits');
+
+    // The latest send wins: a later turn with a different mode overwrites it.
+    sessionsDb.setSessionPermissionMode('session-mode', 'bypassPermissions');
+    assert.equal(sessionsDb.getSessionById('session-mode')?.permission_mode, 'bypassPermissions');
+
+    // Recording against a session that has no row is a silent no-op.
+    sessionsDb.setSessionPermissionMode('session-missing', 'plan');
+    assert.equal(sessionsDb.getSessionById('session-missing'), null);
+  });
+});
+
+test('migrations add permission_mode to an existing sessions table without losing data', async () => {
+  await withIsolatedDatabase(() => {
+    const db = getConnection();
+    sessionsDb.createAppSession('session-legacy', 'claude', '/workspace/demo-project');
+    sessionsDb.setSessionModel('session-legacy', 'some-model');
+
+    // Simulate an install that predates the column, then re-run the migrations.
+    db.exec('ALTER TABLE sessions DROP COLUMN permission_mode');
+    assert.equal(
+      (db.prepare('PRAGMA table_info(sessions)').all() as Array<{ name: string }>)
+        .some((column) => column.name === 'permission_mode'),
+      false,
+    );
+
+    runMigrations(db);
+
+    assert.ok(
+      (db.prepare('PRAGMA table_info(sessions)').all() as Array<{ name: string }>)
+        .some((column) => column.name === 'permission_mode'),
+    );
+    const row = sessionsDb.getSessionById('session-legacy');
+    assert.equal(row?.permission_mode, null);
+    assert.equal(row?.model, 'some-model');
   });
 });

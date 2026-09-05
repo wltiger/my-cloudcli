@@ -53,6 +53,7 @@ function buildDeps(options: {
     runProviderCount: 0,
     notify: [] as Array<{ code: string }>,
     broadcastSessionUpdated: [] as string[],
+    broadcastPermissionFrame: [] as Array<Record<string, unknown>>,
   };
 
   const deps: ScheduledTriggerServiceDependencies = {
@@ -100,7 +101,7 @@ function buildDeps(options: {
         return true;
       },
     },
-    getSession: options.getSession ?? (() => ({ provider: 'codex', project_path: '/workspace/demo', custom_name: null })),
+    getSession: options.getSession ?? (() => ({ provider: 'codex', project_path: '/workspace/demo', custom_name: null, permission_mode: null })),
     hasRuntime: () => true,
     runProvider: options.runProvider ?? (async () => {
       calls.runProviderCount += 1;
@@ -109,6 +110,7 @@ function buildDeps(options: {
     isSessionProcessing: options.isSessionProcessing ?? (() => false),
     notify: (input) => { calls.notify.push({ code: input.code }); },
     broadcastSessionUpdated: (sessionId) => { calls.broadcastSessionUpdated.push(sessionId); },
+    broadcastPermissionFrame: (message) => { calls.broadcastPermissionFrame.push(message as Record<string, unknown>); },
     graceWindowMs: options.graceWindowMs ?? (() => ONE_HOUR_MS),
   };
 
@@ -260,4 +262,67 @@ test('createScheduledTrigger defaults the message to "continue" when blank', () 
 
   assert.ok(created);
   assert.equal(created.messageContent, 'continue');
+});
+
+test('fireDueTriggers inherits the permission mode stored on the session row', async () => {
+  const row = buildRow();
+  let capturedOptions: Record<string, unknown> | undefined;
+  const { deps } = buildDeps({
+    pendingRows: [row],
+    getSession: () => ({ provider: 'claude', project_path: '/workspace/demo', custom_name: null, permission_mode: 'acceptEdits' }),
+    runProvider: async (_provider, _command, options) => { capturedOptions = options as Record<string, unknown>; },
+  });
+
+  await createScheduledTriggerService(deps).fireDueTriggers(new Date());
+
+  assert.equal(capturedOptions?.permissionMode, 'acceptEdits');
+});
+
+test('fireDueTriggers passes no permissionMode when the session row has none stored', async () => {
+  const row = buildRow();
+  let capturedOptions: Record<string, unknown> | undefined;
+  const { deps } = buildDeps({
+    pendingRows: [row],
+    getSession: () => ({ provider: 'claude', project_path: '/workspace/demo', custom_name: null, permission_mode: null }),
+    runProvider: async (_provider, _command, options) => { capturedOptions = options as Record<string, unknown>; },
+  });
+
+  await createScheduledTriggerService(deps).fireDueTriggers(new Date());
+
+  assert.ok(capturedOptions);
+  assert.equal('permissionMode' in capturedOptions, false);
+});
+
+test('the headless writer relays permission frames to clients under the app session id and drops everything else', async () => {
+  const row = buildRow();
+  const { deps, calls } = buildDeps({
+    pendingRows: [row],
+    runProvider: async (_provider, _command, _options, writer) => {
+      const frame = {
+        id: 'msg-1',
+        kind: 'permission_request',
+        requestId: 'req-1',
+        toolName: 'Bash',
+        input: { command: 'npm test' },
+        // The runtime labels frames with the provider-native id once it
+        // learns it; clients only know the app session id.
+        sessionId: 'provider-native-1',
+        provider: 'claude',
+        timestamp: '2026-09-05T00:00:00.000Z',
+      };
+      writer.send(frame);
+      writer.send({ ...frame, kind: 'text', content: 'working...' });
+      writer.send({ ...frame, kind: 'permission_cancelled', reason: 'timeout' });
+    },
+  });
+
+  await createScheduledTriggerService(deps).fireDueTriggers(new Date());
+
+  assert.equal(calls.broadcastPermissionFrame.length, 2);
+  for (const frame of calls.broadcastPermissionFrame) {
+    assert.equal(frame.sessionId, row.session_id);
+  }
+  assert.equal(calls.broadcastPermissionFrame[0].kind, 'permission_request');
+  assert.equal(calls.broadcastPermissionFrame[0].requestId, 'req-1');
+  assert.equal(calls.broadcastPermissionFrame[1].kind, 'permission_cancelled');
 });

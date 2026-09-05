@@ -2,7 +2,8 @@ import { scheduledTriggersDb, sessionsDb } from '@/modules/database/index.js';
 import { createNotificationEvent, notifyUserIfEnabled } from '@/modules/notifications/index.js';
 import { providerRuntimeService } from '@/modules/providers/index.js';
 import { chatRunRegistry, connectedClients, WS_OPEN_STATE } from '@/modules/websocket/index.js';
-import type { AnyRecord, LLMProvider, ProviderRuntimeWriter } from '@/shared/types.js';
+import type { AnyRecord, LLMProvider, NormalizedMessage, ProviderRuntimeWriter } from '@/shared/types.js';
+import { readObjectRecord } from '@/shared/utils.js';
 import type { ScheduledTriggerRow } from '@/modules/database/index.js';
 
 const DEFAULT_GRACE_WINDOW_MINUTES = 60;
@@ -11,6 +12,7 @@ type SessionLookup = {
   provider: string;
   project_path: string | null;
   custom_name: string | null;
+  permission_mode: string | null;
 } | null;
 
 type NotifyInput = {
@@ -42,6 +44,7 @@ export type ScheduledTriggerServiceDependencies = {
   isSessionProcessing(sessionId: string): boolean;
   notify(input: NotifyInput): void;
   broadcastSessionUpdated(sessionId: string): void;
+  broadcastPermissionFrame(message: NormalizedMessage): void;
   graceWindowMs(): number;
 };
 
@@ -56,6 +59,15 @@ function getGraceWindowMs(): number {
   return minutes * 60 * 1000;
 }
 
+/** Sends one serialized frame to every open client. */
+function sendToAllOpenClients(payload: string): void {
+  connectedClients.forEach((client) => {
+    if (client.readyState === WS_OPEN_STATE) {
+      client.send(payload);
+    }
+  });
+}
+
 /**
  * Pings every connected client that a session changed. This only refreshes
  * sidebar metadata (`session_upserted` is explicitly sidebar-only on the
@@ -63,17 +75,21 @@ function getGraceWindowMs(): number {
  * message. Full live-streaming into an open tab is a follow-up, not v1.
  */
 function broadcastSessionUpdated(sessionId: string): void {
-  const payload = JSON.stringify({
+  sendToAllOpenClients(JSON.stringify({
     kind: 'session_upserted',
     sessionId,
     timestamp: new Date().toISOString(),
-  });
+  }));
+}
 
-  connectedClients.forEach((client) => {
-    if (client.readyState === WS_OPEN_STATE) {
-      client.send(payload);
-    }
-  });
+/**
+ * Relays a headless run's permission prompt (or its cancellation) to every
+ * connected client, so the user sees and answers it on any device exactly as
+ * in an interactive run. The caller remaps the frame's `sessionId` to the app
+ * session id first — clients route by app ids only.
+ */
+function broadcastPermissionFrame(message: NormalizedMessage): void {
+  sendToAllOpenClients(JSON.stringify(message));
 }
 
 const defaultDependencies: ScheduledTriggerServiceDependencies = {
@@ -92,6 +108,7 @@ const defaultDependencies: ScheduledTriggerServiceDependencies = {
     });
   },
   broadcastSessionUpdated,
+  broadcastPermissionFrame,
   graceWindowMs: getGraceWindowMs,
 };
 
@@ -106,11 +123,22 @@ export function createScheduledTriggerService(
 ) {
   const deps = { ...defaultDependencies, ...overrides };
 
-  function buildHeadlessWriter(userId: number | null) {
+  function buildHeadlessWriter(sessionId: string, userId: number | null) {
     return {
-      // Headless: no live client is attached, so nothing needs to receive
-      // stream events. The provider's own session file is the record of truth.
-      send: () => {},
+      // Headless: stream events have no live client attached, so they are
+      // dropped — the provider's own session file is the record of truth.
+      // Permission prompts are the one exception: they are relayed to every
+      // connected client so the user can answer them on any device, exactly
+      // as in an interactive run (55s auto-deny / unbounded wait unchanged).
+      send: (message: unknown) => {
+        const record = readObjectRecord(message);
+        if (!record || (record.kind !== 'permission_request' && record.kind !== 'permission_cancelled')) {
+          return;
+        }
+        // Remap to the app session id: the runtime labels frames with the
+        // provider-native id once it learns it, but clients only know app ids.
+        deps.broadcastPermissionFrame({ ...record, sessionId } as NormalizedMessage);
+      },
       setSessionId: () => {},
       userId,
     };
@@ -135,8 +163,16 @@ export function createScheduledTriggerService(
       projectPath: session.project_path ?? undefined,
     };
 
+    // Inherit the permission mode the user most recently sent with in this
+    // session, so a scheduled run behaves like a typed command. When none is
+    // stored (fresh session, pre-feature rows) nothing is passed and the
+    // provider default applies.
+    if (session.permission_mode) {
+      runtimeOptions.permissionMode = session.permission_mode;
+    }
+
     try {
-      await deps.runProvider(provider, row.message_content, runtimeOptions, buildHeadlessWriter(row.user_id));
+      await deps.runProvider(provider, row.message_content, runtimeOptions, buildHeadlessWriter(row.session_id, row.user_id));
       deps.db.markSent(row.id);
       deps.broadcastSessionUpdated(row.session_id);
       deps.notify({
