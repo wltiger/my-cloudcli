@@ -35,7 +35,6 @@ import { createAgentModule } from './modules/agent/index.js';
 import projectModuleRoutes from './modules/projects/projects.routes.js';
 import notificationRoutes from './modules/notifications/notifications.routes.js';
 import { userRoutes } from './modules/user/index.js';
-import { scheduledTriggersRoutes, startScheduledTriggerPoller } from './modules/scheduled-triggers/index.js';
 import {
     getPluginPort,
     pluginsRoutes,
@@ -44,6 +43,11 @@ import {
 } from './modules/plugins/index.js';
 import providerRoutes from './modules/providers/provider.routes.js';
 import { voiceRoutes } from './modules/voice/index.js';
+import {
+    closeScheduledMessageDispatcher,
+    initializeScheduledMessageDispatcher,
+    scheduledMessagesRoutes,
+} from './modules/scheduled-messages/index.js';
 import browserUseRoutes from './modules/browser-use/browser-use.routes.js';
 import { assetsRoutes } from './modules/assets/index.js';
 import { fileTreeRoutes } from './modules/file-tree/index.js';
@@ -124,7 +128,7 @@ const agentRoutes = createAgentModule({
 });
 
 // Single WebSocket server that handles chat, shell, and plugin proxy paths.
-const wss = createWebSocketServer(server, {
+createWebSocketServer(server, {
     verifyClient: {
         isPlatform: IS_PLATFORM,
         authenticateWebSocket,
@@ -144,9 +148,6 @@ const wss = createWebSocketServer(server, {
     },
     getPluginPort,
 });
-
-// Make WebSocket server available to routes
-app.locals.wss = wss;
 
 app.use(cors({ exposedHeaders: ['X-Refreshed-Token', 'X-Auth-Error'] }));
 app.use(express.json({
@@ -210,7 +211,6 @@ app.use('/api/notifications', authenticateToken, notificationRoutes);
 
 // User API Routes (protected)
 app.use('/api/user', authenticateToken, userRoutes);
-app.use('/api/scheduled-triggers', authenticateToken, scheduledTriggersRoutes);
 
 // Plugins API Routes (protected)
 app.use('/api/plugins', authenticateToken, pluginsRoutes);
@@ -223,6 +223,7 @@ app.use('/api/browser-use', authenticateToken, browserUseRoutes);
 
 // Unified provider MCP routes (protected)
 app.use('/api/providers', authenticateToken, providerRoutes);
+app.use('/api/scheduled-messages', authenticateToken, scheduledMessagesRoutes);
 
 // Agent API Routes (uses API key authentication)
 app.use('/api/agent', agentRoutes);
@@ -396,18 +397,18 @@ async function startServer() {
 
             // Start watching the projects folder for changes
             await initializeSessionsWatcher();
+            // Sends anything that came due while the server was not running,
+            // then keeps polling.
+            initializeScheduledMessageDispatcher(providerRuntimeService);
 
             // Start server-side plugin processes for enabled plugins
             startEnabledPluginServers().catch(err => {
                 console.error('[Plugins] Error during startup:', err.message);
             });
-
-            // Start polling for due scheduled triggers (fires once immediately
-            // to catch up on anything missed while the server was down).
-            startScheduledTriggerPoller();
         });
 
         await closeSessionsWatcher();
+        closeScheduledMessageDispatcher();
         // Clean up plugin processes on shutdown
         const shutdownRuntimeServices = async () => {
             try {

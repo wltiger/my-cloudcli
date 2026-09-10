@@ -86,46 +86,11 @@ test('the full capability list carries supportsClear for every provider', () => 
   }
 });
 
-// Seam: this is what the per-message Rewind entry gates on. Claude rewinds
-// through the SDK's own `resumeSessionAt` (#25), OpenCode through the `revert`
-// its HTTP API exposes (#26); Codex never will (ADR 0008).
-test('Claude reports Rewind support', () => {
-  assert.equal(providerCapabilitiesService.getProviderCapabilities('claude').supportsRewind, true);
-});
-
-test('OpenCode reports Rewind support', () => {
-  assert.equal(providerCapabilitiesService.getProviderCapabilities('opencode').supportsRewind, true);
-});
-
-test('Codex withholds Rewind support (ADR 0008)', () => {
-  assert.equal(providerCapabilitiesService.getProviderCapabilities('codex').supportsRewind, false);
-});
-
-test('Cursor withholds Rewind support for now', () => {
-  assert.equal(providerCapabilitiesService.getProviderCapabilities('cursor').supportsRewind, false);
-});
-
-test('the full capability list carries supportsRewind for every provider', () => {
-  const all = providerCapabilitiesService.listAllProviderCapabilities();
-  assert.equal(all.length, 4);
-  for (const capability of all) {
-    assert.equal(typeof capability.supportsRewind, 'boolean');
-  }
-});
-
-// Whether a Rewind also puts tracked files back is settled by the provider,
-// never offered as a choice (see the Rewind entry in CONTEXT.md). It is a
-// second flag rather than an assumption folded into supportsRewind, because
-// the notice above the composer has to say so before the reader commits.
-test('only OpenCode rolls files back with a Rewind', () => {
+// Whether editing a message also puts tracked files back is settled by the
+// provider, never offered as a choice. It is a flag of its own rather than an
+// assumption folded into supportsMessageEditing, because the notice above the
+// composer has to say which of the two it is before the reader commits.
+test('only OpenCode rolls files back when a message is edited', () => {
   assert.equal(providerCapabilitiesService.getProviderCapabilities('opencode').rewindRestoresFiles, true);
   assert.equal(providerCapabilitiesService.getProviderCapabilities('claude').rewindRestoresFiles, false);
-});
-
-test('a provider that cannot rewind never claims to roll files back', () => {
-  for (const capability of providerCapabilitiesService.listAllProviderCapabilities()) {
-    if (!capability.supportsRewind) {
-      assert.equal(capability.rewindRestoresFiles, false, capability.provider);
-    }
-  }
 });

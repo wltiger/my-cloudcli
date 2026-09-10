@@ -2,10 +2,12 @@ import fsSync from 'node:fs';
 
 import Database from 'better-sqlite3';
 
+import { sessionsDb } from '@/modules/database/index.js';
 import { parseFilesInputTag, parseImagesInputTag } from '@/shared/image-attachments.js';
 import type { IProviderSessions } from '@/shared/interfaces.js';
 import type { AnyRecord, FetchHistoryOptions, FetchHistoryResult, ForkSessionOptions, NormalizedMessage } from '@/shared/types.js';
 import {
+  AppError,
   createNormalizedMessage,
   generateMessageId,
   getOpenCodeDatabasePath,
@@ -17,9 +19,9 @@ import {
   unwrapJsonStringLiteral,
 } from '@/shared/utils.js';
 
-import { buildOpenCodeAnchorIndex } from './opencode-anchors.js';
+import { buildOpenCodeAnchorIndex, readOpenCodeMessageIndex } from './opencode-anchors.js';
 import { buildOpenCodeRewindAnchorIndex, filterOpenCodeRevertedRows } from './opencode-rewind.js';
-import { forkOpenCodeSession } from './opencode-serve.js';
+import { forkOpenCodeSession, revertOpenCodeSession } from './opencode-serve.js';
 
 const PROVIDER = 'opencode';
 
@@ -50,9 +52,10 @@ const openOpenCodeDatabase = (): Database.Database | null => {
 };
 
 /**
- * The message id this session was Rewound at, or null when it is not reverted.
+ * The message id this session was reverted at, or null when it is not
+ * reverted.
  *
- * A Rewind on OpenCode is a server-side revert, and OpenCode records it as one
+ * An edit on OpenCode is a server-side revert, and OpenCode records it as one
  * column on the session row rather than by removing anything: every message it
  * reverted stays in `message`/`part` and its own read API still returns them
  * all (measured against 1.18.18). The column holds `{messageID, snapshot,
@@ -67,6 +70,55 @@ const readOpenCodeRevertedMessageId = (
     | { revert: string | null }
     | undefined;
   return readOptionalString(readJsonRecord(row?.revert)?.messageID) ?? null;
+};
+
+/**
+ * Every message of one session with its parts, in the order the Anchor rules
+ * and the revert filter are written to read them.
+ */
+const OPENCODE_HISTORY_ROWS_SQL = `
+  SELECT
+    m.id AS message_id,
+    m.time_created AS message_time_created,
+    m.data AS message_data,
+    p.id AS part_id,
+    p.time_created AS part_time_created,
+    p.data AS part_data
+  FROM message m
+  LEFT JOIN part p
+    ON p.session_id = m.session_id
+   AND p.message_id = m.id
+  WHERE m.session_id = ?
+  ORDER BY
+    COALESCE(m.time_created, 0),
+    m.id,
+    COALESCE(p.time_created, 0),
+    p.id
+`;
+
+/**
+ * The rows of one session as the conversation currently stands, on a database
+ * handle of this call's own.
+ *
+ * `fetchHistory` opens its own instead, because it needs the same connection
+ * for the token totals afterwards. What the edit path needs is only the rows —
+ * and it needs them past the same revert filter, so an Anchor resolves against
+ * exactly the conversation whose message controls the reader pressed.
+ */
+const readOpenCodeActiveRows = (providerSessionId: string): OpenCodeHistoryRow[] => {
+  const db = openOpenCodeDatabase();
+  if (!db) {
+    return [];
+  }
+
+  try {
+    return filterOpenCodeRevertedRows(
+      db.prepare(OPENCODE_HISTORY_ROWS_SQL).all(providerSessionId) as OpenCodeHistoryRow[],
+      readOpenCodeRevertedMessageId(db, providerSessionId),
+    );
+  } finally {
+    db.close();
+  }
 };
 
 const formatToolContent = (value: unknown): string => {
@@ -342,27 +394,9 @@ export class OpenCodeSessionsProvider implements IProviderSessions {
     }
 
     try {
-      const rows = db.prepare(`
-        SELECT
-          m.id AS message_id,
-          m.time_created AS message_time_created,
-          m.data AS message_data,
-          p.id AS part_id,
-          p.time_created AS part_time_created,
-          p.data AS part_data
-        FROM message m
-        LEFT JOIN part p
-          ON p.session_id = m.session_id
-         AND p.message_id = m.id
-        WHERE m.session_id = ?
-        ORDER BY
-          COALESCE(m.time_created, 0),
-          m.id,
-          COALESCE(p.time_created, 0),
-          p.id
-      `).all(providerSessionId) as OpenCodeHistoryRow[];
+      const rows = db.prepare(OPENCODE_HISTORY_ROWS_SQL).all(providerSessionId) as OpenCodeHistoryRow[];
 
-      // A Rewind leaves everything it reverted in OpenCode's own database, so a
+      // An edit leaves everything it reverted in OpenCode's own database, so a
       // straight read goes on rendering it. Filtered before anything else looks
       // at the rows, so anchors and pagination all count the same conversation.
       const activeRows = filterOpenCodeRevertedRows(
@@ -399,21 +433,25 @@ export class OpenCodeSessionsProvider implements IProviderSessions {
     // anchor names an OpenCode message, and one message becomes several
     // messages here, each under an id of CloudCLI's own making.
     const anchors = buildOpenCodeAnchorIndex(rows);
-    const rewindAnchors = buildOpenCodeRewindAnchorIndex(rows);
+    const editAnchors = buildOpenCodeRewindAnchorIndex(rows);
     const normalized: NormalizedMessage[] = [];
     const emittedMessageErrors = new Set<string>();
 
     for (const row of rows) {
       // Every message this row produces is forkable at the same anchor, and
-      // rewindable at the other one — two rules, two rows, both opaque here.
+      // editable at the other one — two rules, two rows, both opaque here.
       const anchor = anchors.get(row.message_id);
-      const rewindAnchor = rewindAnchors.get(row.message_id);
+      const editAnchor = editAnchors.get(row.message_id);
       const push = (message: NormalizedMessage) => {
         if (anchor) {
           message.anchor = anchor;
         }
-        if (rewindAnchor) {
-          message.rewindAnchor = rewindAnchor;
+        if (editAnchor) {
+          // Replacing a message is a revert to it — `revert` is inclusive of
+          // the message it names — so Edit addresses it under the one rule
+          // that was measured against a real server rather than a second one
+          // derived from it.
+          message.transcriptAnchorId = editAnchor;
         }
         normalized.push(message);
       };
@@ -584,5 +622,100 @@ export class OpenCodeSessionsProvider implements IProviderSessions {
       anchor: options.anchor,
       title: options.title,
     });
+  }
+
+  /**
+   * Resolves the last message to keep when the message `anchorId` names is
+   * replaced.
+   *
+   * `anchorId` is an OpenCode message id, and its revert is **inclusive** of
+   * the message it is given, so the message the reader is replacing is the one
+   * the revert will name and everything before it is what survives. This
+   * contract asks for the other end of that pair — the last message KEPT — so
+   * the answer is the message in front of the anchor, or `null` when the anchor
+   * is the opening prompt and nothing survives at all.
+   *
+   * Whether an anchor exists is answered by the revert Anchor index rather than
+   * by the raw message list, so the rules it encodes hold here unchanged: only
+   * the reader's own messages carry one, and nothing at or before the last
+   * compaction does (ADR 0007).
+   */
+  async resolveEditAnchor(
+    sessionId: string,
+    anchorId: string,
+  ): Promise<{ found: boolean; resumeThroughId: string | null }> {
+    const providerSessionId = sessionsDb.getSessionById(sessionId)?.provider_session_id;
+    if (!providerSessionId) {
+      return { found: false, resumeThroughId: null };
+    }
+
+    const rows = readOpenCodeActiveRows(providerSessionId);
+    if (!buildOpenCodeRewindAnchorIndex(rows).has(anchorId)) {
+      return { found: false, resumeThroughId: null };
+    }
+
+    // The index above was built from these rows, so the anchor is in them.
+    const { messages } = readOpenCodeMessageIndex(rows);
+    const anchorIndex = messages.findIndex((message) => message.id === anchorId);
+
+    return {
+      found: true,
+      resumeThroughId: anchorIndex === 0 ? null : messages[anchorIndex - 1].id,
+    };
+  }
+
+  /**
+   * Rewinds the conversation so `keepThroughId` is its last message, rolling
+   * tracked files back with it.
+   *
+   * OpenCode's runtime cannot resume a transcript partway — `opencode run` only
+   * appends — so an edit is a revert on the provider's own side followed by an
+   * ordinary resume, which is the shape the chat gateway branches on. The
+   * session id does not change (a revert is one column on the session row), so
+   * nothing has to be repointed afterwards.
+   *
+   * The ±1 between the two conventions lives here and nowhere else:
+   * `keepThroughId` names the last message to KEEP, `revert` names the first
+   * message to DROP.
+   *
+   * Per ADR 0009 the revert cannot be taken back once the run that follows has
+   * started, so a revert that did not happen throws rather than reporting
+   * nothing: the gateway ends the run instead of asking OpenCode to continue a
+   * conversation that was never rewound.
+   */
+  async rewindSession(sessionId: string, keepThroughId: string | null): Promise<void> {
+    const session = sessionsDb.getSessionById(sessionId);
+    const providerSessionId = session?.provider_session_id;
+    if (!session || !providerSessionId) {
+      throw new AppError('This session has not produced a transcript yet.', {
+        code: 'EDIT_SOURCE_NOT_READY',
+        statusCode: 409,
+      });
+    }
+
+    const { messages } = readOpenCodeMessageIndex(readOpenCodeActiveRows(providerSessionId));
+    const keepThroughIndex = keepThroughId === null
+      ? -1
+      : messages.findIndex((message) => message.id === keepThroughId);
+    // A miss is -1, which is the same value "keep nothing" uses, and one past
+    // it is the opening prompt — reverting there would empty the session and
+    // roll every tracked file back with it. So a message these rows do not
+    // hold is refused rather than rounded into that.
+    if (keepThroughId !== null && keepThroughIndex < 0) {
+      throw new AppError('The message this edit resumes from is no longer in the conversation.', {
+        code: 'EDIT_ANCHOR_GONE',
+        statusCode: 409,
+      });
+    }
+
+    const revertAt = messages[keepThroughIndex + 1]?.id;
+    if (!revertAt) {
+      throw new AppError('There is nothing after that message to replace.', {
+        code: 'EDIT_ANCHOR_GONE',
+        statusCode: 409,
+      });
+    }
+
+    await revertOpenCodeSession(providerSessionId, session.project_path ?? process.cwd(), revertAt);
   }
 }

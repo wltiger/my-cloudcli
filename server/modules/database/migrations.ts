@@ -7,7 +7,11 @@ import {
   PROJECTS_TABLE_SCHEMA_SQL,
   PROVIDER_MODELS_TABLE_SCHEMA_SQL,
   PUSH_SUBSCRIPTIONS_TABLE_SCHEMA_SQL,
+  SESSION_DRAFTS_TABLE_SCHEMA_SQL,
+  SUPERSEDED_PROVIDER_SESSIONS_TABLE_SCHEMA_SQL,
+  SCHEDULED_MESSAGES_TABLE_SCHEMA_SQL,
   SESSIONS_TABLE_SCHEMA_SQL,
+  USER_PREFERENCES_TABLE_SCHEMA_SQL,
   USER_NOTIFICATION_PREFERENCES_TABLE_SCHEMA_SQL,
   VAPID_KEYS_TABLE_SCHEMA_SQL,
 } from '@/modules/database/schema.js';
@@ -405,6 +409,29 @@ const addProviderSessionIdMapping = (db: Database): void => {
 };
 
 /**
+ * Adds the `forked_from_session_id` column recording where a branched session
+ * came from.
+ *
+ * Nothing is backfilled: a session that predates forking was not forked.
+ */
+/**
+ * Adds the transcript path to the superseded-session record.
+ *
+ * Only rows written before this column existed lack it, and there is nothing
+ * to backfill from — the session stopped pointing at that file when the row
+ * was created — so they keep a NULL and the delete path skips them.
+ */
+const addSupersededTranscriptPathColumn = (db: Database): void => {
+  const columnNames = getTableInfo(db, 'superseded_provider_sessions').map((column) => column.name);
+  addColumnToTableIfNotExists(db, 'superseded_provider_sessions', columnNames, 'jsonl_path', 'TEXT');
+};
+
+const addForkedFromSessionIdColumn = (db: Database): void => {
+  const columnNames = getTableInfo(db, 'sessions').map((column) => column.name);
+  addColumnToTableIfNotExists(db, 'sessions', columnNames, 'forked_from_session_id', 'TEXT');
+};
+
+/**
  * Adds the `model` column that records which model each session runs with.
  *
  * Left NULL for pre-existing rows on purpose: the model resolver falls back to
@@ -435,14 +462,35 @@ const addSessionEffortColumn = (db: Database): void => {
  * Adds the `permission_mode` column that records a session's permission-mode
  * choice.
  *
- * Existing rows stay NULL so a scheduled trigger inherits the provider
- * default until the user sends a turn whose mode gets recorded.
+ * The column is still written on every send but currently has no reader: its
+ * only consumer was the retired scheduled-trigger runner. Kept (rather than
+ * dropped) because it is cheap and a future reader is plausible.
  */
 const addSessionPermissionModeColumn = (db: Database): void => {
   const sessionsTableInfo = getTableInfo(db, 'sessions');
   const columnNames = sessionsTableInfo.map((column) => column.name);
 
   addColumnToTableIfNotExists(db, 'sessions', columnNames, 'permission_mode', 'TEXT');
+};
+
+/**
+ * Drops the retired `scheduled_triggers` table and its indexes.
+ *
+ * Scheduling now lives entirely in upstream's `scheduled_messages`. Pending
+ * rows are deliberately dropped rather than migrated across: a trigger stored
+ * a wall-clock time and re-read the session's *current* model/effort/
+ * permission mode at fire time, whereas a scheduled message stores an
+ * absolute instant plus the settings it was scheduled with. Copying rows over
+ * would silently change what each pending item means and when it fires.
+ */
+const dropLegacyScheduledTriggersTable = (db: Database): void => {
+  db.exec('DROP INDEX IF EXISTS idx_scheduled_triggers_status_time');
+  db.exec('DROP INDEX IF EXISTS idx_scheduled_triggers_session');
+
+  if (tableExists(db, 'scheduled_triggers')) {
+    console.log('Running migration: Dropping retired scheduled_triggers table');
+    db.exec('DROP TABLE scheduled_triggers');
+  }
 };
 
 /**
@@ -613,23 +661,36 @@ export const runMigrations = (db: Database) => {
       CREATE INDEX IF NOT EXISTS idx_provider_models_provider_order
       ON provider_models(provider, sort_order, id)
     `);
+    db.exec(USER_PREFERENCES_TABLE_SCHEMA_SQL);
+    db.exec(SESSION_DRAFTS_TABLE_SCHEMA_SQL);
+    db.exec(SUPERSEDED_PROVIDER_SESSIONS_TABLE_SCHEMA_SQL);
+    addSupersededTranscriptPathColumn(db);
 
     db.exec(PROJECTS_TABLE_SCHEMA_SQL);
     rebuildProjectsTableWithPrimaryKeySchema(db);
 
     migrateLegacyWorkspaceTableIntoProjects(db);
+    // Runs before the sessions rebuild below so the retired table's foreign key
+    // into sessions is already gone by the time sessions is recreated.
+    dropLegacyScheduledTriggersTable(db);
     rebuildSessionsTableWithProjectSchema(db);
     migrateLegacySessionNames(db);
     addProviderSessionIdMapping(db);
     addSessionModelColumn(db);
     addSessionEffortColumn(db);
     addSessionPermissionModeColumn(db);
+    addForkedFromSessionIdColumn(db);
     ensureProjectsForSessionPaths(db);
     mergeCaseInsensitiveDuplicateProjectPaths(db);
+    db.exec(SCHEDULED_MESSAGES_TABLE_SCHEMA_SQL);
 
     db.exec('CREATE INDEX IF NOT EXISTS idx_session_ids_lookup ON sessions(session_id)');
     db.exec('CREATE INDEX IF NOT EXISTS idx_sessions_provider_session_id ON sessions(provider_session_id)');
     db.exec('CREATE INDEX IF NOT EXISTS idx_sessions_project_path ON sessions(project_path)');
+    db.exec('CREATE INDEX IF NOT EXISTS idx_sessions_forked_from ON sessions(forked_from_session_id)');
+    // The due-message poll runs on a timer; without this it table-scans.
+    db.exec('CREATE INDEX IF NOT EXISTS idx_scheduled_messages_due ON scheduled_messages(status, scheduled_for)');
+    db.exec('CREATE INDEX IF NOT EXISTS idx_scheduled_messages_session ON scheduled_messages(session_id)');
     db.exec('CREATE INDEX IF NOT EXISTS idx_sessions_is_archived ON sessions(isArchived)');
     db.exec('CREATE INDEX IF NOT EXISTS idx_projects_is_starred ON projects(isStarred)');
     db.exec('CREATE INDEX IF NOT EXISTS idx_projects_is_archived ON projects(isArchived)');

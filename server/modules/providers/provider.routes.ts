@@ -299,6 +299,28 @@ const parseProvider = (value: unknown): LLMProvider => {
   });
 };
 
+/** Both fields are optional: an empty body forks the whole conversation. */
+const parseSessionForkPayload = (payload: unknown): { upToAnchorId?: string; title?: string } => {
+  if (payload === undefined || payload === null) {
+    return {};
+  }
+  if (typeof payload !== 'object') {
+    throw new AppError('Request body must be an object.', {
+      code: 'INVALID_REQUEST_BODY',
+      statusCode: 400,
+    });
+  }
+
+  const body = payload as Record<string, unknown>;
+  const upToAnchorId = typeof body.upToAnchorId === 'string' ? body.upToAnchorId.trim() : '';
+  const title = typeof body.title === 'string' ? body.title.trim() : '';
+
+  return {
+    ...(upToAnchorId ? { upToAnchorId } : {}),
+    ...(title ? { title } : {}),
+  };
+};
+
 const parseSessionRenameSummary = (payload: unknown): string => {
   if (!payload || typeof payload !== 'object') {
     throw new AppError('Request body must be an object.', {
@@ -327,7 +349,12 @@ const parseSessionRenameSummary = (payload: unknown): string => {
 };
 
 /**
- * The name a Fork is created under.
+ * The name a Fork is created under, or an empty string to take the generated
+ * default.
+ *
+ * Empty is the normal case: the frontend names a fork by renaming it after it
+ * exists, so cancelling that step costs no request at all. A name is still
+ * accepted for any caller that has one up front.
  *
  * Its own parser rather than the rename route's: the two routes carry different
  * fields, and this error reaches the reader as the Fork dialog's own failure
@@ -336,12 +363,6 @@ const parseSessionRenameSummary = (payload: unknown): string => {
 const parseForkSessionName = (payload: unknown): string => {
   const body = (payload ?? {}) as Record<string, unknown>;
   const name = typeof body.name === 'string' ? body.name.trim() : '';
-  if (!name) {
-    throw new AppError('Fork name is required.', {
-      code: 'INVALID_FORK_SESSION_NAME',
-      statusCode: 400,
-    });
-  }
 
   if (name.length > 500) {
     throw new AppError('Fork name must not exceed 500 characters.', {
@@ -826,6 +847,15 @@ router.post(
   }),
 );
 
+router.post(
+  '/sessions/:sessionId/fork',
+  asyncHandler(async (req: Request, res: Response) => {
+    const sessionId = parseSessionId(req.params.sessionId);
+    const result = await sessionsService.forkSessionById(sessionId, parseSessionForkPayload(req.body));
+    res.status(201).json(createApiSuccessResponse(result));
+  }),
+);
+
 router.put(
   '/sessions/:sessionId',
   asyncHandler(async (req: Request, res: Response) => {
@@ -866,7 +896,7 @@ router.get(
 );
 
 router.post(
-  '/sessions/:sessionId/fork',
+  '/sessions/:sessionId/fork-at-anchor',
   asyncHandler(async (req: Request, res: Response) => {
     const sessionId = parseSessionId(req.params.sessionId);
     const body = (req.body ?? {}) as Record<string, unknown>;

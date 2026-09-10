@@ -5,7 +5,7 @@ import type { AnyRecord } from '@/shared/types.js';
  *
  * Consumed by `claude-sessions.provider.ts`, which stamps each normalized
  * message with the anchor of the row it came from, so the frontend can offer
- * Fork (and later Rewind) without ever resolving an anchor itself.
+ * Fork without ever resolving an anchor itself.
  *
  * Two measured facts about Claude decide the whole shape of this:
  *

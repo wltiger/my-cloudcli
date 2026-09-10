@@ -31,15 +31,22 @@ type ProviderCapabilities = {
   supportsFork: boolean;
   /** Whether the open conversation can be Cleared: archived, and replaced by an empty session. */
   supportsClear: boolean;
-  /** Whether an earlier message can be re-sent to Rewind the session back to that point. */
-  supportsRewind: boolean;
   /**
-   * Whether that Rewind also restores tracked files to their state at that
-   * point. Settled by the provider rather than chosen per Rewind (see the
-   * Rewind entry in `CONTEXT.md`): it exists so the notice above the composer
-   * can say so before the reader commits, not as a toggle.
+   * Whether re-running the conversation from an edited message also restores
+   * tracked files to their state at that point. Settled by the provider rather
+   * than chosen per edit: it exists so the notice above the composer can say
+   * so before the reader commits, not as a toggle.
    */
   rewindRestoresFiles: boolean;
+  /**
+   * Whether an already-sent message can be replaced, which requires the
+   * provider to re-run a conversation truncated at a chosen point.
+   */
+  supportsMessageEditing: boolean;
+  /**
+   * Whether a session's transcript can be branched into an independent one.
+   */
+  supportsSessionForking: boolean;
 };
 
 /**
@@ -53,11 +60,9 @@ type ProviderCapabilities = {
  * - Claude and OpenCode support Fork; see ADR 0008 for why Codex never will,
  *   and issue #23 for OpenCode's own, which forks through the same side channel
  *   Compact uses. Cursor is unsupported — not investigated.
- * - Claude and OpenCode support Rewind — Claude through the SDK's own
- *   `resumeSessionAt` (#25), OpenCode through the `revert` its HTTP API
- *   exposes (#26). Codex never will (ADR 0008), and Cursor is unsupported —
- *   not investigated. Only OpenCode's restores tracked files with the
- *   conversation, because that is the only shape its API has.
+ * - Only OpenCode's edit restores tracked files with the conversation, because
+ *   a revert is the only shape its API has; Claude's `resumeSessionAt` and
+ *   Codex's `thread/fork` leave the working tree alone.
  * - Clear reaches no provider API at all (ADR 0005), so the flag records which
  *   providers it was verified on — Claude and OpenCode (#24) — rather than what
  *   a runtime can do. Codex and Cursor are simply unverified.
@@ -76,8 +81,11 @@ const PROVIDER_CAPABILITIES: Record<LLMProvider, ProviderCapabilities> = {
     supportsCompact: true,
     supportsFork: true,
     supportsClear: true,
-    supportsRewind: true,
     rewindRestoresFiles: false,
+    // `resumeSessionAt` re-runs a conversation truncated at a message, and
+    // `forkSession` copies a transcript prefix into a new session file.
+    supportsMessageEditing: true,
+    supportsSessionForking: true,
   },
   cursor: {
     provider: 'cursor',
@@ -92,8 +100,9 @@ const PROVIDER_CAPABILITIES: Record<LLMProvider, ProviderCapabilities> = {
     supportsCompact: false,
     supportsFork: false,
     supportsClear: false,
-    supportsRewind: false,
     rewindRestoresFiles: false,
+    supportsMessageEditing: false,
+    supportsSessionForking: false,
   },
   codex: {
     provider: 'codex',
@@ -108,8 +117,13 @@ const PROVIDER_CAPABILITIES: Record<LLMProvider, ProviderCapabilities> = {
     supportsCompact: false,
     supportsFork: false,
     supportsClear: false,
-    supportsRewind: false,
     rewindRestoresFiles: false,
+    // Not from the Codex SDK, which only starts and resumes threads: both ride
+    // the same CLI's `app-server` protocol, whose `thread/fork` copies a
+    // thread up to a chosen turn. Editing is that fork plus a new prompt,
+    // which is how Codex's own IDE clients do it.
+    supportsMessageEditing: true,
+    supportsSessionForking: true,
   },
   opencode: {
     provider: 'opencode',
@@ -127,8 +141,17 @@ const PROVIDER_CAPABILITIES: Record<LLMProvider, ProviderCapabilities> = {
     supportsCompact: true,
     supportsFork: true,
     supportsClear: true,
-    supportsRewind: true,
     rewindRestoresFiles: true,
+    // True by a different mechanism, and this flag must not be read as the one
+    // Claude's entry describes: OpenCode cannot resume a transcript partway at
+    // all. Editing a message rewinds the conversation on OpenCode's own side
+    // first (`POST /session/{id}/revert`) and the run that follows is an
+    // ordinary resume — different internally, the same outcome for the reader.
+    // Unlike the other two, that rewind also restores tracked files —
+    // `rewindRestoresFiles` above is what the notice over the composer reads to
+    // say so before the reader sends.
+    supportsMessageEditing: true,
+    supportsSessionForking: false,
   },
 };
 

@@ -5,9 +5,9 @@ import { buildClaudeAnchorIndex } from '@/modules/providers/list/claude/claude-a
 
 /**
  * Seam: these are raw Claude transcript rows exactly as they sit in the JSONL
- * file, in file order. Everything the Fork/Rewind entry points depend on is
- * decided here, so the fixtures below are shaped after a real transcript
- * rather than after the rendered message stream.
+ * file, in file order. Everything the Fork entry point depends on is decided
+ * here, so the fixtures below are shaped after a real transcript rather than
+ * after the rendered message stream.
  */
 
 test('a user prompt is one transcript row, so it anchors on itself', () => {
@@ -55,7 +55,7 @@ test('a turn whose rows are interleaved with tool results still anchors on its l
 });
 
 test('rows at or before the last compaction boundary get no anchor', () => {
-  // A Rewind anchor from before a Compact is known to fail hard, and Fork's
+  // A resume anchor from before a Compact is known to fail hard, and Fork's
   // tolerance was never measured, so both stay conservative: no anchor at all.
   const anchors = buildClaudeAnchorIndex([
     { uuid: 'old1', type: 'user', message: { role: 'user', content: 'ancient' } },

@@ -243,13 +243,13 @@ test('model routes expose immutable defaults and full custom model CRUD', async 
   });
 });
 
-test('the fork route refuses a request with no anchor, and names the fork in its own error', async () => {
+test('the fork route refuses a request with no anchor', async () => {
   await withProviderServer(async (baseUrl, workspacePath) => {
     sessionsDb.createAppSession('fork-source', 'claude', workspacePath, 'Wire up the sidebar');
     sessionsDb.assignProviderSessionId('fork-source', 'claude-native-1');
 
     const missingAnchorResponse = await fetch(
-      `${baseUrl}/api/providers/sessions/fork-source/fork`,
+      `${baseUrl}/api/providers/sessions/fork-source/fork-at-anchor`,
       {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
@@ -261,25 +261,6 @@ test('the fork route refuses a request with no anchor, and names the fork in its
     };
     assert.equal(missingAnchorResponse.status, 400);
     assert.equal(missingAnchorPayload.error.code, 'ANCHOR_REQUIRED');
-
-    // Fork parses its own payload rather than borrowing the rename route's:
-    // the reader sees this message when they clear the dialog's name, so it
-    // must name the fork's name and never a summary.
-    const missingNameResponse = await fetch(
-      `${baseUrl}/api/providers/sessions/fork-source/fork`,
-      {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ anchor: 'anchor-uuid', name: '   ' }),
-      },
-    );
-    const missingNamePayload = await missingNameResponse.json() as {
-      error: { code: string; message: string };
-    };
-    assert.equal(missingNameResponse.status, 400);
-    assert.equal(missingNamePayload.error.code, 'INVALID_FORK_SESSION_NAME');
-    assert.match(missingNamePayload.error.message, /fork name/i);
-    assert.doesNotMatch(missingNamePayload.error.message, /summary/i);
   });
 });
 

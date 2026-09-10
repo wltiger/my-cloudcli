@@ -35,28 +35,39 @@ _Avoid_: Friendly name — reserve that term for the hardcoded catalog's own `la
 One of the views the selected Project is worked on through — Chat, Shell, Files, Git, plus Browser and Tasks when available and one per enabled plugin. Scope differs per tab and is easy to get wrong: only Chat and Shell follow the selected session; Files and Git are project-scoped and don't change when the session does.
 _Avoid_: Session tab — most tabs ignore the session entirely. Also distinct from the sidebar's Projects/Conversations tabs and the Settings dialog's tabs; when one of those is meant, name it explicitly
 **Compact** (session):
-Replacing the earlier part of a session's conversation with a model-written summary, so the session continues under the same session id with far fewer context tokens. Provider-native and one-way with respect to Rewind: the summarized messages stay in the on-disk transcript, but they stop being addressable, so a Rewind target from before a Compact no longer resolves.
+Replacing the earlier part of a session's conversation with a model-written summary, so the session continues under the same session id with far fewer context tokens. Provider-native and one-way with respect to Edit: the summarized messages stay in the on-disk transcript, but they stop being addressable, so an Anchor from before a Compact no longer resolves.
 _Avoid_: Summarize, condense — summarizing is the mechanism, not the operation. Also distinct from Clear, which starts a different session rather than shrinking this one.
 
 **Clear** (session):
 Retiring the open conversation and continuing in an empty one. The retired session is left whole and Archived rather than emptied, and a new session takes over — so it is a session boundary, not a context operation, and nothing it contained becomes unreadable.
 _Avoid_: Reset, wipe. Don't describe it as "clearing the current session": the current session is left untouched and a different one takes over.
 
-**Rewind** (session):
-Re-sending an earlier message so the session continues from that point, keeping the same session id and the same transcript file. Everything that followed the chosen message leaves the context without being deleted. A Rewind is inseparable from the message that triggers it — there is no state in which a session is rewound and waiting for input. Whether it also restores tracked files to their state at that point is settled by the provider, not chosen per Rewind.
-_Avoid_: Undo, revert — both read as "put the files back". Also distinct from Clear, which cannot preserve the session id.
+**Edit** (session):
+Replacing an already-sent message so the session continues from that point, keeping the same session id. Everything that followed the chosen message leaves the context without being deleted from the provider's own record. An Edit is inseparable from the send that performs it — there is no state in which a session is truncated and waiting for input. Whether it also restores tracked files to their state at that point is settled by the provider, not chosen per Edit.
+_Avoid_: Undo, revert, rewind — all three read as "put the files back", and Rewind now names something narrower (below). Also distinct from Clear, which cannot preserve the session id.
+
+**Rewind** (provider mechanism, not an operation):
+One of the ways a provider reaches an Edit: the conversation is rolled back on the provider's own side before the run that follows. Today only OpenCode works this way, because `opencode run` can only append — so an Edit there is `POST /session/{id}/revert` and then an ordinary resume, which is also why it is the one provider whose Edit restores tracked files. Claude resumes its transcript partway instead and rewinds nothing; Codex branches its thread. Which one applies is the adapter's business, never the reader's.
+_Avoid_: Using Rewind for anything a reader chooses. CloudCLI once offered a per-message Rewind control beside Edit; it was retired once Edit covered every provider. Decision records 0003, 0005, 0006 and 0007 still use that older sense and are read as history.
 
 **Fork** (session):
-Copying a session's transcript up to a chosen message into a **new** session with its own id, leaving the original untouched and still resumable. The branching counterpart to Rewind: the same choose-a-message gesture, the opposite outcome for the session id.
-_Avoid_: Branch, duplicate, copy — reserve those for git. Also distinct from Rewind, which continues the same session instead of creating one.
+Copying a session's transcript up to a chosen message into a **new** session with its own id, leaving the original untouched and still resumable. The branching counterpart to Edit: the same choose-a-message gesture, the opposite outcome for the session id.
+_Avoid_: Branch, duplicate, copy — reserve those for git. Also distinct from Edit, which continues the same session instead of creating one.
 
 **Transcript row**:
 One line of a provider's own on-disk session record. Not the unit a reader sees: a single agent turn is written as several rows — reasoning, text, one per tool call — which CloudCLI renders as one message plus its tool cards. Only rows carry an identity the provider will accept back; the ids on rendered messages are CloudCLI's own.
 _Avoid_: Line, entry, event
 
 **Anchor**:
-The transcript row a Rewind or Fork is taken at, named the way its provider names it. Chosen by pointing at a message but never derivable from one: providers disagree about which row the same gesture lands on, and even about whether the named row is kept or dropped — OpenCode's own fork excludes it while its own revert includes it. A message with no anchor is one the operation cannot be performed on at all.
-_Avoid_: Checkpoint, cut point, target
+The transcript row an Edit or Fork is taken at, named the way its provider names it. Chosen by pointing at a message but never derivable from one: providers disagree about which row the same gesture lands on, and even about whether the named row is kept or dropped — OpenCode's own fork excludes it while its own revert includes it. A message with no anchor is one the operation cannot be performed on at all.
+
+**Two kinds now travel on the same message**, and they are not interchangeable:
+
+- `transcriptAnchorId` — provider-native, stamped by the provider's own session adapter. Claude's transcript-row `uuid`, Codex's enclosing `turnId`, OpenCode's message id. This is what Edit addresses, and what upstream's Fork route takes.
+- `anchor` — computed by this fork from the raw transcript rows, under a rule of its own per provider. It is what this fork's own anchor-based Fork route takes, which today means OpenCode. It is always withheld at or before the last Compact boundary; `transcriptAnchorId` follows that rule only where the provider's own adapter applies it (OpenCode does, Claude stamps every user row regardless).
+
+One message can carry both at once — OpenCode's Edit anchor rides `transcriptAnchorId` while its Fork anchor rides `anchor` — so which field a message carries does **not** decide which backend performs a Fork. That is the provider's upstream fork capability (see `docs/adr/0011-opencode-forks-in-the-client-not-through-the-fork-facet.md`); Edit is the one gesture that still keys on a field, `transcriptAnchorId`, alone.
+_Avoid_: Checkpoint, cut point, target. Also avoid calling either field "the anchor" without saying which — the two disagree about which row they name.
 
 **Session archive** (session):
 A reversible visibility state for a session. Archiving removes it from active

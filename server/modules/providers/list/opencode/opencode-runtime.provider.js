@@ -11,7 +11,7 @@ import {
 import { notifyRunFailed, notifyRunStopped } from '@/modules/notifications/index.js';
 import { createCompleteMessage, createNormalizedMessage, flattenPromptForWindowsShell, getOpenCodeDatabasePath } from '@/shared/utils.js';
 
-import { readOpenCodeRewindAnchor, runOpenCodeRewindSend, withOpenCodeServe } from './opencode-serve.js';
+import { withOpenCodeServe } from './opencode-serve.js';
 
 // cross-spawn resolves .cmd shims/PATHEXT on Windows and delegates to
 // child_process.spawn everywhere else.
@@ -240,7 +240,7 @@ export function killOpenCodeProcessTree(childProcess) {
  * process it was never handed.
  *
  * Exported for `opencode-serve.ts`, whose `withOpenCodeServe` pairs it with
- * `killOpenCodeProcessTree` for every Fork and Rewind call.
+ * `killOpenCodeProcessTree` for every Fork and revert call.
  */
 export function startOpenCodeServeProcess(cwd) {
   return new Promise((resolve, reject) => {
@@ -445,13 +445,6 @@ async function spawnOpenCode(command, options = {}, ws, context) {
   // `/compact` never reaches `opencode run` — see runOpenCodeCompactSideChannel.
   if (isOpenCodeCompactCommand(command)) {
     return runOpenCodeCompactSideChannel(options, ws, context);
-  }
-
-  // A Rewind is issued here rather than folded into the CLI arguments below,
-  // because it is a separate call that has to happen before the send.
-  const rewindAnchor = readOpenCodeRewindAnchor(options);
-  if (rewindAnchor) {
-    return runOpenCodeRewindSend(command, options, ws, context, rewindAnchor);
   }
 
   return new Promise((resolve, reject) => {
