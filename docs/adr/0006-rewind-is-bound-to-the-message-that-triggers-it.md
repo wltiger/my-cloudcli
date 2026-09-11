@@ -1,3 +1,7 @@
+---
+Status: superseded (v1.37.3) — the per-message Rewind this binds no longer exists; Edit replaced it on every provider and enforces the same no-pending-state rule through upstream's own `chat.edit-send`.
+---
+
 # Rewind happens by re-sending a message, so there is no rewind state to store
 
 Claude's `resumeSessionAt` is an option on the next query rather than an operation of its own: clicking Rewind changes nothing on disk until a message is actually sent. Rewind is therefore defined as a single gesture that ends in a send — the composer is prefilled from the chosen message (text and attachments), the messages that would leave the context are dimmed, and nothing has happened until send is pressed. There is deliberately no rewind-anchor table; adding one would reintroduce a CloudCLI-side copy of state the provider owns.
