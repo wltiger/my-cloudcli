@@ -40,9 +40,9 @@ export type OpenCodeMessageSummary = {
  * Collapses per-part rows into the messages an Anchor can name, in first-seen
  * order, and locates the last compaction among them.
  *
- * Exported for `opencode-rewind.ts`: the fork rule, the rewind rule and the
- * revert filter all need this same collapse and this same boundary, and three
- * private copies of it would drift. It is the counterpart of
+ * Exported for `opencode-rewind.ts`: the fork rule, the revert-anchor rule and
+ * the revert filter all need this same collapse and this same boundary, and
+ * three private copies of it would drift. It is the counterpart of
  * `claude-anchors.ts` exporting `findLastCompactBoundaryIndex` to
  * `claude-rewind.ts` — one shared scan, three rules that stay separate.
  *

@@ -8,8 +8,11 @@ import {
 
 /**
  * Seam: the same joined message/part rows `fetchHistory` reads out of
- * `opencode.db`, in the order its query returns them, plus the one extra fact a
- * Rewind adds — the `revert` state OpenCode records on the session row.
+ * `opencode.db`, in the order its query returns them, plus the one extra fact
+ * an edit adds — the `revert` state OpenCode records on the session row.
+ *
+ * OpenCode's runtime cannot resume a transcript partway, so replacing a message
+ * *is* a revert to it; these are the rules the edit path stands on.
  *
  * Both rules below were measured against a real 1.18.18 server rather than read
  * from its OpenAPI document, which is wrong about this feature in two ways.
@@ -40,7 +43,7 @@ const compactionRow = (messageId: string) => ({
   part_data: JSON.stringify({ type: 'compaction', auto: false }),
 });
 
-test('a user prompt is its own Rewind Anchor, because revert drops the message it names', () => {
+test('a user prompt is its own edit Anchor, because revert drops the message it names', () => {
   // The exact opposite of the same provider's fork rule, which anchors this
   // prompt on `msg_a1` because fork *excludes* the message it is given.
   const anchors = buildOpenCodeRewindAnchorIndex([
@@ -51,7 +54,7 @@ test('a user prompt is its own Rewind Anchor, because revert drops the message i
   assert.equal(anchors.get('msg_u1'), 'msg_u1');
 });
 
-test('only the reader\'s own messages get a Rewind Anchor', () => {
+test('only the reader\'s own messages get an edit Anchor', () => {
   const anchors = buildOpenCodeRewindAnchorIndex([
     userRow('msg_u1', 'write hello.txt'),
     assistantRow('msg_a1', { type: 'step-start' }),
@@ -63,17 +66,17 @@ test('only the reader\'s own messages get a Rewind Anchor', () => {
   assert.deepEqual([...anchors.keys()], ['msg_u1', 'msg_u2']);
 });
 
-test('the first prompt of a session can be rewound, unlike Claude\'s', () => {
+test('the first prompt of a session can be edited, unlike Claude\'s', () => {
   // Claude's rule anchors on the row *before* the message and the first prompt
-  // has none, so it offers no entry. Revert names the message itself, so there
-  // is no such gap here: rewinding the opening prompt simply empties the
-  // session and rolls every file back with it.
+  // has none, so it resumes from scratch instead. Revert names the message
+  // itself, so there is no such gap here: replacing the opening prompt simply
+  // empties the session and rolls every file back with it.
   const anchors = buildOpenCodeRewindAnchorIndex([userRow('msg_u1')]);
 
   assert.equal(anchors.get('msg_u1'), 'msg_u1');
 });
 
-test('nothing at or before the last compaction gets a Rewind Anchor', () => {
+test('nothing at or before the last compaction gets an edit Anchor', () => {
   // Same conservative rule the fork index applies. It is load-bearing here for
   // a second reason: per ADR 0007 the filter below refuses to touch that
   // segment, so an anchor there would revert server-side and still render every
