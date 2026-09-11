@@ -159,8 +159,6 @@ function buildNotificationPayload(event) {
     'run.failed': normalizedEvent.meta?.error ? `Run Failed: ${normalizedEvent.meta.error}` : 'Run Failed: The run encountered an error',
     'agent.notification': normalizedEvent.meta?.message ? String(normalizedEvent.meta.message) : 'You have a new notification',
     'permission.resolved': 'Already handled on another device — no action needed',
-    'scheduled_trigger.fired': 'Scheduled retry sent',
-    'scheduled_trigger.failed': normalizedEvent.meta?.error ? `Scheduled retry failed: ${normalizedEvent.meta.error}` : 'Scheduled retry failed',
     'push.enabled': 'Push notifications are now enabled!'
   };
   const providerLabel = PROVIDER_LABELS[normalizedEvent.provider] || 'Assistant';
