@@ -1,11 +1,14 @@
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
-import { Button, Dialog, DialogContent, DialogTitle, Input } from '../../../../shared/view/ui';
+import { Button, Dialog, DialogContent, DialogTitle, Input } from '@/shared/ui';
 
 /**
- * Naming step of Fork. Nothing is created until the reader confirms, so
- * cancelling here leaves both the original session and the sidebar untouched.
+ * Naming step of Fork, opened once the fork already exists and is on screen.
+ *
+ * Cancelling is therefore not an undo: it issues no request at all and leaves
+ * the fork under the name the backend created it with. That is deliberate — it
+ * is what lets this whole dialog be deleted later with no behaviour to unpick.
  *
  * `suggestedName` is resolved by the backend before this opens, because the
  * frontend only holds the first page of a project's sessions and cannot tell
@@ -14,13 +17,13 @@ import { Button, Dialog, DialogContent, DialogTitle, Input } from '../../../../s
 const SessionForkDialog = ({
   isOpen,
   suggestedName,
-  isForking,
+  isRenaming,
   onConfirm,
   onClose,
 }: {
   isOpen: boolean;
   suggestedName: string;
-  isForking: boolean;
+  isRenaming: boolean;
   onConfirm: (name: string) => void;
   onClose: () => void;
 }) => {
@@ -35,10 +38,10 @@ const SessionForkDialog = ({
     }
   }, [isOpen, suggestedName]);
 
-  const canConfirm = name.trim().length > 0 && !isForking;
+  const canConfirm = name.trim().length > 0 && !isRenaming;
 
   return (
-    <Dialog open={isOpen} onOpenChange={(open) => !open && !isForking && onClose()}>
+    <Dialog open={isOpen} onOpenChange={(open) => !open && !isRenaming && onClose()}>
       <DialogContent className="w-[calc(100vw-2rem)] max-w-md overflow-hidden rounded-2xl border-border/80 bg-popover p-0 shadow-2xl">
         <DialogTitle>{t('fork.dialogTitle')}</DialogTitle>
 
@@ -50,7 +53,7 @@ const SessionForkDialog = ({
           <Input
             autoFocus
             value={name}
-            disabled={isForking}
+            disabled={isRenaming}
             onChange={(event) => setName(event.target.value)}
             onKeyDown={(event) => {
               if (event.key === 'Enter' && canConfirm) {
@@ -61,11 +64,11 @@ const SessionForkDialog = ({
         </div>
 
         <div className="flex justify-end gap-2 border-t border-border/70 bg-muted/20 px-5 py-3">
-          <Button type="button" variant="outline" size="sm" onClick={onClose} disabled={isForking} className="rounded-xl">
+          <Button type="button" variant="outline" size="sm" onClick={onClose} disabled={isRenaming} className="rounded-xl">
             {t('fork.cancel')}
           </Button>
           <Button type="button" size="sm" onClick={() => onConfirm(name.trim())} disabled={!canConfirm} className="rounded-xl">
-            {isForking ? t('fork.creating') : t('fork.confirm')}
+            {isRenaming ? t('fork.renaming') : t('fork.confirm')}
           </Button>
         </div>
       </DialogContent>
