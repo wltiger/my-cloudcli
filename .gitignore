@@ -112,6 +112,8 @@ temp/
 CLAUDE.md
 .mcp.json
 .gemini/
+.playwright-mcp/
+.workbuddy/
 
 # .claude/ is tracked selectively in this fork: CLAUDE.md and skills/ travel
 # with the repo, everything else (local settings, session state) stays
