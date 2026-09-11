@@ -1,8 +1,14 @@
 import { execSync } from 'node:child_process'
+import { createRequire } from 'node:module'
 import { fileURLToPath, URL } from 'node:url'
 import { defineConfig, loadEnv } from 'vite'
 import react from '@vitejs/plugin-react'
 import { getConnectableHost, normalizeLoopbackHost } from './shared/networkHosts.js'
+
+// The client shows the installed package version so it can be compared against the
+// version the server process is actually running. Reading package.json here and
+// injecting it keeps the frontend free of imports that reach outside src/.
+const pkg = createRequire(import.meta.url)('./package.json')
 
 // Build identifier: which commit this bundle was built from, and when.
 // package.json's `version` is deliberately left untouched by this fork, so the
@@ -44,12 +50,13 @@ export default defineConfig(({ mode }) => {
   const serverPort = env.SERVER_PORT || env.PORT || 3001
 
   return {
+    plugins: [react()],
     define: {
+      __APP_VERSION__: JSON.stringify(pkg.version),
       // Vite's `define` is raw text replacement, so string values must be JSON-stringified.
       __GIT_SHA__: JSON.stringify(getGitSha()),
       __BUILD_TIME__: JSON.stringify(formatBuildTime(new Date()))
     },
-    plugins: [react()],
     resolve: {
       alias: {
         '@': fileURLToPath(new URL('./src', import.meta.url))

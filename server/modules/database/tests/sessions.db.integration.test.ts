@@ -4,8 +4,9 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
-import { closeConnection } from '@/modules/database/connection.js';
+import { closeConnection, getConnection } from '@/modules/database/connection.js';
 import { initializeDatabase } from '@/modules/database/init-db.js';
+import { runMigrations } from '@/modules/database/migrations.js';
 import { projectsDb } from '@/modules/database/repositories/projects.db.js';
 import { sessionsDb } from '@/modules/database/repositories/sessions.db.js';
 
@@ -72,6 +73,58 @@ test('createSession reactivates archived rows when the session becomes active ag
   });
 });
 
+test("createSession leaves an archived row archived when the transcript has not changed", async () => {
+  await withIsolatedDatabase(() => {
+    const createdAt = "2026-07-18T09:00:00.000Z";
+    const updatedAt = "2026-07-18T10:00:00.000Z";
+    const jsonlPath = "/transcripts/session-untouched.jsonl";
+
+    sessionsDb.createSession("session-untouched", "claude", "/workspace/demo-project", "A Name", createdAt, updatedAt, jsonlPath);
+    sessionsDb.updateSessionIsArchived("session-untouched", true);
+
+    // A full rescan re-indexes every transcript created since the last scan,
+    // changed or not, and hands over the timestamps the file still carries.
+    sessionsDb.createSession("session-untouched", "claude", "/workspace/demo-project", "A Name", createdAt, updatedAt, jsonlPath);
+
+    assert.equal(sessionsDb.getSessionById("session-untouched")?.isArchived, 1);
+    assert.equal(sessionsDb.getArchivedSessions().length, 1);
+    assert.equal(sessionsDb.getAllSessions().length, 0);
+
+    // Actually writing to the session again still brings it back.
+    sessionsDb.createSession("session-untouched", "claude", "/workspace/demo-project", "A Name", createdAt, "2026-07-18T11:00:00.000Z", jsonlPath);
+
+    assert.equal(sessionsDb.getSessionById("session-untouched")?.isArchived, 0);
+  });
+});
+
+test("the upsert path counts an omitted timestamp as activity", async () => {
+  await withIsolatedDatabase(() => {
+    // An app-created row carries no provider id, so indexing it takes the
+    // INSERT ... ON CONFLICT branch rather than the UPDATE above. Its
+    // updated_at is CURRENT_TIMESTAMP, which resolves to whole seconds, so a
+    // call in the same second is not *newer* -- the omitted timestamp itself
+    // has to be what reactivates the row.
+    sessionsDb.createAppSession("session-legacy", "claude", "/workspace/demo-project");
+    sessionsDb.updateSessionIsArchived("session-legacy", true);
+
+    sessionsDb.createSession("session-legacy", "claude", "/workspace/demo-project", "Indexed Name");
+
+    assert.equal(sessionsDb.getSessionById("session-legacy")?.isArchived, 0);
+  });
+});
+
+test("the upsert path leaves an archived row alone for a transcript older than it", async () => {
+  await withIsolatedDatabase(() => {
+    sessionsDb.createAppSession("session-stale", "claude", "/workspace/demo-project");
+    sessionsDb.updateSessionIsArchived("session-stale", true);
+
+    sessionsDb.createSession("session-stale", "claude", "/workspace/demo-project", "Indexed Name", "2026-07-18T09:00:00.000Z", "2026-07-18T10:00:00.000Z", "/transcripts/session-stale.jsonl");
+
+    assert.equal(sessionsDb.getSessionById("session-stale")?.isArchived, 1);
+  });
+});
+
+
 test('repository reads normalize SQLite UTC timestamps to ISO strings', async () => {
   await withIsolatedDatabase(() => {
     sessionsDb.createAppSession('session-timezone', 'claude', '/workspace/demo-project');
@@ -112,5 +165,50 @@ test('recent sessions are globally ordered, paginated, and limited to visible co
       secondPage.sessions.map((session) => session.session_id),
       ['session-middle', 'session-oldest'],
     );
+  });
+});
+
+test('permission mode is recorded on the session row and read back', async () => {
+  await withIsolatedDatabase(() => {
+    sessionsDb.createAppSession('session-mode', 'claude', '/workspace/demo-project');
+
+    assert.equal(sessionsDb.getSessionById('session-mode')?.permission_mode, null);
+
+    sessionsDb.setSessionPermissionMode('session-mode', 'acceptEdits');
+    assert.equal(sessionsDb.getSessionById('session-mode')?.permission_mode, 'acceptEdits');
+
+    // The latest send wins: a later turn with a different mode overwrites it.
+    sessionsDb.setSessionPermissionMode('session-mode', 'bypassPermissions');
+    assert.equal(sessionsDb.getSessionById('session-mode')?.permission_mode, 'bypassPermissions');
+
+    // Recording against a session that has no row is a silent no-op.
+    sessionsDb.setSessionPermissionMode('session-missing', 'plan');
+    assert.equal(sessionsDb.getSessionById('session-missing'), null);
+  });
+});
+
+test('migrations add permission_mode to an existing sessions table without losing data', async () => {
+  await withIsolatedDatabase(() => {
+    const db = getConnection();
+    sessionsDb.createAppSession('session-legacy', 'claude', '/workspace/demo-project');
+    sessionsDb.setSessionModel('session-legacy', 'some-model');
+
+    // Simulate an install that predates the column, then re-run the migrations.
+    db.exec('ALTER TABLE sessions DROP COLUMN permission_mode');
+    assert.equal(
+      (db.prepare('PRAGMA table_info(sessions)').all() as Array<{ name: string }>)
+        .some((column) => column.name === 'permission_mode'),
+      false,
+    );
+
+    runMigrations(db);
+
+    assert.ok(
+      (db.prepare('PRAGMA table_info(sessions)').all() as Array<{ name: string }>)
+        .some((column) => column.name === 'permission_mode'),
+    );
+    const row = sessionsDb.getSessionById('session-legacy');
+    assert.equal(row?.permission_mode, null);
+    assert.equal(row?.model, 'some-model');
   });
 });
