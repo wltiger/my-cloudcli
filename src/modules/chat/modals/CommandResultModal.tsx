@@ -654,7 +654,7 @@ function CommandResultModal({
           <div className="flex items-center gap-2">
             {kind === 'cost' && onCompact && (
               <Button type="button" variant="outline" size="sm" onClick={onCompact} className="rounded-xl">
-                {t('compact.button')}
+                {t('chat:compact.button')}
               </Button>
             )}
             <Button type="button" variant="outline" size="sm" onClick={onClose} className="rounded-xl">
