@@ -491,7 +491,13 @@ export default function ChatComposer({
 
           </PromptInputTools>
 
-          <div className="ml-auto flex shrink-0 items-center gap-1.5 sm:gap-2">
+          {/* flex-1 + min-w-0: the footer is flex-wrap (for the lg hint row), so
+              line breaks are decided on base sizes before shrinking can help.
+              Claiming the remaining width keeps this cluster on one row and
+              lets the model pill — the only shrinkable child — yield its text.
+              (No ml-auto: an auto margin would eat the free space flex-grow
+              needs to hand the pill room to shrink into.) */}
+          <div className="flex min-w-0 flex-1 items-center justify-end gap-1.5 sm:gap-2">
             <ScheduleMessagePopover
               disabled={!input.trim()}
               onSchedule={onScheduleMessage}
