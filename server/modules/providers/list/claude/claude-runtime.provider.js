@@ -24,6 +24,7 @@ import {
   buildClaudeUserContent,
   normalizeImageDescriptors
 } from '@/shared/image-attachments.js';
+import { createBackgroundWorkLedger } from '@/modules/providers/list/claude/claude-background-work.js';
 import { resolveClaudeCustomEndpointEnv } from '@/modules/providers/list/claude/claude-custom-endpoint.js';
 import {
   CLAUDE_PREDEFINED_MODELS,
@@ -560,36 +561,6 @@ function extractCumulativeTokenBudget(sdkMessage) {
   };
 }
 
-// Tool calls that leave work running past the end of a turn. Bash only counts
-// when it is explicitly backgrounded; the rest defer or watch work by nature.
-const DEFERRED_WORK_TOOLS = new Set(['Monitor', 'ScheduleWakeup', 'CronCreate', 'TaskCreate']);
-
-/**
- * Detects tool calls that keep working after the turn's `result` arrives.
- *
- * Only turns that start background work need their CLI process held open; every
- * other turn can let it exit immediately, as it did before the hold existed.
- *
- * @param {Object} sdkMessage - SDK stream message
- * @returns {boolean} True when the message launches work that outlives the turn
- */
-function startsBackgroundWork(sdkMessage) {
-  const content = sdkMessage?.message?.content;
-  if (!Array.isArray(content)) {
-    return false;
-  }
-
-  return content.some((block) => {
-    if (block?.type !== 'tool_use') {
-      return false;
-    }
-    if (block.name === 'Bash') {
-      return block.input?.run_in_background === true;
-    }
-    return DEFERRED_WORK_TOOLS.has(block.name);
-  });
-}
-
 /**
  * Builds the SDK user messages for one turn.
  *
@@ -768,15 +739,16 @@ async function queryClaudeSDK(command, options = {}, ws, context) {
   };
 
   // Closes the held stdin stream so the CLI can wind down. Replaced once the
-  // stream exists; the finally block calls it no matter how the run ends.
-  let releasePromptStream = () => {};
+  // stream exists; the finally block calls it unless work is still outstanding.
+  let inputReleased = false;
+  let releasePromptStream = () => { inputReleased = true; };
   let idleReleaseTimer = null;
   // The client is told the turn is over as soon as `result` lands, even though
   // the process lingers, so the UI never waits out the idle hold.
   let turnCompleteSent = false;
-  // Set when a turn starts background work, cleared when the next `result`
-  // arrives — only turns with work still outstanding hold their process open.
-  let backgroundWorkPending = false;
+  // Reports what is still running when a turn wraps up — only turns with work
+  // still outstanding hold their process open.
+  const backgroundWork = createBackgroundWorkLedger();
   // True while the process is being held open for background work, so a later
   // `result` can be recognised as that work reporting back.
   let heldForBackgroundWork = false;
@@ -867,6 +839,9 @@ async function queryClaudeSDK(command, options = {}, ws, context) {
     const promptMessages = await buildPromptMessages(command, options.images, options.files, options.cwd);
 
     sdkOptions.hooks = {
+      // Stop/SubagentStop report what is still in flight as each turn ends; the
+      // ledger turns that into this run's hold-or-release answer.
+      ...backgroundWork.buildHooks(),
       Notification: [{
         matcher: '',
         hooks: [async (input) => {
@@ -982,6 +957,7 @@ async function queryClaudeSDK(command, options = {}, ws, context) {
     // Reads `heldPrompt` through the closure so the retry below can swap the
     // stream without leaving a stale closer behind in activeSessions.
     releasePromptStream = () => {
+      inputReleased = true;
       if (sessionKey()) {
         forgetHeldTurn(sessionKey(), heldTurn);
       }
@@ -996,6 +972,8 @@ async function queryClaudeSDK(command, options = {}, ws, context) {
       // Older/newer SDK versions may not accept hook shapes yet.
       // Keep notification behavior operational via runtime events even if hook registration fails.
       console.warn('Failed to initialize Claude query with hooks, retrying without hooks:', hookError?.message || hookError);
+      // No hooks means no Stop snapshot can ever arrive, which is exactly how
+      // the ledger ends up deciding from the backgrounded-Bash fallback instead.
       delete sdkOptions.hooks;
       // Discard the abandoned stream and build a fresh one for the retry.
       heldPrompt.release();
@@ -1025,7 +1003,7 @@ async function queryClaudeSDK(command, options = {}, ws, context) {
         sessionSummary = nextSessionSummary ?? sessionSummary;
         turnCompleteSent = false;
         assistantBudgetSent = false;
-        backgroundWorkPending = false;
+        backgroundWork.resetFallbackSignal();
         followUpPromptPending = true;
         // Re-registered with the same instance, purely so the map's `writer`
         // stops naming the finished run's one.
@@ -1097,9 +1075,7 @@ async function queryClaudeSDK(command, options = {}, ws, context) {
         ws.send(createNormalizedMessage({ kind: 'status', text: 'token_budget', tokenBudget: tokenBudgetData, sessionId: capturedSessionId || sessionId || null, provider: 'claude' }));
       }
 
-      if (startsBackgroundWork(message)) {
-        backgroundWorkPending = true;
-      }
+      backgroundWork.observeMessage(message);
 
       if (message.type === 'result') {
         // The turn is done as far as the client is concerned.
@@ -1128,13 +1104,18 @@ async function queryClaudeSDK(command, options = {}, ws, context) {
             sessionName: sessionSummary
           });
         }
-        if (backgroundWorkPending || (answersFollowUpPrompt && heldForBackgroundWork)) {
-          // Work started during this turn is still running — or work from an
-          // earlier turn has yet to report back, and answering the user in
-          // between must not cut it short. Hold the process open so it can
-          // finish and report back in a follow-up turn; the ceiling is only a
-          // backstop for work that never reports.
-          backgroundWorkPending = false;
+        // The Stop hook fires immediately before this `result`, so the ledger's
+        // newest snapshot is this turn's answer. Without one (hooks refused, or
+        // an SDK build that reports no snapshot) fall back to the pre-existing
+        // rule that work from an earlier turn has yet to report back, and
+        // answering the user in between must not cut it short.
+        const holdForBackgroundWork = backgroundWork.hasOutstandingWork()
+          || (!backgroundWork.hasSnapshot() && answersFollowUpPrompt && heldForBackgroundWork);
+        backgroundWork.resetFallbackSignal();
+        if (holdForBackgroundWork) {
+          // Work is still running. Hold the process open so it can finish and
+          // report back in a follow-up turn; the ceiling is only a backstop for
+          // work that never reports.
           heldForBackgroundWork = true;
           scheduleRelease();
           if (sessionKey()) {
@@ -1148,7 +1129,9 @@ async function queryClaudeSDK(command, options = {}, ws, context) {
         }
         settleFollowUpTurn();
       } else if (idleReleaseTimer) {
-        // Background activity after the turn — push the countdown back out.
+        // Background activity after the turn — a `task_progress` report from a
+        // running task, or anything else the CLI emits — pushes the countdown
+        // back out, so the ceiling only fires on genuine silence.
         scheduleRelease();
       }
     }
@@ -1226,13 +1209,34 @@ async function queryClaudeSDK(command, options = {}, ws, context) {
       error
     });
   } finally {
-    // Always close stdin — otherwise an aborted or failed run leaves the CLI
-    // process (and its MCP servers) alive until the server exits.
-    if (idleReleaseTimer) {
-      clearTimeout(idleReleaseTimer);
-      idleReleaseTimer = null;
+    // Close stdin — otherwise an aborted or failed run leaves the CLI process
+    // (and its MCP servers) alive until the server exits. The exception is a
+    // loop that ended while work is still outstanding: an SDK error or a
+    // dropped connection would otherwise kill background work exactly like an
+    // explicit teardown, so leave the process to the ceiling instead. A run
+    // whose stdin is already closed (abort, supersede, an ordinary turn) has
+    // nothing left to protect.
+    // `heldForBackgroundWork` matters as much as the ledger here: a run held by
+    // the fallback signal has already had that signal cleared by the `result`
+    // that started the hold, so asking the ledger alone would tear down exactly
+    // the work the hold exists to protect.
+    if (!inputReleased && (heldForBackgroundWork || backgroundWork.hasOutstandingWork())) {
+      // Its stdin lives on, but its message loop does not, so the run is no
+      // longer able to answer a follow-up prompt — unpublish the handle or the
+      // next turn pushes into a loop that will never produce a `result`.
+      if (sessionKey()) {
+        forgetHeldTurn(sessionKey(), heldTurn);
+      }
+      if (!idleReleaseTimer) {
+        scheduleRelease();
+      }
+    } else {
+      if (idleReleaseTimer) {
+        clearTimeout(idleReleaseTimer);
+        idleReleaseTimer = null;
+      }
+      releasePromptStream();
     }
-    releasePromptStream();
     // A follow-up turn still in flight when this loop ended (abort, crash, the
     // CLI exiting) would otherwise leave its own invocation — and the run it
     // owns — waiting forever.
