@@ -32,8 +32,11 @@ import {
 } from '@/modules/providers/list/claude/claude-models.provider.js';
 import {
   buildTurnSettingsFingerprint,
+  carriesResumeAnchor,
   claimHeldTurn,
+  createLiveTurnSettings,
   forgetHeldTurn,
+  readHotTurnSettings,
   registerHeldTurn
 } from '@/modules/providers/list/claude/claude-turn-reuse.js';
 import { resolveClaudeCodeExecutablePath } from '@/shared/claude-cli-path.js';
@@ -770,30 +773,6 @@ async function queryClaudeSDK(command, options = {}, ws, context) {
     settle?.();
   };
 
-  // A follow-up turn whose settings are unchanged is pushed into the process
-  // this session is still holding open, so background work started earlier
-  // survives it. Anything else supersedes that hold, as it always has, so held
-  // runs cannot stack up across a conversation.
-  const turnFingerprint = buildTurnSettingsFingerprint(options);
-  if (sessionKey()) {
-    const reusableTurn = claimHeldTurn(sessionKey(), turnFingerprint);
-    const accepted = reusableTurn
-      ? reusableTurn.tryAccept({
-        writer: ws,
-        sessionSummary,
-        promptMessages: await buildPromptMessages(command, options.images, options.files, options.cwd)
-      })
-      : null;
-    if (accepted) {
-      // The live loop now owns this turn; it settles this call when the turn's
-      // `result` arrives, and everything below belongs to the run that started
-      // the process, not to this one.
-      await accepted;
-      return;
-    }
-    getSession(sessionKey())?.releaseInput?.();
-  }
-
   // Arms (or re-arms) the idle countdown that eventually closes stdin.
   const scheduleRelease = () => {
     if (idleReleaseTimer) {
@@ -838,6 +817,49 @@ async function queryClaudeSDK(command, options = {}, ws, context) {
     // own stream because an async generator cannot be replayed once consumed.
     const promptMessages = await buildPromptMessages(command, options.images, options.files, options.cwd);
 
+    // The half of this turn's settings a live query can adopt: what a held
+    // process is asked to switch to below, and what this run's own gate starts
+    // out enforcing if it ends up building a process of its own.
+    const hotTurnSettings = readHotTurnSettings(sdkOptions);
+
+    // A follow-up turn the held process can still serve is pushed into it, so
+    // background work started earlier survives it: the model, permission mode,
+    // tool rules and MCP servers are renegotiated on the live query, and
+    // everything a spawned process fixes for good has to match. Anything else
+    // supersedes that hold, as it always has, so held runs cannot stack up
+    // across a conversation.
+    const turnFingerprint = buildTurnSettingsFingerprint(sdkOptions);
+    if (sessionKey()) {
+      // An edited message re-runs the conversation from an earlier point, which
+      // a process positioned at the end of its own transcript cannot do.
+      const reusableTurn = carriesResumeAnchor(options)
+        ? null
+        : claimHeldTurn(sessionKey(), turnFingerprint);
+      const accepted = reusableTurn
+        ? await reusableTurn.tryAccept({
+          writer: ws,
+          sessionSummary,
+          promptMessages,
+          settings: hotTurnSettings
+        })
+        : null;
+      if (accepted) {
+        // The live loop now owns this turn; it settles this call when the
+        // turn's `result` arrives, and everything below belongs to the run that
+        // started the process, not to this one. Returning through this
+        // function's `finally` is deliberate and inert: this invocation never
+        // built a stream, a timer or a held handle of its own.
+        await accepted.settled;
+        return;
+      }
+      getSession(sessionKey())?.releaseInput?.();
+    }
+
+    // Read through this reference everywhere below, never captured: a follow-up
+    // turn pushed into this process rewrites it, and the gate has to enforce
+    // the newest turn's rules rather than the ones this query was built with.
+    const liveTurnSettings = createLiveTurnSettings(hotTurnSettings);
+
     sdkOptions.hooks = {
       // Stop/SubagentStop report what is still in flight as each turn ends; the
       // ledger turns that into this run's hold-or-release answer.
@@ -872,18 +894,23 @@ async function queryClaudeSDK(command, options = {}, ws, context) {
       const requiresInteraction = TOOLS_REQUIRING_INTERACTION.has(toolName);
 
       if (!requiresInteraction) {
-        if (sdkOptions.permissionMode === 'bypassPermissions') {
+        // Read per call, never captured: a follow-up turn pushed into this
+        // process can tighten (or loosen) these, and the gate has to enforce
+        // what is in force now rather than what this query was built with.
+        const { permissionMode, allowedTools, disallowedTools } = liveTurnSettings.current();
+
+        if (permissionMode === 'bypassPermissions') {
           return { behavior: 'allow', updatedInput: input };
         }
 
-        const isDisallowed = (sdkOptions.disallowedTools || []).some(entry =>
+        const isDisallowed = disallowedTools.some(entry =>
           matchesToolPermission(entry, toolName, input)
         );
         if (isDisallowed) {
           return { behavior: 'deny', message: 'Tool disallowed by settings' };
         }
 
-        const isAllowed = (sdkOptions.allowedTools || []).some(entry =>
+        const isAllowed = allowedTools.some(entry =>
           matchesToolPermission(entry, toolName, input)
         );
         if (isAllowed) {
@@ -940,12 +967,11 @@ async function queryClaudeSDK(command, options = {}, ws, context) {
 
       if (decision.allow) {
         if (decision.rememberEntry && typeof decision.rememberEntry === 'string') {
-          if (!sdkOptions.allowedTools.includes(decision.rememberEntry)) {
-            sdkOptions.allowedTools.push(decision.rememberEntry);
-          }
-          if (Array.isArray(sdkOptions.disallowedTools)) {
-            sdkOptions.disallowedTools = sdkOptions.disallowedTools.filter(entry => entry !== decision.rememberEntry);
-          }
+          // Held on the live settings, so it also survives into a follow-up
+          // turn pushed into this process — until that turn brings tool
+          // settings of its own, which replace it exactly as a fresh process
+          // would have.
+          liveTurnSettings.rememberAllowed(decision.rememberEntry);
         }
         return { behavior: 'allow', updatedInput: decision.updatedInput ?? input };
       }
@@ -991,7 +1017,21 @@ async function queryClaudeSDK(command, options = {}, ws, context) {
     // the claiming turn then starts a process of its own as before.
     heldTurn = {
       fingerprint: turnFingerprint,
-      tryAccept: ({ writer, sessionSummary: nextSessionSummary, promptMessages: followUpMessages }) => {
+      tryAccept: async ({ writer, sessionSummary: nextSessionSummary, promptMessages: followUpMessages, settings }) => {
+        if (!heldPrompt.isOpen()) {
+          return null;
+        }
+
+        // Model, permission mode, tool rules and MCP servers come from the
+        // follow-up turn, not from the one this process was started for. A
+        // query that refuses any of them is left to the caller to tear down —
+        // half-adopted settings are worse than a fresh process.
+        if (!await liveTurnSettings.adopt(queryInstance, settings)) {
+          return null;
+        }
+        // Re-checked after the round-trip above: the ceiling, an abort or a
+        // failing loop can close the stream while a control request is in
+        // flight, and pushing into a closed one would hang the new turn.
         if (!heldPrompt.isOpen()) {
           return null;
         }
@@ -1014,7 +1054,10 @@ async function queryClaudeSDK(command, options = {}, ws, context) {
 
         const settled = new Promise((resolve) => { followUpTurnSettled = resolve; });
         heldPrompt.push(followUpMessages);
-        return settled;
+        // Wrapped, not returned bare: a promise resolving to a promise would be
+        // flattened by the caller's own `await`, and "accepted" has to be
+        // answerable before the turn it accepted has finished.
+        return { settled };
       }
     };
 
