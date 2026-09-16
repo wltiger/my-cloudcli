@@ -1127,6 +1127,14 @@ async function queryClaudeSDK(command, options = {}, ws, context) {
         // process, rather than background work reporting back on its own.
         const answersFollowUpPrompt = followUpPromptPending;
         followUpPromptPending = false;
+        // The Stop hook fires immediately before this `result`, so the ledger's
+        // newest snapshot is this turn's answer. Without one (hooks refused, or
+        // an SDK build that reports no snapshot) fall back to the pre-existing
+        // rule that work from an earlier turn has yet to report back, and
+        // answering the user in between must not cut it short.
+        const holdForBackgroundWork = backgroundWork.hasOutstandingWork()
+          || (!backgroundWork.hasSnapshot() && answersFollowUpPrompt && heldForBackgroundWork);
+        backgroundWork.resetFallbackSignal();
         if (!turnCompleteSent && !abortPending) {
           turnCompleteSent = true;
           ws.send(createCompleteMessage({ provider: 'claude', sessionId: capturedSessionId || sessionId || null, exitCode: 0 }));
@@ -1137,9 +1145,13 @@ async function queryClaudeSDK(command, options = {}, ws, context) {
             sessionName: sessionSummary,
             stopReason: 'completed'
           });
-        } else if (heldForBackgroundWork && !answersFollowUpPrompt && !abortPending) {
-          // A result after the turn already reported complete means the work we
-          // held the process open for has finished and pushed a follow-up turn.
+        } else if (heldForBackgroundWork && !answersFollowUpPrompt && !abortPending && !holdForBackgroundWork) {
+          // A result after the turn already reported complete means work we held
+          // the process open for has finished and pushed a follow-up turn — but
+          // one turn can background several tasks, and each reports back on its
+          // own. Telling the user the work is done while the snapshot still
+          // lists a sibling would announce results that are not there yet, so
+          // this waits for the reading that also ends the hold.
           notifyBackgroundWorkCompleted({
             userId: ws?.userId || null,
             provider: 'claude',
@@ -1147,14 +1159,6 @@ async function queryClaudeSDK(command, options = {}, ws, context) {
             sessionName: sessionSummary
           });
         }
-        // The Stop hook fires immediately before this `result`, so the ledger's
-        // newest snapshot is this turn's answer. Without one (hooks refused, or
-        // an SDK build that reports no snapshot) fall back to the pre-existing
-        // rule that work from an earlier turn has yet to report back, and
-        // answering the user in between must not cut it short.
-        const holdForBackgroundWork = backgroundWork.hasOutstandingWork()
-          || (!backgroundWork.hasSnapshot() && answersFollowUpPrompt && heldForBackgroundWork);
-        backgroundWork.resetFallbackSignal();
         if (holdForBackgroundWork) {
           // Work is still running. Hold the process open so it can finish and
           // report back in a follow-up turn; the ceiling is only a backstop for

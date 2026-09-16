@@ -390,7 +390,7 @@ Anchor 规则是**第三条**具体规则，而且它跟同一个 provider 上�
 
 ## 29. Claude 把"这个进程还能接"的追问推进已经挂着的那个进程
 
-**涉及文件：** *官方自有（只做增量改动）：* `server/modules/providers/list/claude/claude-runtime.provider.js`（`createHeldPromptStream` 改成挂在队列上，多了 `push`/`isOpen`；`queryClaudeSDK` 在映射完 SDK options 之后多了复用入口，进程挂起时会发布一个 `heldTurn` 句柄，`ws`/`sessionSummary` 变成可重新绑定，`result` 分支里多了"这个 result 是在回答被推进来的追问吗"的判断，`canUseTool` 改成读这次运行的实时设置而不是当初构造 query 的那个 options 对象）。*fork 自有：* `server/modules/providers/list/claude/claude-turn-reuse.ts`（`buildTurnSettingsFingerprint`、`carriesResumeAnchor`、`readHotTurnSettings`/`createLiveTurnSettings`，以及挂起回合的登记表）、`server/modules/providers/tests/claude-held-turn-reuse.test.ts`、`server/modules/providers/tests/claude-turn-compatibility.test.ts`。
+**涉及文件：** *官方自有（只做增量改动）：* `server/modules/providers/list/claude/claude-runtime.provider.js`（`createHeldPromptStream` 改成挂在队列上，多了 `push`/`isOpen`；`queryClaudeSDK` 在映射完 SDK options 之后多了复用入口，进程挂起时会发布一个 `heldTurn` 句柄，`ws`/`sessionSummary` 变成可重新绑定，`result` 分支里多了"这个 result 是在回答被推进来的追问吗"的判断，`canUseTool` 改成读这次运行的实时设置而不是当初构造 query 的那个 options 对象）。*fork 自有：* `server/modules/providers/list/claude/claude-turn-reuse.ts`（`buildTurnSettingsFingerprint`、`carriesResumeAnchor`、`readHotTurnSettings`/`createLiveTurnSettings`，以及挂起回合的登记表）、`server/modules/providers/tests/claude-held-turn-reuse.test.ts`、`server/modules/providers/tests/claude-turn-compatibility.test.ts`、`server/modules/providers/tests/claude-subagent-survival.test.ts`（和第 30 条共用：复用路径和 Stop 钩子账本只在那里碰头）。
 
 **为什么改：** 官方本来就会在一个回合的 `result` 之后继续挂着 CLI 的 stdin，好让后台 shell、`Monitor`、子 agent 接着跑完再回报（见 `BG_WAIT_CEILING_MS` 那段注释）。但用户的下一条提问会把它拆掉：`queryClaudeSDK` 一上来就 `getSession(...)?.releaseInput?.()`，紧接着 `addSession` 的顶替分支对上一个实例 `interrupt()`——于是"后台命令还在跑的时候顺手追问一句"就把那个命令杀了。官方的挂起只有在"没人追问"时才成立，偏偏坏掉的是最常见的那种情况。
 
@@ -408,7 +408,7 @@ Anchor 规则是**第三条**具体规则，而且它跟同一个 provider 上�
 
 ## 30. Claude 用 SDK Stop 钩子的快照决定要不要挂住进程，不再靠工具名清单
 
-**涉及文件：** *官方自有（只做增量改动）：* `server/modules/providers/list/claude/claude-runtime.provider.js`（`DEFERRED_WORK_TOOLS` 和 `startsBackgroundWork` **删掉**，换成账本；`sdkOptions.hooks` 里把账本的 `Stop`/`SubagentStop` 和官方原有的 `Notification` 并排展开；`result` 分支和 `finally` 块都改成问账本；新增一个 `inputReleased` 标记，记录 stdin 是不是已经关过了）。*fork 自有：* `server/modules/providers/list/claude/claude-background-work.ts`、`server/modules/providers/tests/claude-background-work.test.ts`。
+**涉及文件：** *官方自有（只做增量改动）：* `server/modules/providers/list/claude/claude-runtime.provider.js`（`DEFERRED_WORK_TOOLS` 和 `startsBackgroundWork` **删掉**，换成账本；`sdkOptions.hooks` 里把账本的 `Stop`/`SubagentStop` 和官方原有的 `Notification` 并排展开；`result` 分支和 `finally` 块都改成问账本；新增一个 `inputReleased` 标记，记录 stdin 是不是已经关过了）。*fork 自有：* `server/modules/providers/list/claude/claude-background-work.ts`、`server/modules/providers/tests/claude-background-work.test.ts`、`server/modules/providers/tests/claude-subagent-survival.test.ts`（这一条和第 29 条合在一起的集成测试）。
 
 **为什么改：** 官方判断"回合结束后要不要继续挂着 CLI 进程"，靠的是一份写死的工具名清单——`Monitor`、`ScheduleWakeup`、`CronCreate`、`TaskCreate`，外加 `run_in_background: true` 的 `Bash`。前四个在真实 transcript 里根本不叫这些名字，而真正启动子 agent 的工具叫 `Agent`，不在清单上——所以后台子 agent 的进程在回合一结束就被拆了。把 `Agent` 加进清单只会更糟：子 agent 回合很常见，而且检查时通常早就跑完了，靠名字判断会让绝大多数回合白白挂住进程。
 
@@ -418,6 +418,8 @@ Anchor 规则是**第三条**具体规则，而且它跟同一个 provider 上�
 
 工具名清单收缩成唯一一条兜底：`run_in_background: true` 的 `Bash`，而且只在"压根没有快照可以覆盖它"时才用得上——要么是 SDK 拒绝了钩子形状、走官方原有的重试把 hooks 删掉了，要么是这次运行在钩子还没说过话就中途出错了。**没有专门的标记记录这件事**：没注册上的钩子永远不会触发，所以"快照还是 null"本身就是"注册失败"这个状态，再加一个 `hooksActive` 标记只是把同一句话说两遍。只要有快照，就由快照独自决定，所以流里出现过 `Agent` 但快照是空的那个回合照样释放。留着这唯一一个名字是因为后台 shell 是 CLI 清扫最快的一类——五秒宽限期，来不及等钩子往返。`Agent` 刻意不加。
 
+一个回合可以同时起好几件后台活儿——`Bash run_in_background` 加一次 `Agent` 委派，快照里就是两条——而且它们各自会用一个后续回合回来报信。**挂起**这一半快照天然就管住了：只要列表非空就继续挂，谁先结束都一样。**通知**那一半原本没管住：`notifyBackgroundWorkCompleted` 在"正挂着、且不是在回答推进来的提问"的第一个 `result` 上就发了，于是快照里明明还列着兄弟任务，用户却已经被告知后台工作做完了——等于通知了一份还不存在的结果。现在它还要再满足"这次读数正好结束挂起"，所以一组后台活儿只报一次，在最后一件落地时报。随之而来有两处收窄，是认下来的、不粉饰：被闲置上限放掉（而不是自己报回来）的活儿根本走不到这个分支，所以以前会发一条内容不对的通知，现在是静悄悄结束；另外，如果最后一件恰好在"回答推进来的追问"的那个 `result` 上结束，会被原有的 `!answersFollowUpPrompt` 条件吞掉——同一个事件上分不出这两件事。
+
 另一半修的是 `finally`：以前不管循环为什么退出，它都**无条件**释放 stdin。于是一次偶发的 SDK 报错或断连，和用户主动结束一样会把后台工作杀掉。现在要同时满足两件事才交给闲置上限去收尾："stdin 还没被关过"（就是 `inputReleased` 这个标记，所以中止、被顶替、正常结束的回合都会先自己释放，拆除行为和以前一样），并且"账本说还有活儿在跑"**或者** `heldForBackgroundWork` 说这次运行本来就在为后台工作挂着。后面这半句不是多余的：靠兜底信号挂住的那次运行，信号在开启挂起的那个 `result` 里就已经被清掉了，只问账本反而会把"挂起本来要保护的那份工作"拆掉。上限没武装的话会补上一次，保证不会永远挂着。这条分支还必须 `forgetHeldTurn`：进程活着但它的消息循环已经死了，所以第 29 条那个句柄必须从登记表里摘掉，否则下一回合会把提问推进一个永远不会产出 `result` 的循环里，直接卡死。代价是：这样失败的一次运行会把 CLI 进程（和它的 MCP server）留到上限为止，而 `removeSession` 已经跑过了，后面的回合也没法提前收——上限是唯一的兜底。
 
-**同步官方时怎么办：** 保留我的。如果官方动过 `DEFERRED_WORK_TOOLS` 或 `startsBackgroundWork`，照样采用删除——这一条是换机制，靠名字的规则看不见子 agent。runtime 里的冲突集中在五处：删掉的清单、`hooks` 对象、丢弃 hooks 的那个 `catch`、`result` 里的挂起判断、以及 `finally` 块。`result` 的判断里还留着第 29 条的兜底子句（`answersFollowUpPrompt && heldForBackgroundWork`），用于没有快照的情况，两者要一起保留。如果官方哪天自己注册了 `Stop` 钩子，要合并回调而不是整体替换——SDK 每个事件收的是一个列表，但官方的 `Notification` 和这里的是同一个对象里的兄弟项，整体取一边会丢掉另一边。
+**同步官方时怎么办：** 保留我的。如果官方动过 `DEFERRED_WORK_TOOLS` 或 `startsBackgroundWork`，照样采用删除——这一条是换机制，靠名字的规则看不见子 agent。runtime 里的冲突集中在五处：删掉的清单、`hooks` 对象、丢弃 hooks 的那个 `catch`、`result` 里的挂起判断、以及 `finally` 块。`result` 的判断里还留着第 29 条的兜底子句（`answersFollowUpPrompt && heldForBackgroundWork`），用于没有快照的情况，两者要一起保留。它还被挪到了"发 complete / 发通知"那段分支**之前**计算，纯粹是为了让通知能拿它做条件——官方要是重排了这个 handler，记得把挂起判断放在前面。如果官方哪天自己注册了 `Stop` 钩子，要合并回调而不是整体替换——SDK 每个事件收的是一个列表，但官方的 `Notification` 和这里的是同一个对象里的兄弟项，整体取一边会丢掉另一边。
