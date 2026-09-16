@@ -438,4 +438,4 @@ Stop 是能看见的那一半。`chat.abort` 现在接受「run 已结束、但�
 
 有一个已知缺口，是继承来的而不是新引入的：第 30 条的 `finally` 分支会在消息循环于挂起期间死掉之后，把进程留给闲置上限收尾，而它会调用 `forgetHeldTurn`，于是标志被清掉，但那份工作技术上还在跑。反正 Stop 也够不着它（`removeSession` 已经跑过，`abortClaudeSDKSession` 什么都找不到），显示一个按了没反应的 Stop 比不显示更糟。
 
-**同步官方时怎么办：** 保留我的。登记表和网关的改动都是增量的，紧挨着行为未变的代码；如果官方重写了 `handleChatAbort`，要把「或者还挂着后台工作」这一支重新加回去，而不是退回到 `run.status !== 'running'`，否则 Stop 又会在 `result` 时消失。如果官方自己引入了某种「会话忙碌」的概念，**不要**把后台工作并进去——那一个标志正是这一条要防的东西，它会直接破坏第 29 条，而不只是看着别扭。`server/modules/websocket/index.ts` 末尾那个只为副作用的 import 必须留在最后：它写入的正是上面那些行导出的登记表。
+**同步官方时怎么办：** 保留我的。登记表和网关的改动都是增量的，紧挨着行为未变的代码；如果官方重写了 `handleChatAbort`，要把「或者还挂着后台工作」这一支重新加回去，而不是退回到 `run.status !== 'running'`，否则 Stop 又会在 `result` 时消失。如果官方自己引入了某种「会话忙碌」的概念，**不要**把后台工作并进去——那一个标志正是这一条要防的东西，它会直接破坏第 29 条，而不只是看着别扭。`server/modules/websocket/index.ts` 末尾那个只为副作用的 import 必须留在最后：它写入的正是上面那些行导出的登记表。这一条（连同第 29、30 条）实现的决定见 `docs/adr/0012-turn-in-flight-and-background-work-outstanding-are-separate-signals.md`——包括它否决掉的方案（单一 busy 标志、task 生命周期计数器、让后台工作脱离父进程独立存活）以及让这三条一并退休的条件。

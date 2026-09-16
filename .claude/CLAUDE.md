@@ -19,7 +19,7 @@ npm run client             # frontend only
 
 npm run build               # build:client + build:server
 npm run typecheck           # tsc --noEmit for both src/ and server/
-npm run lint / lint:fix     # eslint src/ server/
+npm run lint / lint:fix     # oxlint src/ server/
 npm test                    # backend: node's test runner via tsx, globs server/**/*.test.{ts,js}
 npm run test:client         # frontend: same runner, globs src/**/*.test.{ts,tsx}
 
@@ -35,7 +35,7 @@ A test file that calls `node:test`'s `mock.module()` (e.g. `server/modules/provi
 
 `test:client` runs under a plain `tsx` runner with no Vite, so a module that reads `import.meta.env` at module scope cannot be imported from a test at all — and neither can anything importing it, which is most of `src/`. Guard such reads with `?.` (see `src/shared/utils.ts`); Vite still replaces them statically.
 
-`postinstall` runs `scripts/fix-node-pty.js` (native module patch). `prepare` installs husky hooks; pre-commit runs `lint-staged` (eslint on staged `src/**` and `server/**` files), commit-msg enforces Conventional Commits via commitlint.
+`postinstall` runs `scripts/fix-node-pty.js` (native module patch). `prepare` installs husky hooks; pre-commit runs `lint-staged` (oxlint on staged `src/**` and `server/**` files), commit-msg enforces Conventional Commits via commitlint.
 
 ## Shell gotchas (Windows + Git Bash)
 
@@ -86,7 +86,7 @@ Remember to stop the dev server and kill any leftover process on ports 3001/5173
 
 ## Backend architecture (`server/`)
 
-Backend code follows a strict feature-module layout enforced by ESLint (`eslint-plugin-boundaries`, see `eslint.config.js`) — violations are lint **errors**, not style nits. Full rules: `.agents/skills/backend-module-standards/SKILL.md` (auto-loaded per `AGENTS.md` for any `server/` work).
+Backend code follows a strict feature-module layout enforced by oxlint (`eslint-plugin-boundaries`, bridged in via oxlint's `import` plugin — see `.oxlintrc.json`) — violations are lint **errors**, not style nits. Full rules: `.agents/skills/backend-module-standards/SKILL.md` (auto-loaded per `AGENTS.md` for any `server/` work).
 
 - Each feature lives in `server/modules/<feature>/` (e.g. `auth`, `git`, `providers`, `websocket`, `database`, `plugins`, `taskmaster`, `worktrees`, `browser-use`). New backend module files must be TypeScript.
 - Every module has an `index.ts` **barrel** exposing only its public API. Cross-module imports MUST go through that barrel — deep-importing another module's routes/services/internals is a lint error.
@@ -128,7 +128,7 @@ Vite dev server proxies `/api`, `/ws`, `/shell`, `/plugin-ws` to the Express bac
 ## Conventions
 
 - Commit messages follow Conventional Commits (`type(scope): description`, imperative present tense) — enforced by commitlint on commit.
-- Import order is enforced by `eslint-plugin-import-x` (`builtin → external → internal → parent → sibling → index`, blank line between groups) on both `src/` and `server/`.
+- Import order is enforced by `eslint-plugin-import-x` (bridged in via oxlint, see `.oxlintrc.json`) (`builtin → external → internal → parent → sibling → index`, blank line between groups) on both `src/` and `server/`.
 - All Claude Code tools are disabled by default in the UI itself (a safety default for end users of the app, not for development in this repo) — enabled per-tool from Settings.
 
 ## Agent skills
