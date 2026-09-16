@@ -222,6 +222,7 @@ export type MessageKind =
 export type GatewayEventKind =
   | 'chat_subscribed'
   | 'session_upserted'
+  | 'session_background_work'
   | 'loading_progress'
   | 'protocol_error';
 
@@ -267,6 +268,24 @@ export type SessionUpsertedEvent = {
     lastActivity: string;
   };
   project: SessionUpsertedProject | null;
+  timestamp: string;
+};
+
+/**
+ * The `session_background_work` delta, built only by
+ * `modules/websocket/services/background-work-broadcast.service.ts`.
+ *
+ * `outstanding` answers "does this session still hold work that would die with
+ * its provider process?" — orthogonal to whether a turn is in flight. It is the
+ * only thing that keeps Stop available once a turn has already reported
+ * `complete`, and it must never be read as "busy": a session that is only
+ * background-work-outstanding still accepts the next prompt, which is what keeps
+ * the work alive.
+ */
+export type BackgroundWorkEvent = {
+  kind: 'session_background_work';
+  sessionId: string;
+  outstanding: boolean;
   timestamp: string;
 };
 

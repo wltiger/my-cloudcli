@@ -249,6 +249,11 @@
     },
     "providers": {
       "assistant": "Assistant"
+    },
+    "backgroundWork": {
+      "label": "后台任务仍在运行",
+      "stop": "停止后台任务",
+      "stopHint": "现在停止会一并结束仍在运行的后台任务，而不只是中断当前回复。"
     }
   },
   "projectSelection": {

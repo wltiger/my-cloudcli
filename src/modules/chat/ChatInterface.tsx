@@ -21,6 +21,7 @@ import { useSessionClear } from '@/modules/chat/hooks/useSessionClear';
 import { useSessionFork } from '@/modules/chat/hooks/useSessionFork';
 import { useSessionStore } from '@/modules/chat/hooks/useSessionStore';
 import {
+  useBackgroundWorkSessionIds,
   useProcessingSessions,
   useSessionProtectionActions,
 } from '@/shared/context/SessionProtectionContext';
@@ -74,9 +75,11 @@ function ChatInterface({
   const { subscribe } = useWebSocket();
   const { t } = useTranslation('chat');
   const processingSessions = useProcessingSessions();
+  const backgroundWorkSessionIds = useBackgroundWorkSessionIds();
   const {
     markSessionProcessing: onSessionProcessing,
     markSessionIdle: onSessionIdle,
+    markSessionBackgroundWork: onSessionBackgroundWork,
   } = useSessionProtectionActions();
 
   const sessionStore = useSessionStore();
@@ -135,6 +138,7 @@ function ChatInterface({
     addMessage,
     sessionActivity,
     isProcessing,
+    hasBackgroundWorkOutstanding,
     canAbortSession,
     currentSessionId,
     setCurrentSessionId,
@@ -170,6 +174,7 @@ function ChatInterface({
     externalMessageUpdate,
     newSessionTrigger,
     processingSessions,
+    backgroundWorkSessionIds,
     onSessionIdle,
     resetStreamingState,
     statusCheckSentAtRef,
@@ -373,6 +378,7 @@ function ChatInterface({
     statusCheckSentAtRef,
     onSessionProcessing,
     onSessionIdle,
+    onSessionBackgroundWork,
     onWebSocketReconnect: handleWebSocketReconnect,
     requestLatestMessages,
     sessionStore,
@@ -557,6 +563,7 @@ function ChatInterface({
           sessionTitle={sessionTitle}
           activity={sessionActivity}
           isLoading={isProcessing}
+          backgroundWorkOutstanding={hasBackgroundWorkOutstanding}
           onAbortSession={handleAbortSession}
           permissionMode={permissionMode}
           availablePermissionModes={availablePermissionModes}

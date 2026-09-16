@@ -180,6 +180,19 @@ export type MarkSessionIdle = (
   opts?: { ifStartedBefore?: number },
 ) => void;
 
+/**
+ * Records whether a session still holds work that would die with its provider
+ * process — a backgrounded command, a subagent still going.
+ *
+ * Deliberately not part of `MarkSessionProcessing`/`MarkSessionIdle` above: a
+ * session can be idle and still holding work, and that state must keep Stop
+ * available and the transcript refreshing without keeping the next prompt out.
+ */
+export type MarkSessionBackgroundWork = (
+  sessionId: string | null | undefined,
+  outstanding: boolean,
+) => void;
+
 /** Replaces the whole processing map with the server's view, used by the periodic running-sessions poll. */
 export type SyncProcessingSessions = (
   sessions: readonly SessionActivitySnapshot[],

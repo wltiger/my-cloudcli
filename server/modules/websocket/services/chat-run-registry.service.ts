@@ -1,4 +1,5 @@
 import { sessionsDb } from '@/modules/database/index.js';
+import { broadcastBackgroundWork } from '@/modules/websocket/services/background-work-broadcast.service.js';
 import { ChatSessionWriter } from '@/modules/websocket/services/chat-session-writer.service.js';
 import { broadcastSessionUpserted } from '@/modules/websocket/services/session-upsert-broadcast.service.js';
 import type {
@@ -58,6 +59,28 @@ const MAX_BUFFERED_EVENTS_PER_RUN = 5000;
  * path all consult it instead of asking each provider runtime individually.
  */
 const runs = new Map<string, ChatRun>();
+
+/**
+ * Sessions whose provider process is still holding work that would die with it —
+ * a backgrounded shell command, a subagent still going — keyed by app session id.
+ *
+ * Deliberately a second, independent state rather than another `ChatRunStatus`
+ * value, and deliberately keyed by session rather than stored on a run:
+ *
+ * - As a status value it would silently change what "running" means for every
+ *   existing consumer, starting with `startRun`'s own busy guard and the
+ *   scheduled-message dispatcher — and blocking a prompt is exactly what kills
+ *   the work, because the provider runtime can only keep the process alive by
+ *   being handed the next prompt (it reuses the held process for it).
+ * - As a field on a run it would not survive: the work outlives the turn that
+ *   started it, that run is evicted minutes later, and the follow-up prompt gets
+ *   a run of its own.
+ *
+ * Nothing in this file reads it. It exists so the UI can show the hold, keep
+ * Stop available through it, and keep refreshing the transcript the background
+ * work is still writing to — never to make a session unavailable.
+ */
+const backgroundWorkSessions = new Set<string>();
 
 function evictRunLater(appSessionId: string): void {
   const timer = setTimeout(() => {
@@ -177,6 +200,12 @@ export const chatRunRegistry = {
     connection: RealtimeClientConnection | null;
     userId: string | number | null;
   }): ChatRun | null {
+    // Turn-in-flight only, on purpose. A session whose previous turn left
+    // background work behind is admitted like any other: the provider runtime
+    // hands that prompt to the process it is already holding open, which is both
+    // what keeps the work alive and what the CLI itself reads as "there is more
+    // to do, do not sweep". Refusing here would be the one thing that cannot
+    // work.
     const existing = runs.get(input.appSessionId);
     if (existing && existing.status === 'running') {
       return null;
@@ -213,8 +242,45 @@ export const chatRunRegistry = {
     return runs.get(appSessionId);
   },
 
+  /**
+   * Whether a turn is producing output right now — and nothing else.
+   *
+   * Every caller that uses this to decide "may a prompt go in?" depends on it
+   * staying that narrow; see `backgroundWorkSessions` for the state that must
+   * not be folded in here.
+   */
   isProcessing(appSessionId: string): boolean {
     return runs.get(appSessionId)?.status === 'running';
+  },
+
+  /**
+   * Records whether a session still holds work that would die with its provider
+   * process, and announces the change to every connected client.
+   *
+   * Called by the provider runtime as it parks a process for outstanding work
+   * and again when that process is released (an ordinary turn end, an explicit
+   * Stop, the idle ceiling, a superseding run).
+   */
+  setBackgroundWorkOutstanding(appSessionId: string, outstanding: boolean): void {
+    if (!appSessionId || backgroundWorkSessions.has(appSessionId) === outstanding) {
+      return;
+    }
+
+    if (outstanding) {
+      backgroundWorkSessions.add(appSessionId);
+    } else {
+      backgroundWorkSessions.delete(appSessionId);
+    }
+
+    broadcastBackgroundWork(appSessionId, outstanding);
+  },
+
+  /**
+   * Whether a session holds work that outlives its turn. Independent of
+   * `isProcessing`: both, either, or neither can be true at a given moment.
+   */
+  hasBackgroundWorkOutstanding(appSessionId: string): boolean {
+    return backgroundWorkSessions.has(appSessionId);
   },
 
   listRunningRuns(): Array<{
@@ -306,5 +372,6 @@ export const chatRunRegistry = {
    */
   clearAll(): void {
     runs.clear();
+    backgroundWorkSessions.clear();
   },
 };

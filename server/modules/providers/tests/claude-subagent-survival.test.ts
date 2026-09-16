@@ -327,6 +327,13 @@ test('Claude subagent work surviving a turn boundary and the next prompt', async
       assert.equal(live.promptStreamClosed, false, 'the subagent keeps the process held past its turn');
       assert.deepEqual(first.kinds(), ['text', 'complete'], 'the user is told the turn finished all the same');
 
+      // The turn is over and the session is not processing, yet the work is
+      // alive — the two states the UI has to be able to tell apart, so that Stop
+      // stays reachable and the transcript keeps refreshing without any of it
+      // standing in the way of the follow-up prompt below.
+      assert.equal(chatRunRegistry.isProcessing('app-subagent'), false);
+      assert.equal(chatRunRegistry.hasBackgroundWorkOutstanding('app-subagent'), true);
+
       // The follow-up: unchanged settings, so it belongs in the live process.
       const second = new FakeConnection();
       const secondRun = startRun('app-subagent', second);
@@ -422,6 +429,11 @@ test('Claude subagent work surviving a turn boundary and the next prompt', async
 
       assert.equal(live.promptStreamClosed, true, 'nothing outstanding, so the process is let go');
       assert.equal(backgroundNotifications.length, 1, 'and the user is told the investigation finished');
+      assert.equal(
+        chatRunRegistry.hasBackgroundWorkOutstanding('app-subagent'),
+        false,
+        'releasing the process also retires the hold the UI was showing',
+      );
     });
   });
 

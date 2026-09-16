@@ -8,9 +8,12 @@ import {
 import type { ReactNode } from 'react';
 
 import {
+  useBackgroundWorkSessions,
+} from '@/shared/hooks/useBackgroundWorkSessions';
+import {
   useSessionProtection,
 } from '@/shared/hooks/useSessionProtection';
-import type { IsSessionProcessing, MarkSessionIdle, MarkSessionProcessing, SessionActivityMap, SyncProcessingSessions } from '@/shared/types';
+import type { IsSessionProcessing, MarkSessionBackgroundWork, MarkSessionIdle, MarkSessionProcessing, SessionActivityMap, SyncProcessingSessions } from '@/shared/types';
 import { api } from '@/shared/api';
 
 type RunningSessionApiItem = {
@@ -31,11 +34,13 @@ type SessionProtectionActions = {
   markSessionIdle: MarkSessionIdle;
   syncProcessingSessions: SyncProcessingSessions;
   isSessionProcessing: IsSessionProcessing;
+  markSessionBackgroundWork: MarkSessionBackgroundWork;
 };
 
 const SessionProtectionStateContext = createContext<SessionActivityMap | null>(null);
 const SessionProtectionActionsContext = createContext<SessionProtectionActions | null>(null);
 const BusySessionIdsContext = createContext<ReadonlySet<string> | null>(null);
+const BackgroundWorkSessionIdsContext = createContext<ReadonlySet<string> | null>(null);
 
 /**
  * The set of session ids currently producing a response, with a stable identity
@@ -80,6 +85,7 @@ export function SessionProtectionProvider({ children }: { children: ReactNode })
     syncProcessingSessions,
     isSessionProcessing,
   } = useSessionProtection();
+  const { backgroundWorkSessionIds, markSessionBackgroundWork } = useBackgroundWorkSessions();
 
   const refreshRunningSessions = useCallback(async () => {
     try {
@@ -130,9 +136,11 @@ export function SessionProtectionProvider({ children }: { children: ReactNode })
       markSessionIdle,
       syncProcessingSessions,
       isSessionProcessing,
+      markSessionBackgroundWork,
     }),
     [
       isSessionProcessing,
+      markSessionBackgroundWork,
       markSessionIdle,
       markSessionProcessing,
       syncProcessingSessions,
@@ -143,13 +151,30 @@ export function SessionProtectionProvider({ children }: { children: ReactNode })
 
   return (
     <SessionProtectionActionsContext.Provider value={actions}>
-      <BusySessionIdsContext.Provider value={busySessionIds}>
-        <SessionProtectionStateContext.Provider value={processingSessions}>
-          {children}
-        </SessionProtectionStateContext.Provider>
-      </BusySessionIdsContext.Provider>
+      <BackgroundWorkSessionIdsContext.Provider value={backgroundWorkSessionIds}>
+        <BusySessionIdsContext.Provider value={busySessionIds}>
+          <SessionProtectionStateContext.Provider value={processingSessions}>
+            {children}
+          </SessionProtectionStateContext.Provider>
+        </BusySessionIdsContext.Provider>
+      </BackgroundWorkSessionIdsContext.Provider>
     </SessionProtectionActionsContext.Provider>
   );
+}
+
+/**
+ * The sessions still holding background work after their turn ended.
+ *
+ * Never a substitute for `useBusySessionIdSet`: membership here means "work is
+ * alive, keep Stop available and keep the transcript refreshing", never "this
+ * session is unavailable".
+ */
+export function useBackgroundWorkSessionIds(): ReadonlySet<string> {
+  const backgroundWorkSessionIds = useContext(BackgroundWorkSessionIdsContext);
+  if (!backgroundWorkSessionIds) {
+    throw new Error('useBackgroundWorkSessionIds must be used within SessionProtectionProvider');
+  }
+  return backgroundWorkSessionIds;
 }
 
 /**

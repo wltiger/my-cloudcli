@@ -6,6 +6,11 @@ import type { SessionActivity } from '@/shared/types';
 
 type ActivityIndicatorProps = {
   activity: SessionActivity | null;
+  /**
+   * Work an earlier turn left running — a backgrounded command, a subagent still
+   * investigating. Orthogonal to `activity`: either, both, or neither.
+   */
+  backgroundWorkOutstanding?: boolean;
   onAbort?: () => void;
   isInputFocused?: boolean;
 };
@@ -24,14 +29,26 @@ const EXIT_ANIMATION_MS = 220;
 /**
  * Minimal response-in-progress indicator, in the spirit of the inline status
  * lines in Claude Code / Codex / OpenCode: a shimmering activity label, the
- * elapsed time, and an interrupt affordance. Rendered only while the viewed
- * session has an entry in the processing map; it disappears the instant that
- * entry is removed.
+ * elapsed time, and an interrupt affordance. Rendered while the viewed session
+ * has an entry in the processing map — and, after that entry is gone, for as
+ * long as the session still holds background work.
+ *
+ * That second state is the one that used to be invisible: a turn reported
+ * complete, the indicator vanished, and a subagent or backgrounded command kept
+ * running with no sign of it and no way to stop it. It reads differently on
+ * purpose — no shimmer, no clock — because nothing is answering the user; it is
+ * there to say the work is alive and to keep Stop within reach. It never blocks
+ * the composer, which stays a send button throughout.
  *
  * Rendered by chat's ChatComposer above the input so the user can see and
- * interrupt the in-flight turn without leaving the composer.
+ * interrupt without leaving the composer.
  */
-export default function ActivityIndicator({ activity, onAbort, isInputFocused = false }: ActivityIndicatorProps) {
+export default function ActivityIndicator({
+  activity,
+  backgroundWorkOutstanding = false,
+  onAbort,
+  isInputFocused = false,
+}: ActivityIndicatorProps) {
   const { t } = useTranslation('chat');
   const [renderedActivity, setRenderedActivity] = useState<SessionActivity | null>(activity);
   const [isExiting, setIsExiting] = useState(false);
@@ -47,6 +64,14 @@ export default function ActivityIndicator({ activity, onAbort, isInputFocused = 
 
     if (!renderedActivity) return;
 
+    // Handing over to the background-work tab, not leaving: animating the turn
+    // tab out would blink the row away and back for no reason.
+    if (backgroundWorkOutstanding) {
+      setRenderedActivity(null);
+      setIsExiting(false);
+      return;
+    }
+
     setIsExiting(true);
     const timer = setTimeout(() => {
       setRenderedActivity(null);
@@ -54,7 +79,7 @@ export default function ActivityIndicator({ activity, onAbort, isInputFocused = 
     }, EXIT_ANIMATION_MS);
 
     return () => clearTimeout(timer);
-  }, [activity, renderedActivity]);
+  }, [activity, backgroundWorkOutstanding, renderedActivity]);
 
   useEffect(() => {
     if (startedAt === null) return;
@@ -64,17 +89,32 @@ export default function ActivityIndicator({ activity, onAbort, isInputFocused = 
     return () => clearInterval(timer);
   }, [startedAt]);
 
-  if (!renderedActivity) return null;
+  if (!renderedActivity && !backgroundWorkOutstanding) return null;
 
   const actionWords = ACTION_KEYS.map((key, i) => t(key, { defaultValue: DEFAULT_ACTION_WORDS[i] }));
-  const label = (renderedActivity.statusText || actionWords[Math.floor(elapsedSeconds / 4) % actionWords.length])
-    .replace(/\.+$/, '');
+  const label = renderedActivity
+    ? (renderedActivity.statusText || actionWords[Math.floor(elapsedSeconds / 4) % actionWords.length])
+      .replace(/\.+$/, '')
+    : t('claudeStatus.backgroundWork.label', { defaultValue: 'Background work still running' });
 
   const minutes = Math.floor(elapsedSeconds / 60);
   const seconds = elapsedSeconds % 60;
   const elapsedLabel = minutes < 1
     ? t('claudeStatus.elapsed.seconds', { count: seconds, defaultValue: '{{count}}s' })
     : t('claudeStatus.elapsed.minutesSeconds', { minutes, seconds, defaultValue: '{{minutes}}m {{seconds}}s' });
+
+  // Stop tears the whole process down, children included, so while background
+  // work is outstanding it is no longer only "interrupt this reply" — say so
+  // rather than letting a user discard a half-hour build by reflex.
+  const stopLabel = renderedActivity
+    ? t('claudeStatus.stop', { defaultValue: 'Stop' })
+    : t('claudeStatus.backgroundWork.stop', { defaultValue: 'Stop background work' });
+  const stopHint = backgroundWorkOutstanding
+    ? t('claudeStatus.backgroundWork.stopHint', {
+      defaultValue: 'Stopping now also ends the background work that is still running, not just the reply.',
+    })
+    : stopLabel;
+  const canStop = backgroundWorkOutstanding || Boolean(renderedActivity?.canInterrupt);
   const tabSurfaceClassName = [
     'chat-activity-tab inline-flex h-8 items-center rounded-b-none rounded-t-lg border border-b-0 bg-card px-3 text-xs transition-all duration-200',
     isInputFocused
@@ -90,22 +130,34 @@ export default function ActivityIndicator({ activity, onAbort, isInputFocused = 
     >
       <div className="flex items-end justify-between gap-2">
         <div className={`${tabSurfaceClassName} gap-2`}>
-          <span className="h-1.5 w-1.5 shrink-0 animate-pulse rounded-full bg-primary" aria-hidden />
-          <Shimmer className="font-medium">{`${label}…`}</Shimmer>
-          <span className="tabular-nums text-muted-foreground/60">{elapsedLabel}</span>
+          <span
+            className={`h-1.5 w-1.5 shrink-0 rounded-full ${
+              renderedActivity ? 'animate-pulse bg-primary' : 'bg-amber-500'
+            }`}
+            aria-hidden
+          />
+          {renderedActivity ? (
+            <>
+              <Shimmer className="font-medium">{`${label}…`}</Shimmer>
+              <span className="tabular-nums text-muted-foreground/60">{elapsedLabel}</span>
+            </>
+          ) : (
+            <span className="font-medium text-muted-foreground">{label}</span>
+          )}
         </div>
 
-        {renderedActivity.canInterrupt && onAbort && (
+        {canStop && onAbort && (
           <button
             type="button"
             onClick={onAbort}
             className={`${tabSurfaceClassName} pointer-events-auto gap-1.5 text-muted-foreground hover:bg-card hover:text-destructive`}
-            aria-label={t('claudeStatus.stop', { defaultValue: 'Stop' })}
+            aria-label={stopLabel}
+            title={stopHint}
           >
             <svg className="h-2.5 w-2.5 fill-current" viewBox="0 0 24 24" aria-hidden>
               <rect x="5" y="5" width="14" height="14" rx="2" />
             </svg>
-            <span>{t('claudeStatus.stop', { defaultValue: 'Stop' })}</span>
+            <span>{stopLabel}</span>
             <kbd className="hidden rounded border border-border/60 px-1 text-[10px] text-muted-foreground/70 sm:inline-block">
               esc
             </kbd>

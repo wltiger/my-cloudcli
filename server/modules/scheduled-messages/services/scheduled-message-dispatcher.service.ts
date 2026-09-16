@@ -87,6 +87,11 @@ export async function dispatchQueuedMessages(runtime: ProviderRuntimeGateway): P
   let claimed = 0;
 
   await Promise.all(candidates.map(async (candidate) => {
+    // Turn-in-flight only: `isProcessing` deliberately says nothing about
+    // background work a previous turn left running. Holding this message back
+    // for that would strand it behind work that has no deadline, and sending it
+    // is what keeps that work alive — the runtime routes it into the process it
+    // is already holding open rather than starting a new one.
     if (chatRunRegistry.isProcessing(candidate.sessionId)) {
       return;
     }

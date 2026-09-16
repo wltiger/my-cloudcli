@@ -278,6 +278,11 @@
     },
     "providers": {
       "assistant": "Assistant"
+    },
+    "backgroundWork": {
+      "label": "Background work still running",
+      "stop": "Stop background work",
+      "stopHint": "Stopping now also ends the background work that is still running, not just the reply."
     }
   },
   "projectSelection": {

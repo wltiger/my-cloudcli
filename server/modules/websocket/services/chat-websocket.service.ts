@@ -433,14 +433,44 @@ async function handleChatAbort(
     return;
   }
 
+  // Stop covers both of the session's live states, not just the noisy one: a
+  // turn producing output, and a process held open for background work after its
+  // turn already reported `complete`. The second is the only way to abort a
+  // long-running background task at all — before this, Stop vanished the instant
+  // the turn ended and the work ran on unreachable until the idle ceiling.
   const run = chatRunRegistry.getRun(sessionId);
-  if (!run || run.status !== 'running') {
+  const isTurnInFlight = run?.status === 'running';
+  const holdsBackgroundWork = chatRunRegistry.hasBackgroundWorkOutstanding(sessionId);
+  if (!isTurnInFlight && !holdsBackgroundWork) {
     sendProtocolError(ws, 'NO_ACTIVE_RUN', `Session "${sessionId}" has no active run.`, sessionId);
     return;
   }
 
-  const success = await dependencies.runtime.abort(run.provider, sessionId);
+  // A hold routinely outlives its run's entry in the registry, so the provider
+  // comes from the session row when there is no run left to ask.
+  const provider = run?.provider ?? (sessionsDb.getSessionById(sessionId)?.provider as LLMProvider | undefined);
+  if (!provider) {
+    sendProtocolError(ws, 'SESSION_NOT_FOUND', `Session "${sessionId}" was not found.`, sessionId);
+    return;
+  }
 
+  const success = await dependencies.runtime.abort(provider, sessionId);
+
+  // Only on a successful abort — and this asymmetry is load-bearing. A failed
+  // one means the runtime could not interrupt the process: it is still alive,
+  // still holding the work, and still in the runtime's own session map, so a
+  // second Stop can reach it. Clearing the flag anyway would take the Stop
+  // button away from work that is still running and now unreachable, which is
+  // the exact failure this state exists to prevent. Leaving it set is also
+  // self-correcting: whichever way the process eventually goes — a retried
+  // Stop, the idle ceiling, a superseding run — releases its input stream, and
+  // that is what retires the hold.
+  if (success) {
+    chatRunRegistry.setBackgroundWorkOutstanding(sessionId, false);
+  }
+
+  // A no-op when only background work was outstanding: that turn's terminal
+  // `complete` was sent long ago, and a second one would be dropped anyway.
   chatRunRegistry.completeRun(sessionId, {
     exitCode: success ? 0 : 1,
     aborted: true,
@@ -496,6 +526,10 @@ function handleChatSubscribe(
       kind: 'chat_subscribed',
       sessionId,
       isProcessing,
+      // Orthogonal to `isProcessing`, and carried on the ack because that is the
+      // one frame a client is guaranteed after a reload or a reconnect — the
+      // `session_background_work` deltas it missed while away are gone.
+      backgroundWorkOutstanding: chatRunRegistry.hasBackgroundWorkOutstanding(sessionId),
       lastSeq: run?.lastSeq ?? 0,
       pendingPermissions,
       timestamp: new Date().toISOString(),
@@ -583,6 +617,10 @@ export async function runDetachedChatTurn(
     return { started: false, error: `Provider "${provider}" is not available.` };
   }
 
+  // Turn-in-flight only. A session that is merely holding background work is not
+  // "busy" here and must not be interrupted: aborting it would kill the very
+  // work the hold exists to protect, when the right move is to let this turn go
+  // through — the runtime feeds it to the held process, which keeps it alive.
   const activeRun = chatRunRegistry.getRun(input.sessionId);
   if (activeRun && activeRun.status === 'running') {
     if (!input.interruptActiveRun) {

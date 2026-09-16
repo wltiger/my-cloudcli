@@ -12,3 +12,8 @@ export { sessionsService } from './services/sessions.service.js';
 
 export { initializeSessionsWatcher } from './services/sessions-watcher.service.js';
 export { closeSessionsWatcher } from './services/sessions-watcher.service.js';
+
+// watchHeldTurns: subscribed by the websocket module's background-work bridge,
+// which turns "the Claude runtime is holding a process for outstanding work"
+// into the run registry state the UI reads.
+export { watchHeldTurns } from './list/claude/claude-turn-reuse.js';

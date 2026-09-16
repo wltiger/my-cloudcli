@@ -80,6 +80,45 @@ type LiveTurnSettings = {
  */
 const heldTurns = new Map<string, HeldTurnHandle>();
 
+/** Told whenever a session starts or stops holding a process for outstanding work. */
+type HeldTurnObserver = (sessionKey: string, outstanding: boolean) => void;
+
+let heldTurnObserver: HeldTurnObserver | null = null;
+
+/**
+ * Registers the one observer of "is this session holding work that would die
+ * with its process?".
+ *
+ * This map is the only place that knows the answer, and it sees both edges: a
+ * run publishes itself here the moment it parks with work outstanding, and
+ * unpublishes when its stdin is released for any reason.
+ *
+ * It is a callback rather than a direct write into the chat run registry because
+ * the dependency only runs one way: the websocket module knows about providers,
+ * not the reverse. Its bridge subscribes on load and forwards each edge into the
+ * registry, which is what puts the state in front of the UI.
+ *
+ * `sessionKey` is the app session id for every run the chat gateway starts,
+ * which is the key the registry uses. A direct API caller with no app session
+ * parks under a provider-native id instead; it has no run in the registry and no
+ * UI watching it, so the report simply has no audience.
+ */
+export function watchHeldTurns(observer: HeldTurnObserver | null): void {
+  heldTurnObserver = observer;
+}
+
+function publishBackgroundWorkState(sessionKey: string, outstanding: boolean): void {
+  try {
+    heldTurnObserver?.(sessionKey, outstanding);
+  } catch (error) {
+    // Never let a reporting failure change whether a process is held.
+    console.warn(
+      '[Claude SDK] Could not report background-work state for a held turn:',
+      (error as Error)?.message || error,
+    );
+  }
+}
+
 function readStringList(value: unknown): string[] {
   return Array.isArray(value)
     ? value.filter((entry): entry is string => typeof entry === 'string')
@@ -264,6 +303,7 @@ export function registerHeldTurn(sessionKey: string, handle: HeldTurnHandle | nu
     return;
   }
   heldTurns.set(sessionKey, handle);
+  publishBackgroundWorkState(sessionKey, true);
 }
 
 /**
@@ -280,6 +320,13 @@ export function forgetHeldTurn(sessionKey: string, handle: HeldTurnHandle | null
   if (heldTurns.get(sessionKey) === handle) {
     heldTurns.delete(sessionKey);
   }
+  // Reported from the map's state rather than from "did this call delete
+  // something", because the two differ in both directions. A handle claimed by a
+  // follow-up turn is already out of the map while its work carries on, so the
+  // release that ends that turn has nothing to delete and would otherwise leave
+  // the session showing a hold forever. And a stale handle whose session has
+  // since parked a newer run must not retire that newer run's hold.
+  publishBackgroundWorkState(sessionKey, heldTurns.has(sessionKey));
 }
 
 /**

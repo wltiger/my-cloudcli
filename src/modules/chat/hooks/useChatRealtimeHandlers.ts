@@ -1,7 +1,7 @@
 import { useEffect, useRef } from 'react';
 import type { Dispatch, MutableRefObject, SetStateAction } from 'react';
 
-import type { ServerEvent,MarkSessionIdle,MarkSessionProcessing,PendingPermissionRequest,ProjectSession,LLMProvider,NormalizedMessage } from '@/shared/types';
+import type { ServerEvent,MarkSessionBackgroundWork,MarkSessionIdle,MarkSessionProcessing,PendingPermissionRequest,ProjectSession,LLMProvider,NormalizedMessage } from '@/shared/types';
 import { showCompletionTitleIndicator } from '@/modules/chat/utils/pageTitleNotification';
 import { playChatCompletionSound, playNotificationSound } from '@/shared/utils';
 import type { SessionStore } from '@/modules/chat/hooks/useSessionStore';
@@ -36,6 +36,13 @@ type UseChatRealtimeHandlersArgs = {
   statusCheckSentAtRef: MutableRefObject<Map<string, number>>;
   onSessionProcessing?: MarkSessionProcessing;
   onSessionIdle?: MarkSessionIdle;
+  /**
+   * Records whether a session still holds work that outlives its turn. Separate
+   * from `onSessionProcessing`/`onSessionIdle` on purpose: a session can be
+   * idle and still holding work, which is precisely the state that must keep
+   * Stop available without keeping the next prompt out.
+   */
+  onSessionBackgroundWork?: MarkSessionBackgroundWork;
   onWebSocketReconnect?: () => void;
   requestLatestMessages: (sessionId: string, allowNetwork?: boolean) => Promise<void>;
   sessionStore: SessionStore;
@@ -69,6 +76,7 @@ export function useChatRealtimeHandlers({
   statusCheckSentAtRef,
   onSessionProcessing,
   onSessionIdle,
+  onSessionBackgroundWork,
   onWebSocketReconnect,
   requestLatestMessages,
   sessionStore,
@@ -123,10 +131,24 @@ export function useChatRealtimeHandlers({
           return;
         }
 
+        case 'session_background_work': {
+          // Work that outlives a turn started or finished. Broadcast to every
+          // client rather than to a run's audience, because the state routinely
+          // flips after the run that started it has already ended.
+          if (sid) {
+            onSessionBackgroundWork?.(sid, msg.outstanding === true);
+          }
+          return;
+        }
+
         case 'chat_subscribed': {
           // Ack for chat.subscribe: authoritative processing state plus any
           // pending tool-permission prompts for the run.
           if (!sid) return;
+
+          // The ack is the only place a client that was away (reload, dropped
+          // socket) learns about a hold whose delta it missed.
+          onSessionBackgroundWork?.(sid, msg.backgroundWorkOutstanding === true);
 
           if (msg.isProcessing) {
             onSessionProcessing?.(sid);
@@ -364,6 +386,7 @@ export function useChatRealtimeHandlers({
     statusCheckSentAtRef,
     onSessionProcessing,
     onSessionIdle,
+    onSessionBackgroundWork,
     onWebSocketReconnect,
     requestLatestMessages,
     sessionStore,

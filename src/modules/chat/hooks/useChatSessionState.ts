@@ -87,6 +87,8 @@ type UseChatSessionStateArgs = {
   externalMessageUpdate?: number;
   newSessionTrigger?: number;
   processingSessions?: SessionActivityMap;
+  /** Sessions still holding work that would die with their provider process. */
+  backgroundWorkSessionIds?: ReadonlySet<string>;
   onSessionIdle?: MarkSessionIdle;
   resetStreamingState: () => void;
   /** When each session's `chat.subscribe` was last sent; guards stale idle acks. */
@@ -187,6 +189,7 @@ export function useChatSessionState({
   externalMessageUpdate,
   newSessionTrigger,
   processingSessions,
+  backgroundWorkSessionIds,
   onSessionIdle,
   resetStreamingState,
   statusCheckSentAtRef,
@@ -314,7 +317,17 @@ export function useChatSessionState({
   // placeholder entry exists anymore.
   const sessionActivity = (activeSessionId && processingSessions?.get(activeSessionId)) || null;
   const isProcessing = sessionActivity !== null;
-  const canAbortSession = isProcessing && sessionActivity.canInterrupt;
+  // Work left running by an earlier turn. Read separately from `isProcessing`
+  // everywhere: it must never reach the composer's send/queue gate or the
+  // transcript-refresh guard, because the background work keeps writing to the
+  // transcript and the next prompt is what keeps it alive.
+  const hasBackgroundWorkOutstanding = Boolean(
+    activeSessionId && backgroundWorkSessionIds?.has(activeSessionId),
+  );
+  // Stop covers both states. Without the second half it disappeared the instant
+  // a turn reported complete, leaving a user with no way to abort a background
+  // task that could still run for half an hour.
+  const canAbortSession = (isProcessing && sessionActivity.canInterrupt) || hasBackgroundWorkOutstanding;
 
   // Ref mirror so effects can read the latest map without re-running on
   // every activity transition.
@@ -1103,6 +1116,7 @@ export function useChatSessionState({
     addMessage,
     sessionActivity,
     isProcessing,
+    hasBackgroundWorkOutstanding,
     canAbortSession,
     currentSessionId,
     setCurrentSessionId,
