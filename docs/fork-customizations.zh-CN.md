@@ -387,3 +387,17 @@ Anchor 规则是**第三条**具体规则，而且它跟同一个 provider 上�
 为什么干脆把底栏的 `flex-wrap` 去掉：引入 wrap 的同一次 v1.37.3 改动还加了那条整宽的提交提示行（`order-last basis-full`，仅桌面），它之所以能独占一行，靠的正是底栏会 wrap。fork 保留了这条提示行的官方设计，所以 wrap 必须留着——这也是为什么修法是"让右侧那组无法换行"，而不是"让底栏不换行"。
 
 **同步官方时怎么办：** 保留我的，把上面的类改动重新套回去。如果官方重构了底栏，按意图重放而不是照搬字面类名：右侧那一组必须是撑满整行、内容右对齐的那个（`flex-1 min-w-0`，从而永不换行），组内只有模型触发按钮可收缩（文字本来就截断），schedule/权限/发送保留 `shrink-0`，让收缩的只有模型名。
+
+## 29. Claude 把"设置没变"的追问推进已经挂着的那个进程
+
+**涉及文件：** *官方自有（只做增量改动）：* `server/modules/providers/list/claude/claude-runtime.provider.js`（`createHeldPromptStream` 改成挂在队列上，多了 `push`/`isOpen`；`queryClaudeSDK` 开头多了复用入口，进程挂起时会发布一个 `heldTurn` 句柄，`ws`/`sessionSummary` 变成可重新绑定，`result` 分支里多了"这个 result 是在回答被推进来的追问吗"的判断）。*fork 自有：* `server/modules/providers/list/claude/claude-turn-reuse.ts`（`buildTurnSettingsFingerprint` 和挂起回合的登记表）、`server/modules/providers/tests/claude-held-turn-reuse.test.ts`。
+
+**为什么改：** 官方本来就会在一个回合的 `result` 之后继续挂着 CLI 的 stdin，好让后台 shell、`Monitor`、子 agent 接着跑完再回报（见 `BG_WAIT_CEILING_MS` 那段注释）。但用户的下一条提问会把它拆掉：`queryClaudeSDK` 一上来就 `getSession(...)?.releaseInput?.()`，紧接着 `addSession` 的顶替分支对上一个实例 `interrupt()`——于是"后台命令还在跑的时候顺手追问一句"就把那个命令杀了。官方的挂起只有在"没人追问"时才成立，偏偏坏掉的是最常见的那种情况。
+
+修法是留着进程、把新提问推进去。挂起改成队列，第二回合的 `SDKUserMessage` 就能追加进 SDK 还在读的那个流；每次挂起时这次运行会发布一个 `heldTurn` 句柄，下一回合来认领——但只有 `buildTurnSettingsFingerprint` 完全一致才认（模型、effort、权限模式、cwd、工具设置、编辑锚点）。指纹里**故意不含** provider 原生 session id：它只喂给 SDK 的 `resume`，而推进活进程的提问本来就是在续这个进程自己的对话；含进去反而会让每个新会话的第一次追问永远复用不了。只要对不上，就走官方原来的拆除路径，那条路一字未动。
+
+跟着提问一起搬家的是回合级状态，因为每个回合在 `chatRunRegistry` 里都是一次独立的 **run**，各自有 writer、`seq` 计数和重放缓冲。所以 `accept()` 会在 push **之前**重新绑定 `ws`、`sessionSummary`，并重置 `turnCompleteSent` / `assistantBudgetSent` / `backgroundWorkPending`（循环是在一个微任务之后醒来的，顺序很关键）——这才使得被复用回合的事件、终结的 `complete`、以及中途的权限询问，都落到真正在等它的那个 run，而不是那个"进程是它的、但已经结束了"的旧 run。推进提问的那次调用随后 await 一个 promise，由活着的循环在该回合 `result` 时兑现，这样 `dispatchRun` 的 `completeRunIfCurrent` 兜底仍然看到一次正常收尾的 run。
+
+还带出两个后果：`heldForBackgroundWork` 现在跨回合粘住（回答用户不能把更早回合里还在跑的命令的 stdin 关掉）；`result` 分支会记录自己是不是在回答被推进来的提问，于是"后台工作已完成"的通知只在 CLI 自己回报时才发——普通追问不会误报。
+
+**同步官方时怎么办：** 保留我的。判断闸门和登记表都在 fork 自有文件里，所以 runtime 里的冲突只集中在四处：`createHeldPromptStream` 里的队列、`queryClaudeSDK` 开头的认领块、`query()` 调用旁边构造的 `heldTurn` 句柄、以及 `result` 分支里"挂起还是释放"的判断。把这四处对着官方的新代码重放，不要整文件还原——那个文件里还带着别的 fork 条目（25）。如果官方哪天自己实现了追问复用，采用官方的并废弃这一条：两套机制往同一个 stdin 里推，提问会交错。如果官方是放宽了"一个回合可以改什么"（比如支持在线 `setModel`），那要松的也只有指纹这一处。

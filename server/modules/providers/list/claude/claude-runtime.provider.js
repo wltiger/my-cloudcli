@@ -29,6 +29,12 @@ import {
   CLAUDE_PREDEFINED_MODELS,
   CLAUDE_ULTRACODE_EFFORT
 } from '@/modules/providers/list/claude/claude-models.provider.js';
+import {
+  buildTurnSettingsFingerprint,
+  claimHeldTurn,
+  forgetHeldTurn,
+  registerHeldTurn
+} from '@/modules/providers/list/claude/claude-turn-reuse.js';
 import { resolveClaudeCodeExecutablePath } from '@/shared/claude-cli-path.js';
 import {
   createNotificationEvent,
@@ -625,22 +631,50 @@ async function buildPromptMessages(command, images, files, cwd) {
  * of the run and kills anything still going in the background, so the iterable
  * has to stay pending until we actually want the process gone.
  *
+ * Parking on a queue rather than a single promise is what lets a follow-up turn
+ * be pushed into a process that is still held open: without it the only way to
+ * send another prompt is a new process, which kills whatever the held one was
+ * still running.
+ *
  * @param {Array<Object>} messages - SDKUserMessage records to send
- * @returns {{ stream: AsyncIterable, release: () => void }} Stream plus its closer
+ * @returns {{ stream: AsyncIterable, release: () => void, push: (messages: Array<Object>) => void, isOpen: () => boolean }} Stream plus its controls
  */
 function createHeldPromptStream(messages) {
-  let release;
-  const held = new Promise((resolve) => { release = resolve; });
+  const queue = [...messages];
+  let wake = null;
+  let released = false;
+
+  const resume = () => {
+    const pending = wake;
+    wake = null;
+    pending?.();
+  };
 
   const stream = (async function* () {
-    for (const message of messages) {
-      yield message;
+    while (true) {
+      while (queue.length > 0) {
+        yield queue.shift();
+      }
+      if (released) {
+        return;
+      }
+      // Keeps stdin open — the CLI stays alive until release() or the next push.
+      await new Promise((resolve) => { wake = resolve; });
     }
-    // Keeps stdin open — the CLI stays alive until release() is called.
-    await held;
   })();
 
-  return { stream, release };
+  return {
+    stream,
+    release: () => {
+      released = true;
+      resume();
+    },
+    push: (followUpMessages) => {
+      queue.push(...followUpMessages);
+      resume();
+    },
+    isOpen: () => !released
+  };
 }
 
 /**
@@ -709,7 +743,11 @@ async function loadMcpConfig(cwd) {
  * @returns {Promise<void>}
  */
 async function queryClaudeSDK(command, options = {}, ws, context) {
-  const { sessionId, sessionSummary } = options;
+  const { sessionId } = options;
+  // Both are rebound when a follow-up turn is pushed into this run: the writer
+  // decides which run receives the turn's events, and the summary labels its
+  // notifications.
+  let sessionSummary = options.sessionSummary;
   // Callers pass the stable app session id; the SDK only understands the
   // provider-native id recorded on the session row.
   const providerSessionId = context.resolveProviderSessionId(sessionId);
@@ -745,10 +783,42 @@ async function queryClaudeSDK(command, options = {}, ws, context) {
   // Set once a turn publishes a budget read from an assistant message, so the
   // turn-ending `result` is only mined for usage when nothing better arrived.
   let assistantBudgetSent = false;
+  // Set while a follow-up prompt pushed into this run is still being answered,
+  // so its `result` is not mistaken for background work reporting back.
+  let followUpPromptPending = false;
+  // This run's entry in the held-turn registry, once it parks; cleared when its
+  // process is released.
+  let heldTurn = null;
+  // Resolves the pushed turn's caller (its own queryClaudeSDK invocation, which
+  // owns the new run) once this loop has answered it.
+  let followUpTurnSettled = null;
+  const settleFollowUpTurn = () => {
+    const settle = followUpTurnSettled;
+    followUpTurnSettled = null;
+    settle?.();
+  };
 
-  // A new turn supersedes any earlier one still holding this session's process
-  // open, so held runs cannot stack up across a conversation.
+  // A follow-up turn whose settings are unchanged is pushed into the process
+  // this session is still holding open, so background work started earlier
+  // survives it. Anything else supersedes that hold, as it always has, so held
+  // runs cannot stack up across a conversation.
+  const turnFingerprint = buildTurnSettingsFingerprint(options);
   if (sessionKey()) {
+    const reusableTurn = claimHeldTurn(sessionKey(), turnFingerprint);
+    const accepted = reusableTurn
+      ? reusableTurn.tryAccept({
+        writer: ws,
+        sessionSummary,
+        promptMessages: await buildPromptMessages(command, options.images, options.files, options.cwd)
+      })
+      : null;
+    if (accepted) {
+      // The live loop now owns this turn; it settles this call when the turn's
+      // `result` arrives, and everything below belongs to the run that started
+      // the process, not to this one.
+      await accepted;
+      return;
+    }
     getSession(sessionKey())?.releaseInput?.();
   }
 
@@ -909,7 +979,14 @@ async function queryClaudeSDK(command, options = {}, ws, context) {
     };
 
     let heldPrompt = createHeldPromptStream(promptMessages);
-    releasePromptStream = heldPrompt.release;
+    // Reads `heldPrompt` through the closure so the retry below can swap the
+    // stream without leaving a stale closer behind in activeSessions.
+    releasePromptStream = () => {
+      if (sessionKey()) {
+        forgetHeldTurn(sessionKey(), heldTurn);
+      }
+      heldPrompt.release();
+    };
     try {
       queryInstance = query({
         prompt: heldPrompt.stream,
@@ -923,12 +1000,45 @@ async function queryClaudeSDK(command, options = {}, ws, context) {
       // Discard the abandoned stream and build a fresh one for the retry.
       heldPrompt.release();
       heldPrompt = createHeldPromptStream(promptMessages);
-      releasePromptStream = heldPrompt.release;
       queryInstance = query({
         prompt: heldPrompt.stream,
         options: sdkOptions
       });
     }
+
+    // How a later turn hands its prompt to this still-running loop instead of
+    // starting a process of its own. Published only while the run is parked
+    // (see the `result` handler), and claimed at most once per park. `tryAccept`
+    // refuses (null) when the stream closed between the claim and the push, and
+    // the claiming turn then starts a process of its own as before.
+    heldTurn = {
+      fingerprint: turnFingerprint,
+      tryAccept: ({ writer, sessionSummary: nextSessionSummary, promptMessages: followUpMessages }) => {
+        if (!heldPrompt.isOpen()) {
+          return null;
+        }
+
+        // Rebound before the push, never after: the loop wakes on a microtask,
+        // and every event the pushed turn produces belongs to the run waiting
+        // for it, not to the finished one whose process this is.
+        ws = writer;
+        sessionSummary = nextSessionSummary ?? sessionSummary;
+        turnCompleteSent = false;
+        assistantBudgetSent = false;
+        backgroundWorkPending = false;
+        followUpPromptPending = true;
+        // Re-registered with the same instance, purely so the map's `writer`
+        // stops naming the finished run's one.
+        if (sessionKey()) {
+          addSession(sessionKey(), queryInstance, ws, releasePromptStream);
+        }
+        scheduleRelease();
+
+        const settled = new Promise((resolve) => { followUpTurnSettled = resolve; });
+        heldPrompt.push(followUpMessages);
+        return settled;
+      }
+    };
 
     // Track the query instance for abort capability
     if (sessionKey()) {
@@ -994,6 +1104,10 @@ async function queryClaudeSDK(command, options = {}, ws, context) {
       if (message.type === 'result') {
         // The turn is done as far as the client is concerned.
         const abortPending = sessionKey() ? abortedSessionIds.has(sessionKey()) : false;
+        // Whether this result answers a prompt the user pushed into the held
+        // process, rather than background work reporting back on its own.
+        const answersFollowUpPrompt = followUpPromptPending;
+        followUpPromptPending = false;
         if (!turnCompleteSent && !abortPending) {
           turnCompleteSent = true;
           ws.send(createCompleteMessage({ provider: 'claude', sessionId: capturedSessionId || sessionId || null, exitCode: 0 }));
@@ -1004,7 +1118,7 @@ async function queryClaudeSDK(command, options = {}, ws, context) {
             sessionName: sessionSummary,
             stopReason: 'completed'
           });
-        } else if (heldForBackgroundWork && !abortPending) {
+        } else if (heldForBackgroundWork && !answersFollowUpPrompt && !abortPending) {
           // A result after the turn already reported complete means the work we
           // held the process open for has finished and pushed a follow-up turn.
           notifyBackgroundWorkCompleted({
@@ -1014,19 +1128,25 @@ async function queryClaudeSDK(command, options = {}, ws, context) {
             sessionName: sessionSummary
           });
         }
-        if (backgroundWorkPending) {
-          // Work started during this turn is still running. Hold the process
-          // open so it can finish and report back in a follow-up turn; the
-          // ceiling is only a backstop for work that never reports.
+        if (backgroundWorkPending || (answersFollowUpPrompt && heldForBackgroundWork)) {
+          // Work started during this turn is still running — or work from an
+          // earlier turn has yet to report back, and answering the user in
+          // between must not cut it short. Hold the process open so it can
+          // finish and report back in a follow-up turn; the ceiling is only a
+          // backstop for work that never reports.
           backgroundWorkPending = false;
           heldForBackgroundWork = true;
           scheduleRelease();
+          if (sessionKey()) {
+            registerHeldTurn(sessionKey(), heldTurn);
+          }
         } else {
           // Either nothing was backgrounded, or the background work just
           // reported in — let the CLI exit now, as it always has.
           heldForBackgroundWork = false;
           releasePromptStream();
         }
+        settleFollowUpTurn();
       } else if (idleReleaseTimer) {
         // Background activity after the turn — push the countdown back out.
         scheduleRelease();
@@ -1113,6 +1233,10 @@ async function queryClaudeSDK(command, options = {}, ws, context) {
       idleReleaseTimer = null;
     }
     releasePromptStream();
+    // A follow-up turn still in flight when this loop ended (abort, crash, the
+    // CLI exiting) would otherwise leave its own invocation — and the run it
+    // owns — waiting forever.
+    settleFollowUpTurn();
   }
 }
 
