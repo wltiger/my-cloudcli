@@ -48,6 +48,12 @@ export type SessionSlot = {
   hasMore: boolean;
   offset: number;
   tokenUsage: unknown;
+  /**
+   * @internal An edit cut the cached suffix, and a rewind may have rewritten
+   * the rows it ends on. No fetched window can bridge onto such a suffix, so
+   * the next tail refresh replaces the cache outright instead of bridging.
+   */
+  pendingHistoryReplace: boolean;
 };
 
 const EMPTY: NormalizedMessage[] = [];
@@ -72,6 +78,7 @@ function createEmptySlot(): SessionSlot {
     // history refresh overwrote the value fetched from the token-usage
     // endpoint with it.
     tokenUsage: undefined,
+    pendingHistoryReplace: false,
     _historyMutationQueue: Promise.resolve(),
   };
 }
@@ -339,6 +346,25 @@ function pruneRealtimeSupersededByServer(
 }
 
 /**
+ * A `replacesAfterRowCount` guard only makes sense inside the window it was
+ * cut from. Once that window is replaced by a fresh tail, the index points
+ * into nothing: a scan starting there can never see the row the echo waits
+ * for, and the echo would sit floored at the bottom of the view forever. A
+ * fresh tail is safe to rescan from the top — a kept row is older than its
+ * replacement, so a window holding one holds the replacement too.
+ */
+function clearStaleCutBounds(realtimeMessages: NormalizedMessage[]): NormalizedMessage[] {
+  if (!realtimeMessages.some((message) => message.replacesAfterRowCount !== undefined)) {
+    return realtimeMessages;
+  }
+  return realtimeMessages.map((message) =>
+    message.replacesAfterRowCount === undefined
+      ? message
+      : { ...message, replacesAfterRowCount: undefined },
+  );
+}
+
+/**
  * Drops the live rows a server-side truncation invalidated.
  *
  * `pruneRealtimeSupersededByServer` cannot do this. It removes live rows the
@@ -348,7 +374,9 @@ function pruneRealtimeSupersededByServer(
  *
  * Everything the server has already written past is therefore dropped: if it
  * were real, it would be in the transcript. Only rows newer than the server's
- * last one are kept, which is exactly a run still streaming.
+ * last one are kept, which is exactly a run still streaming — plus a pending
+ * replacement echo, whose persisted row may not be in this window yet and
+ * which is the message the user just sent.
  */
 function dropRealtimeOlderThanServerTail(
   serverMessages: NormalizedMessage[],
@@ -361,6 +389,9 @@ function dropRealtimeOlderThanServerTail(
   }
 
   return realtimeMessages.filter((message) => {
+    if (message.replacesAnchorId !== undefined) {
+      return true;
+    }
     const time = readMessageTime(message);
     // An unreadable timestamp is kept: dropping a row this cannot place would
     // erase a turn the reader is watching arrive.
@@ -368,7 +399,11 @@ function dropRealtimeOlderThanServerTail(
   });
 }
 
-function computeMerged(server: NormalizedMessage[], realtime: NormalizedMessage[]): NormalizedMessage[] {
+function computeMerged(
+  server: NormalizedMessage[],
+  realtime: NormalizedMessage[],
+  windowStartIndex: number,
+): NormalizedMessage[] {
   if (realtime.length === 0) {
     return dedupeAdjacentAssistantEchoes(server);
   }
@@ -380,6 +415,18 @@ function computeMerged(server: NormalizedMessage[], realtime: NormalizedMessage[
   const reconciledRealtime = removeOptimisticUserEchoes(server, realtime);
   const extra = reconciledRealtime.filter((message) => {
     if (serverIds.has(message.id)) {
+      return false;
+    }
+    // A replacement echo stands in for a row at a fixed transcript position.
+    // When the cached window starts past that position, the row it stands in
+    // for sits in the uncached older part of the conversation: rendering the
+    // echo would floor it onto the bottom of the view, so it stays hidden
+    // until a scroll-up fetch brings the row back into the window.
+    if (
+      message.replacesAnchorId !== undefined
+      && typeof message.replacesAtAbsoluteIndex === 'number'
+      && windowStartIndex > message.replacesAtAbsoluteIndex
+    ) {
       return false;
     }
     return true;
@@ -414,7 +461,11 @@ function recomputeMergedIfNeeded(slot: SessionSlot): boolean {
   }
   slot._lastServerRef = slot.serverMessages;
   slot._lastRealtimeRef = slot.realtimeMessages;
-  slot.merged = computeMerged(slot.serverMessages, slot.realtimeMessages);
+  slot.merged = computeMerged(
+    slot.serverMessages,
+    slot.realtimeMessages,
+    Math.max(0, slot.total - slot.serverMessages.length),
+  );
   return true;
 }
 
@@ -463,6 +514,7 @@ async function refreshLatestSlotFromServer(
   const previousServerMessages = slot.serverMessages;
   const previousTotal = slot.total;
   const previousHasMore = slot.hasMore;
+  const pendingHistoryReplace = slot.pendingHistoryReplace;
   const latestPage = await requestSessionHistoryPage(sessionId, {
     limit,
     offset: 0,
@@ -470,16 +522,23 @@ async function refreshLatestSlotFromServer(
 
   let nextServerMessages: NormalizedMessage[] | null = null;
   let nextHasMore = previousHasMore;
-  const historyTruncated = serverHistoryShrank(previousTotal, latestPage.total);
+  let cacheReplaced = false;
+  // An edit cut can leave the cached suffix ending on rows the provider
+  // rewrote, which no fetched window can bridge onto — the fresh tail replaces
+  // it. `total` alone cannot signal that: the cut resets it to the cut index,
+  // which the new, longer branch does not shrink below.
+  const historyTruncated = pendingHistoryReplace || serverHistoryShrank(previousTotal, latestPage.total);
 
   // A page with no older rows is the complete authoritative transcript. This
   // also removes cached rows after a provider-side truncation.
   if (!latestPage.hasMore) {
     nextServerMessages = latestPage.messages;
     nextHasMore = false;
+    cacheReplaced = true;
   } else if (previousServerMessages.length === 0) {
     nextServerMessages = latestPage.messages;
     nextHasMore = true;
+    cacheReplaced = true;
   } else if (historyTruncated) {
     // An edit deleted rows this cache still holds, so there is nothing left to
     // stitch onto: the fetched page replaces the cache outright rather than
@@ -487,6 +546,7 @@ async function refreshLatestSlotFromServer(
     // way, by scrolling up.
     nextServerMessages = latestPage.messages;
     nextHasMore = true;
+    cacheReplaced = true;
   } else {
     let fetchedWindow = latestPage.messages;
     let oldestFetchedPage = latestPage;
@@ -570,6 +630,10 @@ async function refreshLatestSlotFromServer(
   slot.offset = nextServerMessages.length;
   slot.hasMore = nextHasMore;
   slot.fetchedAt = Date.now();
+  if (cacheReplaced) {
+    slot.pendingHistoryReplace = false;
+    slot.realtimeMessages = clearStaleCutBounds(slot.realtimeMessages);
+  }
   slot.realtimeMessages = pruneRealtimeSupersededByServer(
     slot.serverMessages,
     historyTruncated
@@ -649,9 +713,13 @@ export function useSessionStore() {
         slot.offset = (requestOptions.offset ?? 0) + data.messages.length;
         slot.fetchedAt = Date.now();
         slot.status = 'idle';
+        // A full re-fetch starts the window at a fresh tail: a pending cut is
+        // superseded by what the server now serves, and the cut-index guard a
+        // replacement echo carries referred to the old window.
+        slot.pendingHistoryReplace = false;
         slot.realtimeMessages = pruneRealtimeSupersededByServer(
           slot.serverMessages,
-          slot.realtimeMessages,
+          clearStaleCutBounds(slot.realtimeMessages),
         );
         recomputeMergedIfNeeded(slot);
         if (data.tokenUsage !== undefined) {
@@ -763,6 +831,12 @@ export function useSessionStore() {
     );
     if (cutIndex < 0) return;
 
+    // The anchor's position in the full transcript, not just this window: the
+    // replacement row lands at or after it, and a later re-fetch may start the
+    // window anywhere, so the echo needs an absolute position to tell when it
+    // belongs to the uncached older part of the conversation.
+    const replacementAt = slot.total - slot.serverMessages.length + cutIndex;
+
     slot.serverMessages = slot.serverMessages.slice(0, cutIndex);
     // Anything already streamed belonged to the turn being replaced — except
     // the replacement itself. The client that made the edit appends its
@@ -779,8 +853,16 @@ export function useSessionStore() {
       // Stamped here because this is the only place that knows how much of the
       // conversation survived, which is what tells the echo apart from the
       // turns it now sits after.
-      ? [{ ...replacements[replacements.length - 1], replacesAfterRowCount: cutIndex }]
+      ? [{
+        ...replacements[replacements.length - 1],
+        replacesAfterRowCount: cutIndex,
+        replacesAtAbsoluteIndex: replacementAt,
+      }]
       : EMPTY;
+    // A rewind rewrites the rows this suffix still ends on, so it no longer
+    // lines up with the live transcript: the next tail refresh must replace
+    // the cache instead of bridging onto it.
+    slot.pendingHistoryReplace = true;
     // `total` counts what the server would serve; it is about to be re-fetched
     // anyway, but leaving it high makes the pager offer pages that do not exist.
     slot.total = slot.serverMessages.length;

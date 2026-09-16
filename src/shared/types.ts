@@ -443,6 +443,13 @@ export type NormalizedMessage = {
    * when the cut was made, so this is where those rows begin.
    */
   replacesAfterRowCount?: number;
+  /**
+   * Where in the full transcript the message this echo replaces sat, stamped
+   * with the cut. The replacement row lands at or after this position; once a
+   * fetched window starts past it, the row sits in the uncached older part of
+   * the conversation and the echo must not stand in for it in the view.
+   */
+  replacesAtAbsoluteIndex?: number;
   sessionId: string;
   timestamp: string;
   provider: LLMProvider;

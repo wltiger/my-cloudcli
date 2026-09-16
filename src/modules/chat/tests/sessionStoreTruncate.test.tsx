@@ -224,3 +224,103 @@ describe('truncateAt', () => {
     );
   });
 });
+
+describe('an edit that rewinds the branch', () => {
+  // The provider abandons the old branch and grows a new one from the same
+  // prefix. The row the cut left at the bottom of the cache (a task
+  // notification) no longer exists at that position in the transcript — the
+  // new branch re-injects a different one — so no fetched window can ever
+  // bridge onto the cached suffix. The next tail refresh has to replace the
+  // cache outright, and the edit's echo must retire against the persisted
+  // replacement row instead of staying floored at the bottom of the view.
+  const BASE = Date.parse('2026-09-14T09:30:00.000Z');
+  const at = (ms: number) => new Date(BASE + ms).toISOString();
+
+  const oldRow = (index: number, overrides: Partial<NormalizedMessage> = {}) => ({
+    id: `old-${index}`,
+    kind: 'text',
+    role: 'assistant',
+    provider: 'claude',
+    sessionId: 'session-1',
+    content: `old turn ${index}`,
+    timestamp: at(index * 1000),
+    ...overrides,
+  }) as NormalizedMessage;
+
+  const REPLACEMENT_TEXT = '请使用 /playwright-cli --headed来打开，我可以同步看到窗口';
+
+  const oldBranchPage = (): NormalizedMessage[] => [
+    ...Array.from({ length: 20 }, (_, i) => oldRow(71 + i)),
+    oldRow(90, { role: 'user', content: '看到了', transcriptAnchorId: 'anchor-a' }),
+  ];
+
+  const newBranchPage = (): NormalizedMessage[] => [
+    ...Array.from({ length: 8 }, (_, i) => oldRow(81 + i)),
+    // The new branch's row at the position the old branch's task notification
+    // held: different id, different content, later timestamp.
+    oldRow(89, {
+      id: 'new-89',
+      content: '<task-notification>re-injected</task-notification>',
+      timestamp: at(1_069_525),
+    }),
+    oldRow(90, {
+      id: 'new-90',
+      role: 'user',
+      content: REPLACEMENT_TEXT,
+      timestamp: at(1_069_553),
+    }),
+    ...Array.from({ length: 10 }, (_, i) => oldRow(91 + i, { timestamp: at(1_075_000 + i * 1000) })),
+  ];
+
+  it('replaces the cache the cut froze and retires the edit echo', async () => {
+    const { useSessionStore } = await import('@/modules/chat/hooks/useSessionStore');
+    const { result } = renderHook(() => useSessionStore());
+
+    await act(async () => {
+      sessionMessages
+        .mockResolvedValueOnce({
+          ok: true,
+          json: async () => ({ data: { messages: oldBranchPage(), total: 91, hasMore: true } }),
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          json: async () => ({ data: { messages: newBranchPage(), total: 101, hasMore: true } }),
+        });
+      await result.current.fetchFromServer('session-1', { limit: 20, offset: 0 });
+    });
+
+    const echo = oldRow(90, {
+      id: 'local_echo',
+      role: 'user',
+      content: REPLACEMENT_TEXT,
+      timestamp: at(1_065_000),
+      replacesAnchorId: 'anchor-a',
+    });
+    act(() => {
+      result.current.appendRealtime('session-1', echo);
+    });
+
+    act(() => {
+      result.current.truncateAt('session-1', 'anchor-a');
+    });
+
+    await act(async () => {
+      await result.current.refreshLatestFromServer('session-1');
+    });
+
+    const messages = result.current.getMessages('session-1');
+    assert.ok(
+      !messages.some((message) => message.id === 'local_echo'),
+      'the edit echo must be retired once its persisted row is cached',
+    );
+    assert.ok(
+      messages.some((message) => message.content === REPLACEMENT_TEXT),
+      'the persisted replacement row is shown',
+    );
+    assert.equal(
+      messages[messages.length - 1].id,
+      'old-100',
+      'the newest server row stays at the bottom, not the echo',
+    );
+  });
+});
