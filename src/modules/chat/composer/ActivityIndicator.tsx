@@ -13,6 +13,11 @@ type ActivityIndicatorProps = {
   backgroundWorkOutstanding?: boolean;
   onAbort?: () => void;
   isInputFocused?: boolean;
+  /**
+   * The reader has scrolled up away from the bottom: fade out of their way
+   * without hiding — the work is still alive and Stop stays reachable.
+   */
+  isFaded?: boolean;
 };
 
 const ACTION_KEYS = [
@@ -48,6 +53,7 @@ export default function ActivityIndicator({
   backgroundWorkOutstanding = false,
   onAbort,
   isInputFocused = false,
+  isFaded = false,
 }: ActivityIndicatorProps) {
   const { t } = useTranslation('chat');
   const [renderedActivity, setRenderedActivity] = useState<SessionActivity | null>(activity);
@@ -128,7 +134,11 @@ export default function ActivityIndicator({
         isExiting ? 'chat-activity-exit' : 'chat-activity-enter'
       }`}
     >
-      <div className="flex items-end justify-between gap-2">
+      <div
+        className={`flex items-end justify-between gap-2 transition-opacity duration-300 ${
+          isFaded ? 'opacity-40' : 'opacity-100'
+        }`}
+      >
         <div className={`${tabSurfaceClassName} gap-2`}>
           <span
             className={`h-1.5 w-1.5 shrink-0 rounded-full ${

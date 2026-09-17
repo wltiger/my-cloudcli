@@ -28,6 +28,7 @@ import {
 } from '@/modules/chat/composer/PromptInput';
 import CommandMenu from '@/modules/chat/composer/CommandMenu';
 import ActivityIndicator from '@/modules/chat/composer/ActivityIndicator';
+import { isActivityIndicatorVisible } from '@/modules/chat/composer/indicatorVisibility';
 import ComposerAttachment from '@/modules/chat/composer/ComposerAttachment';
 import VoiceInputButton from '@/modules/chat/composer/VoiceInputButton';
 import PermissionRequestsBanner from '@/modules/chat/composer/PermissionRequestsBanner';
@@ -125,6 +126,8 @@ type ChatComposerProps = {
   onTextareaInput: (event: FormEvent<HTMLTextAreaElement>) => void;
   isInputFocused?: boolean;
   onInputFocusChange?: (focused: boolean) => void;
+  /** The reader is reading history above the bottom; the status tab fades out of their way. */
+  isUserScrolledUp?: boolean;
   placeholder: string;
   isTextareaExpanded: boolean;
   sendByCtrlEnter?: boolean;
@@ -201,6 +204,7 @@ export default function ChatComposer({
   onTextareaInput,
   isInputFocused = false,
   onInputFocusChange,
+  isUserScrolledUp = false,
   placeholder,
   isTextareaExpanded,
   sendByCtrlEnter,
@@ -269,7 +273,11 @@ export default function ChatComposer({
 
   // Hide the thinking/status bar while any permission request is pending
   const hasPendingPermissions = pendingPermissionRequests.length > 0;
-  const hasActivityIndicator = Boolean((activity || backgroundWorkOutstanding) && !hasPendingPermissions);
+  const hasActivityIndicator = isActivityIndicatorVisible({
+    turnInFlight: Boolean(activity),
+    backgroundWorkOutstanding,
+    hasPendingPermissions,
+  });
 
   const hasQueuedDraft = Boolean(queuedDraft);
   const canQueueDraft = isLoading && Boolean(input.trim() || attachedFiles.length > 0);
@@ -290,6 +298,10 @@ export default function ChatComposer({
 
   return (
     <div className="chat-composer-shell relative flex-shrink-0 px-2 pb-2 pt-0 sm:px-4 sm:pb-4 md:px-4 md:pb-6">
+      {/* Gated on pending permissions only, not on hasActivityIndicator: the
+          indicator must stay mounted after a turn ends so it can play its
+          exit animation — it renders null itself once there is nothing left
+          to show, and a pending panel replaces it instantly. */}
       {!hasPendingPermissions && (
         <div className={`pointer-events-none absolute bottom-full left-1/2 z-10 w-[calc(100%-1rem)] ${widthClasses.column} -translate-x-1/2 translate-y-px bg-transparent sm:w-[calc(100%-2rem)]`}>
           <ActivityIndicator
@@ -297,6 +309,7 @@ export default function ChatComposer({
             backgroundWorkOutstanding={backgroundWorkOutstanding}
             onAbort={onAbortSession}
             isInputFocused={isInputFocused}
+            isFaded={isUserScrolledUp}
           />
         </div>
       )}

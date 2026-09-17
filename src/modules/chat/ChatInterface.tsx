@@ -27,6 +27,7 @@ import {
 } from '@/shared/context/SessionProtectionContext';
 import ChatMessagesPane from '@/modules/chat/transcript/ChatMessagesPane';
 import ChatComposer from '@/modules/chat/composer/ChatComposer';
+import { isActivityIndicatorVisible } from '@/modules/chat/composer/indicatorVisibility';
 import CommandResultModal from '@/modules/chat/modals/CommandResultModal';
 import SessionForkDialog from '@/modules/chat/modals/SessionForkDialog';
 
@@ -454,10 +455,13 @@ function ChatInterface({
     }
   }, [currentSessionId, provider, selectProviderEffort, selectedSession?.id]);
 
-  // Mirrors ChatComposer's own visibility check so the message pane can
-  // reserve enough bottom space to keep the floating status tab from
-  // overlapping the last message.
-  const hasActivityIndicator = Boolean(sessionActivity && pendingPermissionRequests.length === 0);
+  // The same definition the composer renders from, so the reserved bottom
+  // space can never disagree with the floating tab about whether it is there.
+  const hasActivityIndicator = isActivityIndicatorVisible({
+    turnInFlight: Boolean(sessionActivity),
+    backgroundWorkOutstanding: hasBackgroundWorkOutstanding,
+    hasPendingPermissions: pendingPermissionRequests.length > 0,
+  });
 
   const selectedProviderLabel =
     provider === 'cursor'
@@ -628,6 +632,7 @@ function ChatInterface({
           onTextareaInput={handleTextareaInput}
           isInputFocused={isInputFocused}
           onInputFocusChange={handleInputFocusChange}
+          isUserScrolledUp={isUserScrolledUp}
           placeholder={t('input.placeholder', { provider: selectedProviderLabel })}
           isTextareaExpanded={isTextareaExpanded}
           sendByCtrlEnter={sendByCtrlEnter}

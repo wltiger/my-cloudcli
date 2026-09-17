@@ -152,3 +152,40 @@ test('a session with neither state renders no indicator at all', async () => {
 
   assert.equal(container.innerHTML, '');
 });
+
+test('faded while the reader has scrolled up, but Stop stays clickable', async () => {
+  const onAbort = vi.fn();
+  const { container } = await renderIndicator({
+    activity: null,
+    backgroundWorkOutstanding: true,
+    onAbort,
+    isFaded: true,
+  });
+
+  // Faded, not hidden: the work is still alive, so the tab stays visible —
+  // just out of the reader's way while they read history. The fade must sit
+  // on the inner row (the transition-opacity element), not the wrapper: the
+  // wrapper's enter/exit animations use `animation … both`, which pins the
+  // wrapper's own opacity and would swallow a fade applied there.
+  const fadedRow = [...container.querySelectorAll<HTMLElement>('[class*="transition-opacity"]')]
+    .find((el) => el.className.includes('opacity-40'));
+  assert.ok(fadedRow, 'fade applied to the inner row, not the animated wrapper');
+
+  const stop = screen.getByRole('button', { name: 'Stop background work' });
+  fireEvent.click(stop);
+  assert.equal(onAbort.mock.calls.length, 1);
+});
+
+test('fully opaque at the bottom', async () => {
+  const { container } = await renderIndicator({
+    activity: null,
+    backgroundWorkOutstanding: true,
+    onAbort: () => {},
+    isFaded: false,
+  });
+
+  const row = container.querySelector<HTMLElement>('[class*="transition-opacity"]');
+  assert.ok(row, 'inner row rendered');
+  assert.ok(row.className.includes('opacity-100'), 'inner row fully opaque');
+  assert.equal(container.querySelector('[class*="opacity-40"]'), null);
+});

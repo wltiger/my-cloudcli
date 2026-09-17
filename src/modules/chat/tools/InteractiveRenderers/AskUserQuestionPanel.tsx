@@ -10,6 +10,13 @@ import { FullscreenSurface, FullscreenToggleButton } from '@/shared/ui';
 const NO_QUESTIONS: Question[] = [];
 
 /**
+ * Where the "Other" field stops growing and starts scrolling: roughly five
+ * lines at the option font. Beyond that, a long answer would push the panel
+ * — and the composer below it — off a small screen.
+ */
+const OTHER_FIELD_MAX_HEIGHT_PX = 120;
+
+/**
  * Registered by chat's PermissionRequestsBanner as the permission panel for
  * AskUserQuestion requests, so the user answers the model's questions inline.
  */
@@ -34,7 +41,7 @@ export const AskUserQuestionPanel: React.FC<PermissionPanelProps> = ({
   const [isFullscreen, setIsFullscreen] = useState(false);
 
   const containerRef = useRef<HTMLDivElement>(null);
-  const otherInputRef = useRef<HTMLInputElement>(null);
+  const otherInputRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
     requestAnimationFrame(() => setMounted(true));
@@ -49,11 +56,21 @@ export const AskUserQuestionPanel: React.FC<PermissionPanelProps> = ({
     }
   }, [currentStep, otherActive, isFullscreen]);
 
+  // Grow the field to its content up to the cap, then let it scroll. Runs
+  // whenever the field (re)appears, because a saved answer may already span
+  // several lines by the time its step comes back into view.
+  const fitOtherField = useCallback((target: HTMLTextAreaElement) => {
+    target.style.height = 'auto';
+    target.style.height = `${Math.min(target.scrollHeight, OTHER_FIELD_MAX_HEIGHT_PX)}px`;
+  }, []);
+
   useEffect(() => {
-    if (otherActive.get(currentStep)) {
-      otherInputRef.current?.focus();
-    }
-  }, [otherActive, currentStep]);
+    if (!otherActive.get(currentStep)) return;
+    const field = otherInputRef.current;
+    if (!field) return;
+    field.focus();
+    fitOtherField(field);
+  }, [otherActive, currentStep, fitOtherField]);
 
   const toggleOption = useCallback((qIdx: number, label: string, multiSelect: boolean) => {
     setSelections(prev => {
@@ -114,8 +131,8 @@ export const AskUserQuestionPanel: React.FC<PermissionPanelProps> = ({
 
   // Keyboard handler for number keys and navigation
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
-    // Don't capture keys when typing in the "Other" input
-    if (e.target instanceof HTMLInputElement) return;
+    // Don't capture keys when typing in the "Other" field
+    if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
 
     const q = questions[currentStep];
     if (!q) return;
@@ -162,6 +179,9 @@ export const AskUserQuestionPanel: React.FC<PermissionPanelProps> = ({
   const multi = q.multiSelect || false;
   const selected = selections.get(currentStep) || new Set<string>();
   const isOtherOn = otherActive.get(currentStep) || false;
+  // While the multi-line field is active, a bare Enter is a line break, so the
+  // advance/submit key is the explicit combo — Next and Submit must agree.
+  const keyHint = isOtherOn ? 'Ctrl+Enter' : 'Enter';
   const isLast = currentStep === total - 1;
   const isFirst = currentStep === 0;
   const hasCurrentSelection = selected.size > 0 || (isOtherOn && (otherTexts.get(currentStep) || '').trim().length > 0);
@@ -211,7 +231,7 @@ export const AskUserQuestionPanel: React.FC<PermissionPanelProps> = ({
             }`}
           >
             Submit
-            <span className="ml-0.5 font-mono text-[9px] opacity-70">Enter</span>
+            <span className="ml-0.5 font-mono text-[9px] opacity-70">{keyHint}</span>
           </button>
         ) : (
           <button
@@ -222,7 +242,7 @@ export const AskUserQuestionPanel: React.FC<PermissionPanelProps> = ({
             }`}
           >
             Next
-            <span className="ml-0.5 font-mono text-[9px] opacity-70">Enter</span>
+            <span className="ml-0.5 font-mono text-[9px] opacity-70">{keyHint}</span>
           </button>
         )}
       </div>
@@ -406,31 +426,37 @@ export const AskUserQuestionPanel: React.FC<PermissionPanelProps> = ({
               )}
             </button>
 
-            {/* Other text input — inline */}
+            {/* Other text field — inline, multi-line. Grows with the answer
+                (fitOtherField) and scrolls past the cap. No hint chip over
+                the text: it used to cover the tail of a long single-line
+                entry, and with a multi-line field Enter is no longer the
+                submit key anyway. */}
             {isOtherOn && (
               <div className="pl-[30px] pr-0.5">
-                <div className="relative">
-                  <input
-                    ref={otherInputRef}
-                    type="text"
-                    value={otherTexts.get(currentStep) || ''}
-                    onChange={(e) => setOtherText(currentStep, e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter') {
-                        e.preventDefault();
-                        if (isLast) handleSubmit();
-                        else setCurrentStep(s => s + 1);
-                      }
-                      // Prevent container keydown from firing
-                      e.stopPropagation();
-                    }}
-                    placeholder={t('chat:misc.typeAnswer')}
-                    className={`w-full rounded-lg border-0 bg-gray-50 px-3 py-1.5 ${fontClasses.optionLabel} text-gray-900 outline-none ring-1 ring-gray-200 transition-shadow duration-200 placeholder:text-gray-400 focus:ring-2 focus:ring-blue-400 dark:bg-gray-900/60 dark:text-gray-100 dark:ring-gray-700 dark:placeholder:text-gray-600 dark:focus:ring-blue-500`}
-                  />
-                  <kbd className="absolute right-2 top-1/2 -translate-y-1/2 rounded border border-gray-200 bg-gray-100 px-1 py-0.5 font-mono text-[9px] text-gray-300 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-600">
-                    Enter
-                  </kbd>
-                </div>
+                <textarea
+                  ref={otherInputRef}
+                  rows={1}
+                  value={otherTexts.get(currentStep) || ''}
+                  onChange={(e) => {
+                    setOtherText(currentStep, e.target.value);
+                    fitOtherField(e.target);
+                  }}
+                  onKeyDown={(e) => {
+                    // Enter alone is a line break in a multi-line field; only
+                    // the explicit combo advances or submits, so a line break
+                    // mid-answer can never ship a half-finished panel.
+                    if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+                      e.preventDefault();
+                      if (isLast) handleSubmit();
+                      else setCurrentStep(s => s + 1);
+                    }
+                    // Prevent container keydown from firing
+                    e.stopPropagation();
+                  }}
+                  placeholder={t('chat:misc.typeAnswer')}
+                  aria-label={t('chat:misc.typeAnswer')}
+                  className={`block w-full resize-none overflow-y-auto rounded-lg border-0 bg-gray-50 px-3 py-1.5 ${fontClasses.optionLabel} text-gray-900 outline-none ring-1 ring-gray-200 transition-shadow duration-200 placeholder:text-gray-400 focus:ring-2 focus:ring-blue-400 dark:bg-gray-900/60 dark:text-gray-100 dark:ring-gray-700 dark:placeholder:text-gray-600 dark:focus:ring-blue-500`}
+                />
               </div>
             )}
           </div>
