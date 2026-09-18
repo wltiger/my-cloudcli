@@ -93,6 +93,15 @@ export type ProviderModelOption = {
    */
   baseUrl?: string;
   apiKey?: string;
+  /**
+   * Claude-only context window this model accepts, in raw tokens (the UI
+   * collects it in K units, K = 1024, so this is always a multiple of 1024
+   * between 1024 and 1048576). Set only when the user declared one: the
+   * runtime then tells the spawned process the real size, and every context
+   * usage read point displays it instead of the server-level default. See
+   * fork-customizations.md.
+   */
+  contextWindow?: number;
 };
 
 /**
@@ -122,6 +131,8 @@ export type CustomProviderModelRecord = {
   apiKey: string | null;
   /** Claude-only reasoning-effort levels this custom endpoint accepts, or null. */
   effortLevels: string[] | null;
+  /** Claude-only declared context window in raw tokens, or null. */
+  contextWindow: number | null;
 };
 
 /**
@@ -139,6 +150,12 @@ export type CustomProviderModelInput = {
   apiKey?: string;
   /** Claude-only reasoning-effort levels this custom endpoint accepts. */
   effortLevels?: string[];
+  /**
+   * Claude-only context window in raw tokens (a whole number of 1024-token K
+   * units, 1K-1024K). Absent clears any previous declaration, the same way the
+   * endpoint fields behave.
+   */
+  contextWindow?: number;
 };
 
 // ---------------------------

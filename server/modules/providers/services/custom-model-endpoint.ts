@@ -68,3 +68,45 @@ export const buildCustomModelEffort = (
     values: effortLevels.map((value) => ({ value })),
   };
 };
+
+/**
+ * Smallest and largest context window a custom model may declare, expressed in
+ * the K units the UI collects (K = 1024 tokens). A model whose real window is
+ * larger than 1024K uses the `[1m]` name-suffix convention Claude Code already
+ * recognises instead of a declaration.
+ */
+const CUSTOM_MODEL_CONTEXT_WINDOW_K_RANGE = { min: 1, max: 1024 } as const;
+
+const TOKENS_PER_K = 1024;
+
+/**
+ * Rejects a context window that could not have come from a whole number of K
+ * units inside the supported range. The API and the database carry raw tokens,
+ * so the check is done on the K value the raw number implies. Used by
+ * `provider-models.service.ts` when normalizing a create/update payload; an
+ * absent declaration is always valid, and is valid with or without a custom
+ * endpoint (the window belongs to the model name, not to the routing).
+ */
+export const assertValidContextWindow = (contextWindow: number | undefined): void => {
+  if (contextWindow === undefined) {
+    return;
+  }
+
+  const units = contextWindow / TOKENS_PER_K;
+  const isWholeUnits = Number.isInteger(contextWindow) && Number.isInteger(units);
+  if (
+    isWholeUnits
+    && units >= CUSTOM_MODEL_CONTEXT_WINDOW_K_RANGE.min
+    && units <= CUSTOM_MODEL_CONTEXT_WINDOW_K_RANGE.max
+  ) {
+    return;
+  }
+
+  throw new AppError(
+    `Context window must be a whole number of K (1024 tokens), between ${CUSTOM_MODEL_CONTEXT_WINDOW_K_RANGE.min}K and ${CUSTOM_MODEL_CONTEXT_WINDOW_K_RANGE.max}K.`,
+    {
+      code: 'MODEL_INVALID_CONTEXT_WINDOW',
+      statusCode: 400,
+    },
+  );
+};

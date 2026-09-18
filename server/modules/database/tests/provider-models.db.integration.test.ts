@@ -38,6 +38,7 @@ test('provider model repository stores custom rows only and maintains session re
       'base_url',
       'api_key',
       'effort_levels',
+      'context_window',
     ]);
     assert.deepEqual(providerModelsDb.listCustomProviderModels('codex'), []);
 

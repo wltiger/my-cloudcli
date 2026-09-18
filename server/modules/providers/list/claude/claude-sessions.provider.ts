@@ -25,6 +25,7 @@ import {
   truncateSubagentActivity,
 } from '@/shared/utils.js';
 import { sessionsDb } from '@/modules/database/index.js';
+import { lookupDeclaredContextWindow } from '@/modules/providers/services/claude-context-window.js';
 import { summarizeClaudeTokenUsage } from '@/modules/providers/services/provider-token-usage.service.js';
 
 import { buildClaudeAnchorIndex } from './claude-anchors.js';
@@ -1183,8 +1184,14 @@ export class ClaudeSessionsProvider implements IProviderSessions {
       limit: normalizedLimit,
       // Carried on every page, like the Codex and OpenCode readers do, so the
       // composer's counter tracks the conversation instead of being frozen at
-      // whatever it was when the session was opened.
-      tokenUsage: summarizeClaudeTokenUsage(rawMessages),
+      // whatever it was when the session was opened. The window comes from the
+      // same resolver the live turn uses, so re-reading a session cannot make
+      // the total jump back to the server-level default.
+      tokenUsage: summarizeClaudeTokenUsage(
+        rawMessages,
+        process.env.CONTEXT_WINDOW,
+        lookupDeclaredContextWindow(sessionsDb.getSessionById(sessionId)?.model),
+      ),
     };
   }
 

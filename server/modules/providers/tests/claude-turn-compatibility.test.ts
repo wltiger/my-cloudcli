@@ -29,6 +29,19 @@ const ENDPOINT_MODELS: ProviderModelsDefinition = {
   DEFAULT: 'default',
 };
 
+/**
+ * Adds two endpoint-less custom models whose only difference is the context
+ * window they declare, so reuse can only be refused on the window itself.
+ */
+const WINDOW_MODELS: ProviderModelsDefinition = {
+  OPTIONS: [
+    ...MODELS.OPTIONS,
+    { value: 'window-256k', label: 'Window 256K', isCustom: true, contextWindow: 262_144 },
+    { value: 'window-128k', label: 'Window 128K', isCustom: true, contextWindow: 131_072 },
+  ],
+  DEFAULT: 'default',
+};
+
 /** Lets pending microtasks and I/O callbacks run before asserting. */
 async function flush(rounds = 6): Promise<void> {
   for (let i = 0; i < rounds; i += 1) {
@@ -347,6 +360,30 @@ test('Claude per-turn process-reuse compatibility', async (t) => {
     const second = await startTurn('compat-two-endpoints', { model: 'proxy-b' }, 'second', ENDPOINT_MODELS);
 
     assert.equal(queries.length, 2, 'a shared base URL with a different key is still a different endpoint');
+
+    await queries[1]?.emit(RESULT);
+    await Promise.all([first.turn, second.turn]);
+  });
+
+  await t.test('a declared context window needs a new process', async () => {
+    // The window is baked into the child process's environment at spawn time,
+    // so a built-in model's held process can never serve a declared one.
+    const first = await startHeldTurn('compat-window', {}, WINDOW_MODELS);
+    const second = await startTurn('compat-window', { model: 'window-256k' }, 'second', WINDOW_MODELS);
+
+    assert.equal(queries.length, 2, 'the declared window is baked into the process environment');
+    assert.equal(first.live.promptStreamClosed, true, 'the previous hold is released');
+    assert.deepEqual(first.live.modelChanges, [], 'nothing was renegotiated on the abandoned process');
+
+    await queries[1]?.emit(RESULT);
+    await Promise.all([first.turn, second.turn]);
+  });
+
+  await t.test('two declared context windows do not share a process', async () => {
+    const first = await startHeldTurn('compat-two-windows', { model: 'window-256k' }, WINDOW_MODELS);
+    const second = await startTurn('compat-two-windows', { model: 'window-128k' }, 'second', WINDOW_MODELS);
+
+    assert.equal(queries.length, 2, 'models that differ only by declared window are different processes');
 
     await queries[1]?.emit(RESULT);
     await Promise.all([first.turn, second.turn]);

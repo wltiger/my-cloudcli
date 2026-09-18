@@ -188,6 +188,11 @@ export function buildTurnSettingsFingerprint(sdkOptions: AnyRecord = {}): string
     // endpoints just as well as the secret itself.
     baseUrl: env.ANTHROPIC_BASE_URL ?? null,
     apiKey: apiKey === null ? null : createHash('sha256').update(apiKey).digest('hex'),
+    // A declared context window is baked into the child's environment at spawn
+    // time too, and without it here a window-declaring model fingerprints
+    // identically to a built-in one — a held process spawned with the variable
+    // could then serve a model that must not see it, or the reverse.
+    contextWindow: env.CLAUDE_CODE_MAX_CONTEXT_TOKENS ?? null,
   });
 }
 

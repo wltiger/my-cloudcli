@@ -199,6 +199,11 @@ CREATE TABLE IF NOT EXISTS provider_models (
     -- JSON array of reasoning-effort levels this custom endpoint accepts (e.g.
     -- '["low","medium","xhigh"]'), or NULL to leave effort unavailable for it.
     effort_levels TEXT,
+    -- Context window this custom model accepts, in raw tokens (a whole number
+    -- of 1024-token K units), or NULL to leave Claude Code's own assumption in
+    -- place. Drives both the spawned process's CLAUDE_CODE_MAX_CONTEXT_TOKENS
+    -- and the session's context usage readout.
+    context_window INTEGER,
     UNIQUE(provider, model_id)
 );
 `;

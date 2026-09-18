@@ -25,7 +25,7 @@ import {
   normalizeImageDescriptors
 } from '@/shared/image-attachments.js';
 import { createBackgroundWorkLedger } from '@/modules/providers/list/claude/claude-background-work.js';
-import { resolveClaudeCustomEndpointEnv } from '@/modules/providers/list/claude/claude-custom-endpoint.js';
+import { resolveClaudeCustomModelEnv } from '@/modules/providers/list/claude/claude-custom-endpoint.js';
 import {
   CLAUDE_PREDEFINED_MODELS,
   CLAUDE_ULTRACODE_EFFORT
@@ -39,6 +39,10 @@ import {
   readHotTurnSettings,
   registerHeldTurn
 } from '@/modules/providers/list/claude/claude-turn-reuse.js';
+import {
+  readDeclaredContextWindow,
+  resolveContextWindowTotal
+} from '@/modules/providers/services/claude-context-window.js';
 import { resolveClaudeCodeExecutablePath } from '@/shared/claude-cli-path.js';
 import {
   createNotificationEvent,
@@ -56,6 +60,10 @@ const pendingToolApprovals = new Map();
 // terminal `complete` (aborted: true) to the client, so the run loop must not
 // emit a second one when its generator winds down.
 const abortedSessionIds = new Set();
+// Sessions already told that Claude Code reports a different context window
+// than their model declares. The warning names a configuration mistake, so it
+// is worth saying once per session and never again.
+const contextWindowMismatchWarnedSessions = new Set();
 // Query instances interrupted because a newer run took over their session id
 // (see addSession). Their run loops must stay silent on wind-down: the map
 // entry, the abort flag, and all client-facing events belong to the new run.
@@ -296,10 +304,12 @@ function mapCliOptionsToSDK(options = {}) {
   applyClaudeEffort(sdkOptions, resolveClaudeEffort(sdkOptions.model, effort, modelsDefinition));
 
   // A Claude custom model with its own Base URL/API Key routes this call to
-  // that endpoint instead of the logged-in subscription. See fork-customizations.md.
-  const customEndpointEnv = resolveClaudeCustomEndpointEnv(sdkOptions.model, modelsDefinition);
-  if (customEndpointEnv) {
-    Object.assign(sdkOptions.env, customEndpointEnv);
+  // that endpoint instead of the logged-in subscription, and one that declares
+  // its own context window tells the spawned process the real size. See
+  // fork-customizations.md.
+  const customModelEnv = resolveClaudeCustomModelEnv(sdkOptions.model, modelsDefinition);
+  if (customModelEnv) {
+    Object.assign(sdkOptions.env, customModelEnv);
   }
 
   sdkOptions.systemPrompt = {
@@ -447,16 +457,17 @@ function readNumber(value) {
  * `input_tokens + cache_read + cache_creation` is one request's whole prompt,
  * which is exactly what the context window holds at that moment.
  * @param {Object} messageUsage - Anthropic usage payload
+ * @param {number|null} [declaredContextWindow] - Window the model declares, in raw tokens
  * @returns {TokenBudget} Token budget object
  */
-function buildTokenBudget(messageUsage) {
+function buildTokenBudget(messageUsage, declaredContextWindow = null) {
   const directInputTokens = readNumber(messageUsage.input_tokens ?? messageUsage.inputTokens);
   const cacheCreationTokens = readNumber(messageUsage.cache_creation_input_tokens ?? messageUsage.cacheCreationInputTokens ?? messageUsage.cacheCreationTokens);
   const cacheReadTokens = readNumber(messageUsage.cache_read_input_tokens ?? messageUsage.cacheReadInputTokens ?? messageUsage.cacheReadTokens);
   const cacheTokens = cacheCreationTokens + cacheReadTokens;
   const inputTokens = directInputTokens + cacheTokens;
   const outputTokens = readNumber(messageUsage.output_tokens ?? messageUsage.outputTokens);
-  const contextWindow = parseInt(process.env.CONTEXT_WINDOW, 10) || 160000;
+  const contextWindow = resolveContextWindowTotal(declaredContextWindow);
 
   return {
     used: inputTokens + outputTokens,
@@ -480,9 +491,10 @@ function buildTokenBudget(messageUsage) {
  * prompt its own request carried. The turn-ending `result` is deliberately not
  * a source here — see `extractCumulativeTokenBudget`.
  * @param {Object} sdkMessage - SDK stream message
+ * @param {number|null} [declaredContextWindow] - Window the model declares, in raw tokens
  * @returns {TokenBudget|null} Token budget object or null
  */
-function extractTokenBudget(sdkMessage) {
+function extractTokenBudget(sdkMessage, declaredContextWindow = null) {
   if (!sdkMessage || typeof sdkMessage !== 'object') {
     return null;
   }
@@ -507,7 +519,7 @@ function extractTokenBudget(sdkMessage) {
     return null;
   }
 
-  return buildTokenBudget(messageUsage);
+  return buildTokenBudget(messageUsage, declaredContextWindow);
 }
 
 /**
@@ -524,15 +536,16 @@ function extractTokenBudget(sdkMessage) {
  * message ever emits, so it stays available for the caller to use when a turn
  * produced no assistant budget at all.
  * @param {Object} sdkMessage - SDK stream message
+ * @param {number|null} [declaredContextWindow] - Window the model declares, in raw tokens
  * @returns {TokenBudget|null} Token budget object or null
  */
-function extractCumulativeTokenBudget(sdkMessage) {
+function extractCumulativeTokenBudget(sdkMessage, declaredContextWindow = null) {
   if (!sdkMessage || typeof sdkMessage !== 'object' || sdkMessage.type !== 'result') {
     return null;
   }
 
   if (sdkMessage.usage && typeof sdkMessage.usage === 'object') {
-    return buildTokenBudget(sdkMessage.usage);
+    return buildTokenBudget(sdkMessage.usage, declaredContextWindow);
   }
 
   if (!sdkMessage.modelUsage || typeof sdkMessage.modelUsage !== 'object') {
@@ -550,7 +563,7 @@ function extractCumulativeTokenBudget(sdkMessage) {
   const inputTokens = readNumber(modelData.cumulativeInputTokens ?? modelData.inputTokens);
   const outputTokens = readNumber(modelData.cumulativeOutputTokens ?? modelData.outputTokens);
   const totalUsed = inputTokens + outputTokens;
-  const contextWindow = parseInt(process.env.CONTEXT_WINDOW, 10) || 160000;
+  const contextWindow = resolveContextWindowTotal(declaredContextWindow);
 
   return {
     used: totalUsed,
@@ -806,6 +819,46 @@ async function queryClaudeSDK(command, options = {}, ws, context) {
       model: resolvedModel || options.model,
       effortModels,
     });
+
+    // The window this turn's model declares, resolved once: it is both the
+    // total every budget this run publishes reports, and the value the turn's
+    // own `result` is checked against.
+    const declaredContextWindow = readDeclaredContextWindow(sdkOptions.model, effortModels);
+
+    /**
+     * Says once per session when Claude Code disagrees with the declaration.
+     *
+     * An unknown environment variable is ignored silently by the CLI, so a
+     * declaration that never took effect — a CLI too old to know the variable,
+     * or a model name Claude Code recognises and therefore refuses to override
+     * — looks exactly like one that did. The window the turn's `result`
+     * reports is the only place that disagreement is visible. The readout
+     * keeps showing the declared value either way; this warning is the signal.
+     * @param {Object} resultMessage - The turn's `result` stream message
+     */
+    const warnOnContextWindowMismatch = (resultMessage) => {
+      if (!declaredContextWindow) {
+        return;
+      }
+
+      const reportedContextWindow = resultMessage?.modelUsage?.[sdkOptions.model]?.contextWindow;
+      if (typeof reportedContextWindow !== 'number' || reportedContextWindow === declaredContextWindow) {
+        return;
+      }
+
+      const key = sessionKey();
+      if (!key || contextWindowMismatchWarnedSessions.has(key)) {
+        return;
+      }
+      contextWindowMismatchWarnedSessions.add(key);
+
+      ws.send(createNormalizedMessage({
+        kind: 'error',
+        content: `Claude Code is running "${sdkOptions.model}" with a ${reportedContextWindow}-token context window, not the ${declaredContextWindow} tokens this model declares. CLAUDE_CODE_MAX_CONTEXT_TOKENS was not honored — either the installed Claude Code is too old to know it, or Claude Code recognizes this model name and uses its own window. The context readout still shows the declared value.`,
+        sessionId: capturedSessionId || sessionId || null,
+        provider: 'claude'
+      }));
+    };
 
     const mcpServers = await loadMcpConfig(options.cwd);
     if (mcpServers) {
@@ -1109,8 +1162,8 @@ async function queryClaudeSDK(command, options = {}, ws, context) {
       // Extract and send token budget updates from assistant usage payloads,
       // falling back to the turn's cumulative bill only for SDK builds that
       // report no per-assistant usage at all.
-      const tokenBudgetData = extractTokenBudget(message)
-        || (assistantBudgetSent ? null : extractCumulativeTokenBudget(message));
+      const tokenBudgetData = extractTokenBudget(message, declaredContextWindow)
+        || (assistantBudgetSent ? null : extractCumulativeTokenBudget(message, declaredContextWindow));
       if (tokenBudgetData) {
         if (message.type === 'assistant') {
           assistantBudgetSent = true;
@@ -1121,6 +1174,7 @@ async function queryClaudeSDK(command, options = {}, ws, context) {
       backgroundWork.observeMessage(message);
 
       if (message.type === 'result') {
+        warnOnContextWindowMismatch(message);
         // The turn is done as far as the client is concerned.
         const abortPending = sessionKey() ? abortedSessionIds.has(sessionKey()) : false;
         // Whether this result answers a prompt the user pushed into the held

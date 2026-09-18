@@ -71,6 +71,53 @@ test('token usage lookup requires only the app-facing session id for Claude', as
   }
 });
 
+test('Claude token usage reports the session model declared context window', async () => {
+  const tempDirectory = await mkdtemp(path.join(tmpdir(), 'provider-token-usage-claude-window-'));
+  const sessionFilePath = path.join(tempDirectory, 'provider-session.jsonl');
+
+  try {
+    await writeFile(sessionFilePath, JSON.stringify({
+      type: 'assistant',
+      message: { usage: { input_tokens: 1_000, output_tokens: 200 } },
+    }));
+
+    const service = createProviderTokenUsageService({
+      getSessionById: () => createSessionRow({ jsonl_path: sessionFilePath, model: 'gateway-256k' }),
+      // Set, and deliberately ignored: the model declaration outranks it.
+      getClaudeContextWindow: () => '180000',
+      getDeclaredContextWindow: (model) => (model === 'gateway-256k' ? 262_144 : null),
+    });
+
+    const usage = await service.getSessionTokenUsage('app-session');
+    assert.equal(usage.total, 262_144);
+  } finally {
+    await rm(tempDirectory, { recursive: true, force: true });
+  }
+});
+
+test('Claude token usage keeps the server-level window for a model that declares none', async () => {
+  const tempDirectory = await mkdtemp(path.join(tmpdir(), 'provider-token-usage-claude-nowindow-'));
+  const sessionFilePath = path.join(tempDirectory, 'provider-session.jsonl');
+
+  try {
+    await writeFile(sessionFilePath, JSON.stringify({
+      type: 'assistant',
+      message: { usage: { input_tokens: 1_000, output_tokens: 200 } },
+    }));
+
+    const service = createProviderTokenUsageService({
+      getSessionById: () => createSessionRow({ jsonl_path: sessionFilePath, model: 'claude-sonnet-5' }),
+      getClaudeContextWindow: () => '180000',
+      getDeclaredContextWindow: () => null,
+    });
+
+    const usage = await service.getSessionTokenUsage('app-session');
+    assert.equal(usage.total, 180_000);
+  } finally {
+    await rm(tempDirectory, { recursive: true, force: true });
+  }
+});
+
 test('Codex token usage uses the latest token_count snapshot', async () => {
   const tempDirectory = await mkdtemp(path.join(tmpdir(), 'provider-token-usage-codex-'));
   const sessionFilePath = path.join(tempDirectory, 'rollout-provider-session.jsonl');

@@ -72,6 +72,7 @@ const createCatalogStore = () => {
         baseUrl: input.baseUrl ?? null,
         apiKey: input.apiKey ?? null,
         effortLevels: input.effortLevels ?? null,
+        contextWindow: input.contextWindow ?? null,
       };
       rows.set(provider, [...readRows(provider), record]);
       return record;
@@ -92,6 +93,7 @@ const createCatalogStore = () => {
         baseUrl: input.baseUrl ?? null,
         apiKey: input.apiKey ?? null,
         effortLevels: input.effortLevels ?? null,
+        contextWindow: input.contextWindow ?? null,
       };
       rows.set(provider, readRows(provider).map((record) => (
         record.recordId === recordId ? updated : record
@@ -248,6 +250,56 @@ test('an unknown effort level is rejected', async () => {
     }),
     (error) => error instanceof AppError && error.statusCode === 400,
   );
+});
+
+test('a custom model with no endpoint still round-trips its declared context window', async () => {
+  const { service } = createTestService();
+  const created = await service.createCustomModel('claude', {
+    model: 'Gateway 256K',
+    id: 'gateway-256k',
+    contextWindow: 262_144,
+  });
+
+  assert.equal(created.model.contextWindow, 262_144);
+  assert.equal(created.model.baseUrl, undefined);
+
+  const models = await service.getProviderModels('claude');
+  assert.equal(
+    models.OPTIONS.find((option) => option.value === 'gateway-256k')?.contextWindow,
+    262_144,
+  );
+});
+
+test('an update without a context window clears the declaration', async () => {
+  const { service } = createTestService();
+  const created = await service.createCustomModel('claude', {
+    model: 'Gateway 256K',
+    id: 'gateway-256k',
+    contextWindow: 262_144,
+  });
+
+  const updated = await service.updateCustomModel('claude', created.model.recordId!, {
+    model: 'Gateway 256K',
+    id: 'gateway-256k',
+  });
+
+  assert.equal(updated.model.contextWindow, undefined);
+});
+
+test('a context window outside the 1K-1024K range is rejected', async () => {
+  const { service } = createTestService();
+
+  for (const contextWindow of [0, -1024, 1_500, 1_048_576 + 1024, 262_144.5]) {
+    await assert.rejects(
+      () => service.createCustomModel('claude', {
+        model: 'Gateway',
+        id: `gateway-${contextWindow}`,
+        contextWindow,
+      }),
+      (error) => error instanceof AppError && error.statusCode === 400,
+      `expected ${contextWindow} to be rejected`,
+    );
+  }
 });
 
 test('base URL/API key never leak into another provider\'s option list', async () => {

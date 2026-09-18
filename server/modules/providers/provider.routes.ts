@@ -509,6 +509,12 @@ const parseCustomProviderModelPayload = (payload: unknown): CustomProviderModelI
   const effortLevels = Array.isArray(body.effortLevels)
     ? body.effortLevels.filter((level): level is string => typeof level === 'string')
     : undefined;
+  // Carried through as-is (only coerced to a number) so a malformed declaration
+  // is rejected by the service's validation instead of being silently dropped,
+  // which would read as "clear the field".
+  const contextWindow = body.contextWindow === undefined || body.contextWindow === null
+    ? undefined
+    : Number(body.contextWindow);
   if (!model) {
     throw new AppError('model is required.', {
       code: 'MODEL_NAME_REQUIRED',
@@ -534,7 +540,7 @@ const parseCustomProviderModelPayload = (payload: unknown): CustomProviderModelI
     });
   }
 
-  return { model, id, baseUrl, apiKey, effortLevels };
+  return { model, id, baseUrl, apiKey, effortLevels, contextWindow };
 };
 
 router.get(

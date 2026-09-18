@@ -3,14 +3,20 @@ import { cn } from '@/shared/utils';
 import type { LLMProvider, ProviderModelOption } from '@/shared/types';
 
 /**
- * Claude-only: routes a custom model's sessions to a self-hosted endpoint
- * instead of the logged-in subscription. See fork-customizations.md.
+ * Claude-only per-model settings: routing a custom model's sessions to a
+ * self-hosted endpoint instead of the logged-in subscription, and declaring the
+ * context window that model really accepts. See fork-customizations.md.
+ *
+ * `contextWindowK` is the raw text of the K-unit input (K = 1024 tokens) and is
+ * deliberately independent of `enabled`: the unknown-model window assumption
+ * applies to the model name, not to the endpoint.
  */
 export type ClaudeCustomEndpointValue = {
   enabled: boolean;
   baseUrl: string;
   apiKey: string;
   effortLevels: string[];
+  contextWindowK: string;
 };
 
 export const EMPTY_CUSTOM_ENDPOINT: ClaudeCustomEndpointValue = {
@@ -18,17 +24,30 @@ export const EMPTY_CUSTOM_ENDPOINT: ClaudeCustomEndpointValue = {
   baseUrl: '',
   apiKey: '',
   effortLevels: [],
+  contextWindowK: '',
 };
 
 /** Must match `CUSTOM_MODEL_EFFORT_LEVELS` in `custom-model-endpoint.ts` on the server. */
 const KNOWN_EFFORT_LEVELS = ['low', 'medium', 'high', 'xhigh', 'max'];
 
+/**
+ * K means 1024 here, matching the server's own range check. The conversion
+ * lives only in this file's read-back/payload helpers: the API, the database
+ * and the runtime all carry raw tokens.
+ */
+const TOKENS_PER_K = 1024;
+
 export const readClaudeCustomEndpointFromOption = (
   provider: LLMProvider,
   option: ProviderModelOption,
 ): ClaudeCustomEndpointValue => {
-  if (provider !== 'claude' || !option.baseUrl) {
+  if (provider !== 'claude') {
     return EMPTY_CUSTOM_ENDPOINT;
+  }
+
+  const contextWindowK = option.contextWindow ? String(option.contextWindow / TOKENS_PER_K) : '';
+  if (!option.baseUrl) {
+    return { ...EMPTY_CUSTOM_ENDPOINT, contextWindowK };
   }
 
   return {
@@ -36,18 +55,47 @@ export const readClaudeCustomEndpointFromOption = (
     baseUrl: option.baseUrl,
     apiKey: option.apiKey ?? '',
     effortLevels: option.effort?.values.map((level) => level.value) ?? [],
+    contextWindowK,
   };
+};
+
+/**
+ * Tokens the declared K value stands for, or undefined when the field is empty
+ * (which clears the declaration server-side). A field that holds something
+ * unreadable resolves to 0 rather than undefined, so the server rejects it
+ * instead of silently treating it as "cleared".
+ */
+const readDeclaredContextWindow = (contextWindowK: string): number | undefined => {
+  const entered = contextWindowK.trim();
+  if (!entered) {
+    return undefined;
+  }
+
+  const units = Number(entered);
+  return Number.isFinite(units) ? units * TOKENS_PER_K : 0;
 };
 
 export const buildClaudeCustomEndpointPayload = (
   provider: LLMProvider,
   value: ClaudeCustomEndpointValue,
-): { baseUrl?: string; apiKey?: string; effortLevels?: string[] } => {
-  if (provider !== 'claude' || !value.enabled) {
+): { baseUrl?: string; apiKey?: string; effortLevels?: string[]; contextWindow?: number } => {
+  if (provider !== 'claude') {
     return {};
   }
 
-  return { baseUrl: value.baseUrl.trim(), apiKey: value.apiKey.trim(), effortLevels: value.effortLevels };
+  // The window rides along even with the endpoint pair switched off; the
+  // endpoint fields still only exist when it is on.
+  const contextWindow = readDeclaredContextWindow(value.contextWindowK);
+  if (!value.enabled) {
+    return { contextWindow };
+  }
+
+  return {
+    baseUrl: value.baseUrl.trim(),
+    apiKey: value.apiKey.trim(),
+    effortLevels: value.effortLevels,
+    contextWindow,
+  };
 };
 
 /**
@@ -168,6 +216,31 @@ export default function ClaudeCustomEndpointFields({ value, onChange }: ClaudeCu
           </p>
         </div>
       )}
+
+      <div className="mt-3 border-t border-border/70 pt-3">
+        <label className="block text-xs font-semibold text-foreground" htmlFor="custom-model-context-window">
+          Context window (K, optional)
+        </label>
+        <p className="mt-0.5 text-[11px] leading-4 text-muted-foreground">
+          K means 1024 tokens, so 256 declares a 262144-token window. Only needed when this model&apos;s
+          window differs from what Claude Code assumes for an unrecognized model name (200K). Leave it
+          empty for subscription models and for any model using the <code>[1m]</code> name suffix.
+        </p>
+        <Input
+          id="custom-model-context-window"
+          type="number"
+          inputMode="numeric"
+          min={1}
+          max={1024}
+          step={1}
+          value={value.contextWindowK}
+          onChange={(event) => onChange({ ...value, contextWindowK: event.target.value })}
+          placeholder="e.g. 256"
+          autoComplete="off"
+          spellCheck={false}
+          className="mt-1.5 h-10 rounded-xl bg-background font-mono"
+        />
+      </div>
     </div>
   );
 }

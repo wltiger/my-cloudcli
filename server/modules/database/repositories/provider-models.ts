@@ -14,10 +14,11 @@ type CustomProviderModelRow = {
   base_url: string | null;
   api_key: string | null;
   effort_levels: string | null;
+  context_window: number | null;
 };
 
 const CUSTOM_PROVIDER_MODEL_COLUMNS =
-  'id, provider, model_id, model_name, sort_order, base_url, api_key, effort_levels';
+  'id, provider, model_id, model_name, sort_order, base_url, api_key, effort_levels, context_window';
 
 const parseEffortLevels = (value: string | null): string[] | null =>
   value ? (JSON.parse(value) as string[]) : null;
@@ -36,6 +37,7 @@ const toCustomProviderModelRecord = (
   baseUrl: row.base_url,
   apiKey: row.api_key,
   effortLevels: parseEffortLevels(row.effort_levels),
+  contextWindow: row.context_window,
 });
 
 const readCustomProviderModelRow = (
@@ -104,8 +106,8 @@ export const providerModelsDb = {
     `).get(provider) as { next_order: number };
 
     const result = db.prepare(`
-      INSERT INTO provider_models (provider, model_id, model_name, sort_order, base_url, api_key, effort_levels)
-      VALUES (?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO provider_models (provider, model_id, model_name, sort_order, base_url, api_key, effort_levels, context_window)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       provider,
       input.id,
@@ -114,6 +116,7 @@ export const providerModelsDb = {
       input.baseUrl ?? null,
       input.apiKey ?? null,
       serializeEffortLevels(input.effortLevels),
+      input.contextWindow ?? null,
     );
 
     const row = readCustomProviderModelRow(provider, Number(result.lastInsertRowid));
@@ -138,7 +141,7 @@ export const providerModelsDb = {
 
       db.prepare(`
         UPDATE provider_models
-        SET model_id = ?, model_name = ?, base_url = ?, api_key = ?, effort_levels = ?, updated_at = CURRENT_TIMESTAMP
+        SET model_id = ?, model_name = ?, base_url = ?, api_key = ?, effort_levels = ?, context_window = ?, updated_at = CURRENT_TIMESTAMP
         WHERE provider = ? AND id = ?
       `).run(
         input.id,
@@ -146,6 +149,7 @@ export const providerModelsDb = {
         input.baseUrl ?? null,
         input.apiKey ?? null,
         serializeEffortLevels(input.effortLevels),
+        input.contextWindow ?? null,
         provider,
         recordId,
       );

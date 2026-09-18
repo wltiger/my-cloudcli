@@ -6,6 +6,10 @@ import path from 'node:path';
 import Database from 'better-sqlite3';
 
 import { sessionsDb } from '@/modules/database/index.js';
+import {
+  lookupDeclaredContextWindow,
+  resolveContextWindowTotal,
+} from '@/modules/providers/services/claude-context-window.js';
 import type { AnyRecord } from '@/shared/types.js';
 import { AppError, getOpenCodeDatabasePath } from '@/shared/utils.js';
 
@@ -26,6 +30,8 @@ type ProviderTokenUsageServiceDependencies = {
   readTextFile: (filePath: string) => Promise<string>;
   readTextFileTail: (filePath: string, maxBytes: number) => Promise<FileTail>;
   getClaudeContextWindow: () => string | undefined;
+  /** Window the session's own model declares, in raw tokens, or null. */
+  getDeclaredContextWindow: (model: string | null) => number | null;
   isProviderSessionSuperseded: (providerSessionId: string, provider: string) => boolean;
 };
 
@@ -92,6 +98,7 @@ const defaultDependencies: ProviderTokenUsageServiceDependencies = {
     }
   },
   getClaudeContextWindow: () => process.env.CONTEXT_WINDOW,
+  getDeclaredContextWindow: (model) => lookupDeclaredContextWindow(model),
   isProviderSessionSuperseded: (providerSessionId, provider) =>
     sessionsDb.isProviderSessionSuperseded(providerSessionId, provider),
 };
@@ -197,6 +204,7 @@ function emptyCodexTokenUsage(): TokenUsageResult {
 export function summarizeClaudeTokenUsage(
   entries: AnyRecord[],
   configuredContextWindow: string | undefined = process.env.CONTEXT_WINDOW,
+  declaredContextWindow: number | null = null,
 ): TokenUsageResult {
   let inputTokens = 0;
   let outputTokens = 0;
@@ -244,8 +252,7 @@ export function summarizeClaudeTokenUsage(
     break;
   }
 
-  const parsedContextWindow = Number.parseInt(configuredContextWindow ?? '', 10);
-  const contextWindow = Number.isFinite(parsedContextWindow) ? parsedContextWindow : 160_000;
+  const contextWindow = resolveContextWindowTotal(declaredContextWindow, configuredContextWindow);
   const cacheTokens = cacheReadTokens + cacheCreationTokens;
 
   return {
@@ -473,7 +480,11 @@ export function createProviderTokenUsageService(
       if (!claudeEntriesHaveUsage(entries) && !tail.isComplete) {
         entries = parseClaudeUsageEntries(await dependencies.readTextFile(sessionFilePath));
       }
-      return summarizeClaudeTokenUsage(entries, dependencies.getClaudeContextWindow());
+      return summarizeClaudeTokenUsage(
+        entries,
+        dependencies.getClaudeContextWindow(),
+        dependencies.getDeclaredContextWindow(session.model),
+      );
     },
   };
 }

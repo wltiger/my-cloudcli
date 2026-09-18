@@ -102,3 +102,54 @@ test('the cumulative reader ignores anything that is not a result', () => {
     null,
   );
 });
+
+/** Runs `body` with CONTEXT_WINDOW forced to `value` (or unset), then restores it. */
+function withServerContextWindow(value: string | undefined, body: () => void): void {
+  const previous = process.env.CONTEXT_WINDOW;
+  if (value === undefined) {
+    delete process.env.CONTEXT_WINDOW;
+  } else {
+    process.env.CONTEXT_WINDOW = value;
+  }
+  try {
+    body();
+  } finally {
+    if (previous === undefined) {
+      delete process.env.CONTEXT_WINDOW;
+    } else {
+      process.env.CONTEXT_WINDOW = previous;
+    }
+  }
+}
+
+const ASSISTANT_USAGE = {
+  type: 'assistant',
+  message: { usage: { input_tokens: 1_000, output_tokens: 200 } },
+};
+
+const RESULT_USAGE = {
+  type: 'result',
+  usage: { input_tokens: 1_000, output_tokens: 200 },
+};
+
+test('a model\'s declared context window is the budget total', () => {
+  // The server-level value is deliberately set: the declaration outranks it.
+  withServerContextWindow('180000', () => {
+    assert.equal(extractTokenBudget(ASSISTANT_USAGE, 262_144)?.total, 262_144);
+    assert.equal(extractCumulativeTokenBudget(RESULT_USAGE, 262_144)?.total, 262_144);
+  });
+});
+
+test('without a declaration the budget total falls back to the server-level window', () => {
+  withServerContextWindow('180000', () => {
+    assert.equal(extractTokenBudget(ASSISTANT_USAGE)?.total, 180_000);
+    assert.equal(extractCumulativeTokenBudget(RESULT_USAGE)?.total, 180_000);
+  });
+});
+
+test('without a declaration or a server-level window the budget total is the 160K default', () => {
+  withServerContextWindow(undefined, () => {
+    assert.equal(extractTokenBudget(ASSISTANT_USAGE)?.total, 160_000);
+    assert.equal(extractCumulativeTokenBudget(RESULT_USAGE)?.total, 160_000);
+  });
+});

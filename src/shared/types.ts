@@ -24,6 +24,8 @@ export type ProviderModelOption = {
   /** Claude-only endpoint override, set together or not at all. */
   baseUrl?: string;
   apiKey?: string;
+  /** Claude-only declared context window in raw tokens; the form shows it in K units. */
+  contextWindow?: number;
 };
 
 /** The full model catalog for one provider: every option plus the value used when the user has not chosen one. */
@@ -39,6 +41,8 @@ export type CustomProviderModelInput = {
   baseUrl?: string;
   apiKey?: string;
   effortLevels?: string[];
+  /** Raw tokens, not K units: the form converts before it builds this payload. */
+  contextWindow?: number;
 };
 
 /** Mutation callbacks a model menu calls to persist custom provider models. */

@@ -2,6 +2,7 @@ import { providerModelsDb, sessionsDb } from '@/modules/database/index.js';
 import { providerRegistry } from '@/modules/providers/provider.registry.js';
 import {
   assertCustomModelEndpointFieldsPaired,
+  assertValidContextWindow,
   assertValidEffortLevels,
   buildCustomModelEffort,
 } from '@/modules/providers/services/custom-model-endpoint.js';
@@ -51,6 +52,7 @@ const toCustomProviderModelOption = (
   baseUrl: record.baseUrl ?? undefined,
   apiKey: record.apiKey ?? undefined,
   effort: buildCustomModelEffort(record.effortLevels),
+  contextWindow: record.contextWindow ?? undefined,
 });
 
 const mergeProviderModels = (
@@ -71,6 +73,7 @@ const normalizeCustomModelInput = (input: CustomProviderModelInput): CustomProvi
   const apiKey = input.apiKey?.trim() || undefined;
   assertCustomModelEndpointFieldsPaired(baseUrl, apiKey);
   assertValidEffortLevels(input.effortLevels);
+  assertValidContextWindow(input.contextWindow);
 
   return {
     id: input.id.trim(),
@@ -78,6 +81,7 @@ const normalizeCustomModelInput = (input: CustomProviderModelInput): CustomProvi
     baseUrl,
     apiKey,
     effortLevels: input.effortLevels,
+    contextWindow: input.contextWindow,
   };
 };
 

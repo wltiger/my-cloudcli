@@ -494,13 +494,15 @@ const dropLegacyScheduledTriggersTable = (db: Database): void => {
 };
 
 /**
- * Adds the `base_url`/`api_key`/`effort_levels` columns that let a Claude
- * custom model override the SDK's endpoint/credential and declare which
- * reasoning-effort levels its own sessions can use.
+ * Adds the `base_url`/`api_key`/`effort_levels`/`context_window` columns that
+ * let a Claude custom model override the SDK's endpoint/credential, declare
+ * which reasoning-effort levels its own sessions can use, and declare the
+ * context window it really accepts.
  *
  * Left NULL for every pre-existing row (and every non-Claude row going
  * forward): the runtime only overrides the SDK environment when both
- * base_url/api_key are set, and only offers effort when effort_levels is set.
+ * base_url/api_key are set, only offers effort when effort_levels is set, and
+ * only declares a window when context_window is set.
  */
 const addProviderModelCustomEndpointColumns = (db: Database): void => {
   const providerModelsTableInfo = getTableInfo(db, 'provider_models');
@@ -509,6 +511,7 @@ const addProviderModelCustomEndpointColumns = (db: Database): void => {
   addColumnToTableIfNotExists(db, 'provider_models', columnNames, 'base_url', 'TEXT');
   addColumnToTableIfNotExists(db, 'provider_models', columnNames, 'api_key', 'TEXT');
   addColumnToTableIfNotExists(db, 'provider_models', columnNames, 'effort_levels', 'TEXT');
+  addColumnToTableIfNotExists(db, 'provider_models', columnNames, 'context_window', 'INTEGER');
 };
 
 const ensureProjectsForSessionPaths = (db: Database): void => {

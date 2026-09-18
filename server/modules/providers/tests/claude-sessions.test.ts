@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
-import { closeConnection, initializeDatabase, sessionsDb } from '@/modules/database/index.js';
+import { closeConnection, initializeDatabase, providerModelsDb, sessionsDb } from '@/modules/database/index.js';
 import { ClaudeSessionsProvider } from '@/modules/providers/list/claude/claude-sessions.provider.js';
 
 async function withIsolatedDatabase(runTest: () => void | Promise<void>): Promise<void> {
@@ -650,4 +650,78 @@ test('claude: an unrelated system event still produces nothing', () => {
   );
 
   assert.deepEqual(messages, []);
+});
+
+test("Claude history reports the session model's declared context window", { concurrency: false }, async () => {
+  const tempRoot = await mkdtemp(path.join(os.tmpdir(), 'claude-window-'));
+  const sessionId = 'claude-window-session';
+
+  try {
+    const transcriptPath = path.join(tempRoot, `${sessionId}.jsonl`);
+    await writeFile(transcriptPath, JSON.stringify({
+      type: 'assistant',
+      uuid: 'assistant-1',
+      sessionId,
+      timestamp: '2026-08-21T10:00:00.000Z',
+      message: { role: 'assistant', content: [{ type: 'text', text: 'hi' }], usage: { input_tokens: 1_000, output_tokens: 200 } },
+    }), 'utf8');
+
+    await withIsolatedDatabase(async () => {
+      const now = new Date().toISOString();
+      sessionsDb.createSession(sessionId, 'claude', tempRoot, 'Window session', now, now, transcriptPath);
+      providerModelsDb.createCustomProviderModel('claude', {
+        model: 'Gateway 256K',
+        id: 'gateway-256k',
+        contextWindow: 262_144,
+      });
+      sessionsDb.setSessionModel(sessionId, 'gateway-256k');
+
+      const history = await new ClaudeSessionsProvider().fetchHistory(sessionId, {
+        providerSessionId: sessionId,
+      });
+
+      // The same total the live turn and the token-usage aggregation report, so
+      // the readout does not jump between read points.
+      assert.equal((history.tokenUsage as { total: number }).total, 262_144);
+    });
+  } finally {
+    await rm(tempRoot, { recursive: true, force: true });
+  }
+});
+
+test('Claude history falls back to the server-level window when the model declares none', { concurrency: false }, async () => {
+  const tempRoot = await mkdtemp(path.join(os.tmpdir(), 'claude-window-default-'));
+  const sessionId = 'claude-window-default-session';
+  const previousContextWindow = process.env.CONTEXT_WINDOW;
+  process.env.CONTEXT_WINDOW = '180000';
+
+  try {
+    const transcriptPath = path.join(tempRoot, `${sessionId}.jsonl`);
+    await writeFile(transcriptPath, JSON.stringify({
+      type: 'assistant',
+      uuid: 'assistant-1',
+      sessionId,
+      timestamp: '2026-08-21T10:00:00.000Z',
+      message: { role: 'assistant', content: [{ type: 'text', text: 'hi' }], usage: { input_tokens: 1_000, output_tokens: 200 } },
+    }), 'utf8');
+
+    await withIsolatedDatabase(async () => {
+      const now = new Date().toISOString();
+      sessionsDb.createSession(sessionId, 'claude', tempRoot, 'Plain session', now, now, transcriptPath);
+      sessionsDb.setSessionModel(sessionId, 'claude-sonnet-5');
+
+      const history = await new ClaudeSessionsProvider().fetchHistory(sessionId, {
+        providerSessionId: sessionId,
+      });
+
+      assert.equal((history.tokenUsage as { total: number }).total, 180_000);
+    });
+  } finally {
+    if (previousContextWindow === undefined) {
+      delete process.env.CONTEXT_WINDOW;
+    } else {
+      process.env.CONTEXT_WINDOW = previousContextWindow;
+    }
+    await rm(tempRoot, { recursive: true, force: true });
+  }
 });
