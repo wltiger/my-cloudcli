@@ -313,8 +313,14 @@ test('providerMcpService global adder writes to all providers and rejects unsupp
       workspacePath,
     });
 
-    assert.equal(globalResult.length, 4);
-    assert.ok(globalResult.every((entry) => entry.created === true));
+    // Antigravity's MCP write is not implemented yet, so the per-provider
+    // catch reports it as a failure while the other four still land.
+    assert.equal(globalResult.length, 5);
+    const createdByProvider = new Map(globalResult.map((entry) => [entry.provider, entry.created]));
+    for (const providerId of ['claude', 'codex', 'cursor', 'opencode'] as const) {
+      assert.equal(createdByProvider.get(providerId), true);
+    }
+    assert.equal(createdByProvider.get('antigravity'), false);
 
     const claudeProject = await readJson(path.join(workspacePath, '.mcp.json'));
     assert.ok((claudeProject.mcpServers as Record<string, unknown>)['global-http']);

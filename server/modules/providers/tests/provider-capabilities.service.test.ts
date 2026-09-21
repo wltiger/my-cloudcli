@@ -26,7 +26,7 @@ test('Cursor withholds Compact support for now', () => {
 
 test('the full capability list carries supportsCompact for every provider', () => {
   const all = providerCapabilitiesService.listAllProviderCapabilities();
-  assert.equal(all.length, 4);
+  assert.equal(all.length, 5);
   for (const capability of all) {
     assert.equal(typeof capability.supportsCompact, 'boolean');
   }
@@ -53,7 +53,7 @@ test('OpenCode reports Fork support via the side channel (#23)', () => {
 
 test('the full capability list carries supportsFork for every provider', () => {
   const all = providerCapabilitiesService.listAllProviderCapabilities();
-  assert.equal(all.length, 4);
+  assert.equal(all.length, 5);
   for (const capability of all) {
     assert.equal(typeof capability.supportsFork, 'boolean');
   }
@@ -80,7 +80,7 @@ test('Cursor withholds Clear support until it is verified', () => {
 
 test('the full capability list carries supportsClear for every provider', () => {
   const all = providerCapabilitiesService.listAllProviderCapabilities();
-  assert.equal(all.length, 4);
+  assert.equal(all.length, 5);
   for (const capability of all) {
     assert.equal(typeof capability.supportsClear, 'boolean');
   }

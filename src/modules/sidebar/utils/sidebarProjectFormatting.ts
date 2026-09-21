@@ -262,4 +262,5 @@ export const PROVIDER_LABELS: Record<LLMProvider, string> = {
   codex: 'Codex',
   cursor: 'Cursor',
   opencode: 'OpenCode',
+  antigravity: 'Antigravity',
 };

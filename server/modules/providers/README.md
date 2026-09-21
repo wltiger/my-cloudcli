@@ -45,6 +45,7 @@ Current provider ids in this repo are:
 - `codex`
 - `cursor`
 - `opencode`
+- `antigravity`
 
 Those ids are mirrored in backend unions and frontend provider constants. If
 adding a new provider, update every place that hardcodes this list.
@@ -65,7 +66,7 @@ server/modules/providers/list/<provider>/
   <provider>-session-synchronizer.provider.ts
 ```
 
-The existing provider folders are `claude`, `codex`, `cursor`, and `opencode`.
+The existing provider folders are `claude`, `codex`, `cursor`, `opencode`, and `antigravity`.
 
 Each provider wrapper owns its SDK/CLI runtime alongside its auth, model, and
 session facets. Runtime adapters receive registry-backed model and session
