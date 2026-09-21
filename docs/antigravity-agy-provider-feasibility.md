@@ -170,7 +170,7 @@ The question that matters for this fork is not effort in days but *how much of t
 | Shared cross-provider tests | 11 files | ~30 lines | Low (add a case to an existing table) |
 
 **The bad news: every single wiring file is upstream-owned.** All 21 touchpoints were checked with
-`git cat-file -e upstream/main:<path>` — **21/21 exist upstream**. There is no way to register a provider
+`git cat-file -e upstream/main:<path>` at `5e73a49b` — **21/21 exist upstream**. There is no way to register a provider
 purely in fork-owned files: `providers: Record<LLMProvider, IProvider>` in
 `server/modules/providers/provider.registry.ts:9` forces the `LLMProvider` union to be edited, and that
 union is upstream's (`server/shared/types.ts:69`, `src/shared/types.ts:8`).
@@ -181,7 +181,7 @@ must edit — the two unions, the registry map, the `Record<LLMProvider, X>` map
 the DB `CHECK` list — are the lines upstream will edit next time *it* adds a provider. Collision on those
 hunks is likely, not hypothetical.
 
-**Mitigating fact:** 8 of the 15 core wiring files are **currently byte-identical to `upstream/main`**
+**Mitigating fact:** 8 of the 15 core wiring files are **byte-identical to `upstream/main` @ `5e73a49b`**
 (`git diff --numstat upstream/main dev` reports no change for `provider.registry.ts`, `constants.ts`,
 `LLMProviderLogo.tsx`, `agent.routes.ts`, `commands.routes.ts`, `McpServers.tsx`, `ProviderLoginModal.tsx`,
 `AgentConnectionsStep.tsx`). Adding a provider is what would dirty them. The 7 that already diverge are
@@ -667,7 +667,7 @@ own tests/CLI wrapper/logo, scoped with `git show --stat 374e9de7 -- <paths>`):
 | `server/modules/providers/tests/opencode-models.test.ts` | +73 |
 | `server/opencode-cli.js` (pre-module-refactor runtime location) | +263 |
 | `server/opencode-cli.test.js` | +95 |
-| `src/components/llm-logo-provider/OpenCodeLogo.tsx` | +25 |
+| `src/components/llm-logo-provider/OpenCodeLogo.tsx` (now `src/shared/ui/OpenCodeLogo.tsx`) | +25 |
 | **Subtotal, unambiguously opencode-specific** | **~2180** |
 
 This subtotal (2180 lines, one PR, one author, merged 2026-05-28 per

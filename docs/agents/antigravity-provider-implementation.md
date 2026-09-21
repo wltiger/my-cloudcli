@@ -213,8 +213,9 @@ non-zero exit as opaque.
 - **No Node SDK.** The official SDK is Python-only; npm has no first-party package (`antigravity-sdk@1.7.0`
   on npm is an unrelated AGPL community package for IDE extensions). Subprocess is the only path — which is
   how codex, cursor and opencode already work here. Only the Claude provider uses an SDK.
-- **No headless image/file attachments.** `stream-json` input accepts `text` blocks only. [D] Set the
-  corresponding capability to false.
+- **No native image/file attachment blocks in headless mode.** `stream-json` input accepts `text` blocks
+  only [D] — which is why attachments ride the shared `<images_input>`/`<files_input>` path-tag mechanism
+  like cursor and opencode do (§10), instead of native blocks.
 
 ---
 
@@ -283,7 +284,9 @@ group_id`
 - Filter `app_data_dir = 'antigravity-cli'` to exclude IDE conversations.
 - `preview` is the first user prompt. `title` is **often empty** for short CLI runs — 1.2.5+ deliberately
   skips the title-generating model call in headless runs. Fall back to `preview`.
-- `workspace_uris` is your project key — and is only populated if `--add-dir` was passed (ground rule #1).
+- The project key is `project_id` — set by `--project` (ground rule #1); a run with no `--project` lands in
+  a synthetic `default-cli-project`. `workspace_uris` only lists the added workspace roots and is populated
+  only if `--add-dir` was passed.
 - Weaker secondary source: `cache/last_conversations.json` maps workspace path → most recent conversation id.
 
 ---
@@ -316,7 +319,8 @@ Interface: `IProviderModels` (`interfaces.ts:98-114`) — `getSupportedModels()`
   `gemini-3.6-flash-{high,medium,low}`, `gemini-3.1-pro-{high,low}`, `claude-sonnet-4-6`,
   `claude-opus-4-6-thinking`, `gpt-oss-120b-medium` — 15 entries.
 - **Reasoning effort is baked into the model id** (`-high`/`-medium`/`-low`) *and* separately settable via
-  `--effort`. Decide one convention and stick to it; don't expose both paths.
+  `--effort`. Settled: the model id is the only path — effort is expressed by choosing a model, so
+  `supportsEffort` is `false` and the flag is never passed (§10). Don't expose both paths.
 - The list is **server-fetched and auth-gated** — unauthenticated returns empty with "Please sign in to view
   available models." **Ship a hardcoded fallback catalog** for the logged-out state. [V]
 - `--output-format` is **rejected** by `agy models` on 1.2.7 despite the changelog claiming otherwise, so
@@ -397,8 +401,10 @@ Extend `SkillsProvider` (`shared/skills/skills.provider.ts`, 287 lines) and impl
 Reference: `cursor-skills.provider.ts` (39 lines).
 
 Format is Claude-Code-shaped: `SKILL.md` with YAML frontmatter (`description` required, `name` optional,
-defaulting to the folder name), auto-exposed as `/<skill-name>`. Slash commands and skills **are** expanded
-in print mode, with `--disable-slash-commands` to opt out. [D][V]
+defaulting to the folder name), auto-exposed as `/<skill-name>`. In print mode only the **read-only** slash
+commands expand (`/help`, `/config`, `/permissions`, `/hooks`, `/changelog`) — `/fork` and `/rewind` reach
+the model as literal text (Corrections table above); whether a skill's `/<name>` also expands headless is [?].
+Opt out with `--disable-slash-commands`. [D][V]
 
 Discovery roots:
 
@@ -439,12 +445,12 @@ The `antigravity` entry, settled on 2026-09-21. Each value is a finding or a rec
 | `supportsAbort` | `true` | kill the process tree; borrow `killOpenCodeProcessTree` |
 | `supportsPermissionRequests` | `false` | [V] headless cannot prompt at all — ADR 0015 |
 | `supportsTokenUsage` | `true` | `usage` is on every `step_update` and on `result` (§3) |
-| `supportsEffort` | `true` | `--effort low\|medium\|high` (§6) |
+| `supportsEffort` | `false` | effort is baked into the model id and not uniform across models; the flag is never passed (§6) |
 | `supportsCompact` | `false` | [V] the slash-command registry has **no** `/compact`, only `/context`. A fact, not a conservative default |
 | `supportsFork` / `supportsSessionForking` | `false` | ADR 0014 |
 | `supportsMessageEditing` | `false` | ADR 0014 |
 | `rewindRestoresFiles` | `false` | nothing to restore without Edit |
-| `supportsClear` | `true` | Clear reaches no provider API (ADR 0005); for `agy` it is just omitting `--conversation`. Verify once, then set it |
+| `supportsClear` | `true` | Clear is a new session plus an archive (ADR 0005); for `agy` starting a new session is just omitting `--conversation` — no provider API to call |
 
 The `false`s that reflect a decision rather than a missing upstream feature are already recorded: ADR 0014
 (Fork and Edit) and ADR 0015 (permissions), alongside the established `0004-no-codex-compact-via-sdk.md`,
@@ -454,10 +460,10 @@ The `false`s that reflect a decision rather than a missing upstream feature are 
 
 ## 11. Wiring checklist — outside the provider directory
 
-**Every one of these files is upstream-owned** (verified: `git cat-file -e upstream/main:<path>` succeeds
-for all 21). Marginal cost is ~100 lines of mostly one-line list/map entries, but each one is future
-merge-conflict surface. **8 of the 15 core files are currently byte-identical to `upstream/main`** — adding
-this provider is what dirties them.
+**Every one of these files is upstream-owned** (verified at `upstream/main` @ `5e73a49b`:
+`git cat-file -e upstream/main:<path>` succeeds for all 21). Marginal cost is ~100 lines of mostly one-line
+list/map entries, but each one is future merge-conflict surface. **8 of the 15 core files are byte-identical
+to `upstream/main` @ `5e73a49b`** — adding this provider is what dirties them.
 
 Do them in this order; after step 1 the TypeScript compiler will point at almost everything else.
 
@@ -478,7 +484,7 @@ Do them in this order; after step 1 the TypeScript compiler will point at almost
 | 13 | `src/modules/settings/tabs/agents-settings/**` (4 files), `src/modules/chat/modals/ModelLibraryPanel.tsx`, `src/modules/onboarding/AgentConnectionsStep.tsx`, `src/modules/skills/ProviderSkills.tsx` | Small per-provider branch/entry each. Onboarding copy and UI category grouping need a judgment call. | 🟢 |
 | 14 | `src/modules/i18n/locales/{en,es,fr,ko,zh-CN}/{chat,settings}.json` | ~5–10 short strings each. Note 6 of 11 locales (`de it ja ru tr zh-TW`) never received opencode's strings either — matching that precedent is acceptable. | 🟢 |
 | 15 | 11 shared cross-provider test files (§12) | Add a case to an existing loop/table. | 🟢 |
-| 16 | **`docs/fork-customizations.md` + `.zh-CN.md`** | **Mandatory.** A whole new provider is a fork-specific customization by definition; per `.claude/CLAUDE.md` the entry is part of *this* task, not a follow-up. | — |
+| 16 | **`docs/fork-customizations.md` + `.zh-CN.md`** | **Due with the first code commit.** A whole new provider is a fork-specific customization by definition; per `.claude/CLAUDE.md` the entry ships with the work that diverges from upstream, not as a follow-up. The docs-only planning commits that precede it owe no entry. | — |
 
 ---
 
