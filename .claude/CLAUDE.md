@@ -21,7 +21,7 @@ npm run build               # build:client + build:server
 npm run typecheck           # tsc --noEmit for both src/ and server/
 npm run lint / lint:fix     # oxlint src/ server/
 npm test                    # backend: node's test runner via tsx, globs server/**/*.test.{ts,js}
-npm run test:client         # frontend: same runner, globs src/**/*.test.{ts,tsx}
+npm run test:client         # frontend: vitest under jsdom, globs src/**/*.test.{ts,tsx}
 
 # run a single backend test file:
 npx tsx --tsconfig server/tsconfig.json --test server/modules/git/tests/git.test.ts
@@ -33,7 +33,7 @@ A test file that calls `node:test`'s `mock.module()` (e.g. `server/modules/provi
 
 `npm test` and `npm run test:client` are separate suites — running only `npm test` skips every frontend test. Legacy `src/**/*.test.js` files (e.g. `src/utils/api.test.js`) match neither glob and are plain assertion scripts nothing runs.
 
-`test:client` runs under a plain `tsx` runner with no Vite, so a module that reads `import.meta.env` at module scope cannot be imported from a test at all — and neither can anything importing it, which is most of `src/`. Guard such reads with `?.` (see `src/shared/utils.ts`); Vite still replaces them statically.
+`test:client` runs under **vitest** in a jsdom environment (`vitest.config.ts` + `vitest.setup.ts`), not the backend's `tsx` runner — so Vite's transforms apply and a module reading `import.meta.env` at module scope imports fine. Run one file with `npx vitest run src/modules/chat/tests/chatProviderModels.test.ts`. The config pins `VITE_IS_PLATFORM` to `'false'` so a developer's local `.env` cannot change the suite's shape; tests that care stub it per case. The `?.` guards on `import.meta.env` in `src/shared/utils.ts` (and the comment there explaining them) predate vitest and are now belt-and-braces rather than something the runner requires.
 
 `postinstall` runs `scripts/fix-node-pty.js` (native module patch). `prepare` installs husky hooks; pre-commit runs `lint-staged` (oxlint on staged `src/**` and `server/**` files), commit-msg enforces Conventional Commits via commitlint.
 
