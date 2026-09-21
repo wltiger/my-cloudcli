@@ -108,12 +108,9 @@ Backend code follows a strict feature-module layout enforced by oxlint (`eslint-
 
 ## Frontend architecture (`src/`)
 
-- `components/<feature>/` — feature-scoped UI (chat, git-panel, file-tree, shell, mcp, plugins, task-master, provider-auth, …); many contain their own `hooks/`/`view/` sub-structure.
-- `contexts/` — React context providers (Auth, Theme, WebSocket, Permission, Plugins, TaskMasterSettings…).
-- `stores/` — non-context app state (e.g. `useSessionStore.ts`, message reconciliation logic).
-- `utils/api.js` — the HTTP client wrapper for all `/api/*` calls.
-- `i18n/` — i18next setup; `locales/` holds per-language translation files (README/READMEs are translated into several languages too — keep `docs/README.md` as the source of truth and mirror significant changes to `docs/README.*.md` only if asked).
-- `lib/`, `hooks/`, `types/` — shared frontend utilities, custom hooks, and TS type defs (`src/types/app.ts` holds the frontend `LLMProvider` union, kept in sync with the backend one).
+- `modules/<feature>/` — feature-scoped code (chat, git-panel, file-tree, shell, mcp, plugins, task-master, provider-auth, …). Modules carry their own `hooks/`, `context/`, `utils/` sub-structure; app-state hooks are per-module too (e.g. `modules/chat/hooks/useSessionStore.ts`, message reconciliation logic).
+- `shared/` — cross-feature frontend code: utilities (`utils.ts`), the HTTP client wrapper for all `/api/*` calls (`api.ts`), constants, custom hooks (`hooks/`), React contexts (`context/`), and the TS type defs (`types.ts` holds the frontend `LLMProvider` union, kept in sync with the backend one).
+- `modules/i18n/` — i18next setup; `locales/` holds per-language translation files (README/READMEs are translated into several languages too — keep `docs/README.md` as the source of truth and mirror significant changes to `docs/README.*.md` only if asked).
 
 Vite dev server proxies `/api`, `/ws`, `/shell`, `/plugin-ws` to the Express backend (see `vite.config.js`); in production the Express server serves the built `dist/` directly (see `server/index.ts`).
 
