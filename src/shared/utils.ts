@@ -9,9 +9,12 @@ import type { Project, ProjectSession } from '@/shared/types';
  * Indicates whether the app runs in Platform mode (hosted) or OSS mode (self-hosted).
  * Read it to hide or gate features that only exist in one of the two deployments.
  *
- * The optional chain is what lets a plain Node/test runner import this file: `import.meta.env`
- * is Vite's, so it is undefined outside a Vite build, and because most of `src/` reaches this
- * module a bare property access here made the whole store and hook layer untestable.
+ * The optional chain dates from when the client suite ran under a plain Node runner, where
+ * `import.meta.env` is undefined and a bare property access here made the whole store and hook
+ * layer untestable, since most of `src/` reaches this module. The suite runs under vitest now
+ * and populates it — `vitest.config.ts` pins `VITE_IS_PLATFORM` through it — so the guard is
+ * defensive rather than required. Kept because it costs nothing and this module is imported
+ * almost everywhere.
  */
 export const IS_PLATFORM = import.meta.env?.VITE_IS_PLATFORM === 'true';
 
