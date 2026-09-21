@@ -6,7 +6,11 @@ CloudCLI UI is a desktop/mobile web UI for driving CLI coding agents (Claude Cod
 
 **Project** (sidebar):
 A directory that has ever had at least one CLI agent session in it. Discovered automatically from each provider's on-disk session transcripts on every sidebar refresh — never created manually, and never permanently excluded: new session activity in that directory always reintroduces it.
-_Avoid_: Workspace, repo (a project maps 1:1 to a directory, not necessarily a git repo)
+_Avoid_: Workspace, repo (a project maps 1:1 to a directory, not necessarily a git repo). Also distinct from an Antigravity project below, which is a provider-side record rather than a discovered directory
+
+**Antigravity project** (provider-side):
+An explicit named record in `agy`'s own store — an id, a display name, the folders it covers, its permission grants and its agent settings — created by a person in the Antigravity IDE or CLI and selected per run with `--project`. The inverse of a Project: a Project is a directory CloudCLI discovers, an Antigravity project is an entity the provider holds, and CloudCLI maps one onto the other by matching folder rather than creating a parallel set. It is also the only place a permission grant takes effect — a run that names a project carrying no grants has its grants cleared, including the ones stored globally.
+_Avoid_: Project on its own — always say it in full. Also distinct from the directories one run is given, which `agy` calls its workspace
 
 **Star** (project):
 A per-project flag that only affects sidebar sort order — starred projects sort first. It is not a filter.
@@ -55,7 +59,7 @@ Copying a session's transcript up to a chosen message into a **new** session wit
 _Avoid_: Branch, duplicate, copy — reserve those for git. Also distinct from Edit, which continues the same session instead of creating one.
 
 **Transcript row**:
-One line of a provider's own on-disk session record. Not the unit a reader sees: a single agent turn is written as several rows — reasoning, text, one per tool call — which CloudCLI renders as one message plus its tool cards. Only rows carry an identity the provider will accept back; the ids on rendered messages are CloudCLI's own.
+One line of a provider's own on-disk session record. Not the unit a reader sees: a single agent turn is written as several rows — reasoning, text, one per tool call — which CloudCLI renders as one message plus its tool cards. Only rows carry an identity the provider will accept back, and only where the provider accepts one at all — Antigravity numbers its rows and takes none of them back, which is what leaves it without Edit or Fork. The ids on rendered messages are CloudCLI's own.
 _Avoid_: Line, entry, event
 
 **Anchor**:
