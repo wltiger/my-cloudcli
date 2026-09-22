@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
+import { ANTIGRAVITY_PREDEFINED_MODELS } from '@/modules/providers/list/antigravity/antigravity-models.provider.js';
 import { createProviderModelsService } from '@/modules/providers/services/provider-models.service.js';
 import type {
   CustomProviderModelInput,
@@ -116,6 +117,8 @@ const createTestService = (options: {
   sessions?: ReturnType<typeof createSessionStore>;
   activeModel?: (provider: LLMProvider, sessionId?: string) => string;
   onCatalogRead?: (provider: LLMProvider) => void;
+  /** Serves a real provider catalog instead of the one-entry stand-in. */
+  catalogFor?: (provider: LLMProvider) => ProviderModelsDefinition;
 } = {}) => {
   const catalog = options.catalog ?? createCatalogStore();
   const sessions = options.sessions ?? createSessionStore();
@@ -126,7 +129,7 @@ const createTestService = (options: {
       models: {
         getSupportedModels: async () => {
           options.onCatalogRead?.(provider);
-          return createModels(`${provider}-default`);
+          return options.catalogFor?.(provider) ?? createModels(`${provider}-default`);
         },
         getCurrentActiveModel: async (sessionId) => createCurrentActiveModel(
           options.activeModel?.(provider, sessionId) ?? `${provider}-default`,
@@ -566,4 +569,54 @@ test('resolveResumeModel never consults provider-global state', async () => {
 
   assert.equal(model, 'gpt-5.5');
   assert.equal(providerLookups, 0);
+});
+
+// Antigravity's catalog is the fork's own, and the picker has to hand it back
+// intact: the ids carry their reasoning effort as a suffix, so a service that
+// rewrote or reordered them would change which model a run actually uses.
+test('the Antigravity catalog reaches the picker unchanged', async () => {
+  const { service } = createTestService({
+    catalogFor: () => ANTIGRAVITY_PREDEFINED_MODELS,
+  });
+
+  const models = await service.getProviderModels('antigravity');
+
+  assert.equal(models.DEFAULT, ANTIGRAVITY_PREDEFINED_MODELS.DEFAULT);
+  assert.deepEqual(
+    models.OPTIONS.map((option) => option.value),
+    ANTIGRAVITY_PREDEFINED_MODELS.OPTIONS.map((option) => option.value),
+  );
+  assert.equal(models.OPTIONS.every((option) => option.isCustom === false), true);
+  // Effort is a model choice for this provider, so no option may carry one.
+  assert.equal(models.OPTIONS.some((option) => option.effort !== undefined), false);
+});
+
+test('a custom Antigravity model is appended without moving the default', async () => {
+  const { service } = createTestService({
+    catalogFor: () => ANTIGRAVITY_PREDEFINED_MODELS,
+  });
+
+  const created = await service.createCustomModel('antigravity', {
+    model: 'Gateway Gemini',
+    id: 'gateway-gemini',
+  });
+
+  assert.equal(created.models.OPTIONS.at(-1)?.value, 'gateway-gemini');
+  assert.equal(created.models.DEFAULT, ANTIGRAVITY_PREDEFINED_MODELS.DEFAULT);
+});
+
+test('an Antigravity custom model may not shadow a catalog id', async () => {
+  const { service } = createTestService({
+    catalogFor: () => ANTIGRAVITY_PREDEFINED_MODELS,
+  });
+
+  await assert.rejects(
+    () => service.createCustomModel('antigravity', {
+      model: 'Shadow',
+      id: ANTIGRAVITY_PREDEFINED_MODELS.DEFAULT,
+    }),
+    (error) => error instanceof AppError
+      && error.code === 'MODEL_ID_ALREADY_EXISTS'
+      && error.statusCode === 409,
+  );
 });

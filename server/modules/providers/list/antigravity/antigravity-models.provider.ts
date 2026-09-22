@@ -79,7 +79,7 @@ let liveCatalogRefresh: Promise<LiveCatalog | null> | null = null;
  * Parses `agy models`, which prints TSV `id<TAB>display name` and rejects
  * `--output-format` on 1.2.7 despite its own changelog claiming otherwise.
  */
-const parseAgyModelsOutput = (stdout: string): string[] => {
+export const parseAgyModelsOutput = (stdout: string): string[] => {
   const ids: string[] = [];
   for (const line of stdout.split(/\r?\n/)) {
     const id = line.split('\t')[0]?.trim();
@@ -186,7 +186,7 @@ const isLiveCatalogFresh = (): boolean => (
  * visible, while a known model stays selectable even when the live list omits
  * it.
  */
-const mergeLiveModelIds = (
+export const mergeLiveModelIds = (
   base: ProviderModelsDefinition,
   liveIds: string[],
 ): ProviderModelsDefinition => {

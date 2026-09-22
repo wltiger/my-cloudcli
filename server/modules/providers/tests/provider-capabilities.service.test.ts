@@ -94,3 +94,64 @@ test('only OpenCode rolls files back when a message is edited', () => {
   assert.equal(providerCapabilitiesService.getProviderCapabilities('opencode').rewindRestoresFiles, true);
   assert.equal(providerCapabilitiesService.getProviderCapabilities('claude').rewindRestoresFiles, false);
 });
+
+// Antigravity is the fifth provider, and every count above is hardcoded on
+// purpose: adding a provider without deciding what it can do has to break a
+// test rather than quietly inherit someone else's answers.
+test('Antigravity appears in the full capability list (#60)', () => {
+  const all = providerCapabilitiesService.listAllProviderCapabilities();
+  assert.equal(all.filter((capability) => capability.provider === 'antigravity').length, 1);
+});
+
+// Seam: this is what the composer's permission-mode control offers. Headless
+// `agy` accepts `--mode accept-edits` and `--mode plan` and then ignores them
+// with a warning, so offering either would be a control that does nothing.
+test('Antigravity offers only the two permission modes that do something (ADR 0015)', () => {
+  const capabilities = providerCapabilitiesService.getProviderCapabilities('antigravity');
+
+  assert.deepEqual(capabilities.permissionModes, ['default', 'bypassPermissions']);
+  assert.equal(capabilities.defaultPermissionMode, 'default');
+});
+
+// Headless `agy` cannot prompt at all: a turn whose every tool call was refused
+// still exits 0 and reports success. Pre-granting is the only lever, so the
+// live permission-request path must never be offered.
+test('Antigravity withholds live permission requests (ADR 0015)', () => {
+  assert.equal(
+    providerCapabilitiesService.getProviderCapabilities('antigravity').supportsPermissionRequests,
+    false,
+  );
+});
+
+test('Antigravity withholds Compact — the CLI has no /compact at all', () => {
+  assert.equal(providerCapabilitiesService.getProviderCapabilities('antigravity').supportsCompact, false);
+});
+
+// ADR 0014: /rewind and /fork exist only as TUI overlays, so neither the Fork
+// entry nor the per-message edit affordance may appear.
+test('Antigravity withholds Fork, message editing and session forking (ADR 0014)', () => {
+  const capabilities = providerCapabilitiesService.getProviderCapabilities('antigravity');
+
+  assert.equal(capabilities.supportsFork, false);
+  assert.equal(capabilities.supportsMessageEditing, false);
+  assert.equal(capabilities.supportsSessionForking, false);
+  assert.equal(capabilities.rewindRestoresFiles, false);
+});
+
+// Reasoning effort is baked into the model id (`-high`/`-medium`/`-low`), so it
+// is expressed by choosing a model rather than by a Reasoning dial.
+test('Antigravity withholds the effort control but reports token usage', () => {
+  const capabilities = providerCapabilitiesService.getProviderCapabilities('antigravity');
+
+  assert.equal(capabilities.supportsEffort, false);
+  assert.equal(capabilities.supportsTokenUsage, true);
+});
+
+test('Antigravity accepts attachments and can be aborted', () => {
+  const capabilities = providerCapabilitiesService.getProviderCapabilities('antigravity');
+
+  assert.equal(capabilities.supportsImages, true);
+  assert.equal(capabilities.supportsFiles, true);
+  assert.equal(capabilities.supportsAbort, true);
+  assert.equal(capabilities.supportsClear, true);
+});

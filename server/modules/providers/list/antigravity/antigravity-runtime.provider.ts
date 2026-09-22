@@ -117,7 +117,7 @@ const readUsageNumber = (value: unknown): number => {
  * conversation-cumulative, so billing a turn from it charges the whole history
  * again on every follow-up. The per-step `usage` is the per-call number.
  */
-const buildAntigravityTokenBudget = (usage: unknown): {
+export const buildAntigravityTokenBudget = (usage: unknown): {
   used: number;
   inputTokens: number;
   outputTokens: number;
@@ -173,7 +173,7 @@ const describeDeniedAction = (entry: AntigravityRefusedAction): string => (
  * which is the only place the complete command/path/URL appears — the
  * `denied_actions` entry itself carries just the kind and a display name.
  */
-const collectGrantRuleCandidates = (line: string, into: Set<string>): void => {
+export const collectGrantRuleCandidates = (line: string, into: Set<string>): void => {
   const matches = line.match(/\b(?:read_file|write_file|read_url|execute_url|command|unsandboxed|mcp)\([^)]+\)/g);
   for (const candidate of matches ?? []) {
     into.add(candidate);
@@ -188,7 +188,7 @@ const collectGrantRuleCandidates = (line: string, into: Set<string>): void => {
  * the same kind, and finally the command of the tool call that was refused —
  * an observation of what was attempted, not a guess at what to allow.
  */
-const buildRefusedAction = (
+export const buildRefusedAction = (
   entry: unknown,
   stderrRules: Set<string>,
   lastCommand: string | null,
@@ -276,7 +276,7 @@ function killAntigravityProcessTree(childProcess: ChildProcess): Promise<void> {
  * passed (ADR 0015). Default relies on the grants in the user's own project
  * record; bypassPermissions is the one escape hatch the CLI offers.
  */
-const resolveAntigravityPermissionArgs = (permissionMode: unknown): string[] => (
+export const resolveAntigravityPermissionArgs = (permissionMode: unknown): string[] => (
   permissionMode === 'bypassPermissions' ? ['--dangerously-skip-permissions'] : []
 );
 
