@@ -232,6 +232,281 @@ export const buildRefusedAction = (
 };
 
 /**
+ * Everything one turn's NDJSON fold carries from one line to the next.
+ *
+ * Explicit rather than captured in the executor's closure, so the fold is a
+ * module-level function that can be driven by synthetic events instead of only
+ * by a live `agy` process.
+ */
+export type AntigravityTurnState = {
+  /** The conversation id, once `agy` has announced one. */
+  capturedSessionId: string | null;
+  /** The newest `step_update` usage, never `result.usage` (see the budget builder). */
+  latestStepUsage: unknown;
+  /**
+   * Whole allow rules `agy` named while refusing something this turn. Mutated
+   * in place, because the stderr handler harvests into the same set.
+   */
+  refusalRuleCandidates: Set<string>;
+  /** The last command a tool step tried to run, for the refusal notice. */
+  lastAttemptedCommand: string | null;
+  /** Unified lifecycle contract: exactly one terminal `complete` per run. */
+  completeSent: boolean;
+};
+
+/** The fold's collaborators: what it emits through, and who owns session adoption. */
+export type AntigravityFoldContext = {
+  /** The only side-effect channel. */
+  send: (message: NormalizedMessage) => void;
+  /**
+   * Adopts a conversation id announced mid-stream and answers with the id the
+   * turn is known by afterwards. Everything adoption touches outside the fold —
+   * the process map, the writer's session id, the one-off `session_created` —
+   * belongs to the caller.
+   */
+  registerSession: (capturedSessionId: string | null, nextSessionId: string | null) => string | null;
+  /** The app session id, used until a conversation id has been seen. */
+  appSessionId: string | null;
+  /** Both only reach the refusal notice, which names the record a grant goes into. */
+  antigravityProjectId: string;
+  workspacePath: string;
+  /** The prompt this turn ran, replayed when a granted action is retried. */
+  prompt: string;
+};
+
+export const createAntigravityTurnState = (
+  capturedSessionId: string | null = null,
+): AntigravityTurnState => ({
+  capturedSessionId,
+  latestStepUsage: null,
+  refusalRuleCandidates: new Set<string>(),
+  lastAttemptedCommand: null,
+  completeSent: false,
+});
+
+/** The session id every message of this turn is tagged with. */
+const turnSessionId = (
+  state: AntigravityTurnState,
+  context: AntigravityFoldContext,
+): string | null => state.capturedSessionId || context.appSessionId || null;
+
+/** Hands a newly announced conversation id to the caller and folds the answer back in. */
+const adoptSession = (
+  state: AntigravityTurnState,
+  context: AntigravityFoldContext,
+  nextSessionId: string | null,
+): AntigravityTurnState => {
+  const capturedSessionId = context.registerSession(state.capturedSessionId, nextSessionId);
+  return capturedSessionId === state.capturedSessionId
+    ? state
+    : { ...state, capturedSessionId };
+};
+
+/**
+ * Folds one NDJSON line of `agy`'s stream-json output into the turn state.
+ *
+ * `init` announces the conversation. `step_update` carries everything that
+ * streams — assistant prose as `text_delta`, tool calls by name, and the
+ * per-step `usage`. `result` ends the turn.
+ */
+export const foldAntigravityEventLine = (
+  state: AntigravityTurnState,
+  line: string,
+  context: AntigravityFoldContext,
+): AntigravityTurnState => {
+  if (!line.trim()) {
+    return state;
+  }
+
+  let event: AnyRecord;
+  try {
+    const parsed = readObjectRecord(JSON.parse(line));
+    if (!parsed) {
+      return state;
+    }
+    event = parsed;
+  } catch {
+    // Not NDJSON: surface it as streamed text rather than dropping it, so a
+    // change in the CLI's output shape still reaches the user.
+    context.send(createNormalizedMessage({
+      kind: 'stream_delta',
+      content: line,
+      sessionId: turnSessionId(state, context),
+      provider: PROVIDER,
+    }));
+    return state;
+  }
+
+  const eventName = readOptionalString(event.event);
+
+  if (eventName === 'init') {
+    const init = readObjectRecord(event.init);
+    return adoptSession(
+      state,
+      context,
+      (readOptionalString(event.conversation_id)
+        ?? readOptionalString(init?.conversation_id)
+        ?? null),
+    );
+  }
+
+  if (eventName === 'step_update') {
+    const update = readObjectRecord(event.step_update) as AgyStepUpdate | null;
+    if (!update) {
+      return state;
+    }
+
+    let next = adoptSession(state, context, readOptionalString(update.conversation_id) ?? null);
+
+    const stepType = readOptionalString(update.step_type) ?? '';
+    const stepIndex = readOptionalString(update.step_index) ?? String(update.step_index ?? '');
+    const stepState = readOptionalString(update.state);
+    const sessionIdForEvent = turnSessionId(next, context);
+
+    // Per-step usage is per-call, so this is the number the turn is billed
+    // on.
+    if (update.usage !== undefined) {
+      next = { ...next, latestStepUsage: update.usage };
+    }
+
+    // Tool calls: `tool` steps name the tool and carry `tool_info`. Unknown
+    // step types fall through to the generic text path below rather than
+    // being dropped.
+    if (stepType === 'tool') {
+      const toolName = readOptionalString(update.tool_name) ?? 'Tool';
+      const toolInfo = readObjectRecord(update.tool_info);
+      // Kept for the refusal notice: a refused `command` action reports its
+      // kind but not what it wanted to run.
+      next = {
+        ...next,
+        lastAttemptedCommand: readOptionalString(toolInfo?.command) ?? next.lastAttemptedCommand,
+      };
+      const toolMessage = createNormalizedMessage({
+        // Keyed on step_index so ACTIVE and DONE emissions of the same step
+        // update one card instead of stacking two.
+        id: `antigravity-tool-${next.capturedSessionId || context.appSessionId || 'run'}-${stepIndex}`,
+        kind: 'tool_use',
+        sessionId: sessionIdForEvent,
+        provider: PROVIDER,
+        toolName,
+        toolInput: toolInfo ?? {},
+        toolId: `antigravity-tool-${stepIndex}`,
+      });
+
+      // A completed tool step carries its result on the same record.
+      if (stepState === 'DONE') {
+        const output = readOptionalString(toolInfo?.output)
+          ?? readOptionalString(toolInfo?.result)
+          ?? readOptionalString(update.text_delta);
+        if (output) {
+          toolMessage.toolResult = { content: output };
+        }
+      }
+
+      context.send(toolMessage);
+      return next;
+    }
+
+    // The user's own prompt is already rendered by the client's optimistic
+    // bubble; echoing it back would double it.
+    if (AGY_USER_STEP_TYPES.has(stepType)) {
+      return next;
+    }
+
+    const delta = typeof update.text_delta === 'string' ? update.text_delta : '';
+    if (!delta) {
+      return next;
+    }
+
+    // Every other step type — the documented `agent_response`, the observed
+    // `system_message`, and anything a future release adds — renders as text.
+    context.send(createNormalizedMessage({
+      kind: 'stream_delta',
+      content: delta,
+      sessionId: sessionIdForEvent,
+      provider: PROVIDER,
+      role: 'assistant',
+    }));
+    return next;
+  }
+
+  if (eventName === 'result') {
+    const result = readObjectRecord(event.result) as AgyResult | null;
+    let next = adoptSession(
+      state,
+      context,
+      (readOptionalString(event.conversation_id)
+        ?? readOptionalString(result?.conversation_id)
+        ?? null),
+    );
+
+    const deniedActions = Array.isArray(result?.denied_actions) ? result.denied_actions : [];
+    const status = readOptionalString(result?.status);
+
+    // `result.status` and the exit code cannot be trusted: a turn whose every
+    // tool call was refused still reports SUCCESS and exits 0, with an empty
+    // response. The refused-action list is the only signal.
+    if (deniedActions.length > 0) {
+      const refusedActions = deniedActions.map((entry) => (
+        buildRefusedAction(entry, next.refusalRuleCandidates, next.lastAttemptedCommand)
+      ));
+      const described = refusedActions.map(describeDeniedAction).join(', ');
+      context.send(createNormalizedMessage({
+        kind: 'error',
+        content: `Antigravity refused ${refusedActions.length === 1 ? 'this action' : 'these actions'}: ${described}. Grant it for this project, or rerun with permissions bypassed.`,
+        sessionId: turnSessionId(next, context),
+        provider: PROVIDER,
+        // The post-turn notice: headless `agy` cannot prompt, so the
+        // refusal is only actionable after the fact. Allowing a rule
+        // re-runs this prompt as a new turn — the refused turn stays in
+        // the transcript, because `agy` has no rewind (ADR 0014).
+        antigravityRefusal: {
+          projectId: context.antigravityProjectId,
+          projectPath: context.workspacePath,
+          prompt: context.prompt,
+          actions: refusedActions,
+        },
+      }));
+    } else if (status && status !== 'SUCCESS' && status !== 'RUNNING') {
+      context.send(createNormalizedMessage({
+        kind: 'error',
+        content: `Antigravity ended with status "${status}".`,
+        sessionId: turnSessionId(next, context),
+        provider: PROVIDER,
+      }));
+    }
+
+    if (next.latestStepUsage) {
+      const tokenBudget = buildAntigravityTokenBudget(next.latestStepUsage);
+      if (tokenBudget) {
+        context.send(createNormalizedMessage({
+          kind: 'status',
+          text: 'token_budget',
+          tokenBudget,
+          sessionId: turnSessionId(next, context),
+          provider: PROVIDER,
+        }));
+      }
+    }
+
+    // Terminal complete, emitted here rather than on process close so the
+    // UI stops waiting as soon as the turn reports.
+    if (!next.completeSent) {
+      next = { ...next, completeSent: true };
+      context.send(createCompleteMessage({
+        provider: PROVIDER,
+        sessionId: turnSessionId(next, context),
+        exitCode: 0,
+      }));
+    }
+
+    return next;
+  }
+
+  return state;
+};
+
+/**
  * Terminates a spawned `agy` process, tree and all.
  *
  * On Windows `agy` is reached through a shim, and killing that top-level
@@ -315,6 +590,69 @@ export const resolveAntigravityPermissionArgs = (permissionMode: unknown): strin
 };
 
 /**
+ * Assembles the whole `agy` command line for one turn.
+ *
+ * Always present: `-p` (headless print mode), `--output-format stream-json`
+ * (the NDJSON the fold reads) and `--project` (see below). Everything else is
+ * conditional, and each condition matters: `--conversation` turns the run into
+ * a resume, `--model` overrides whatever the CLI would have picked, and the
+ * permission flag hands the turn more permission than the project record grants.
+ * Passing any of them when they do not apply would change what the turn does.
+ */
+export const buildAntigravityArgs = ({
+  command,
+  projectPath,
+  images,
+  files,
+  antigravityProjectId,
+  providerSessionId,
+  resolvedModel,
+  permissionMode,
+}: {
+  command: string;
+  projectPath?: string | null;
+  images?: unknown;
+  files?: unknown;
+  antigravityProjectId: string;
+  providerSessionId?: string | null;
+  resolvedModel?: string | null;
+  permissionMode?: unknown;
+}): string[] => {
+  const args = ['-p'];
+  const hasAttachments =
+    normalizeAttachmentDescriptors(images).length > 0
+    || normalizeAttachmentDescriptors(files).length > 0;
+
+  if ((command && command.trim()) || hasAttachments) {
+    // Image and file attachments ride along as `<images_input>`/`<files_input>`
+    // path lists appended to the prompt: stream-json input accepts `text`
+    // blocks only, so there is no native attachment block to use. The prompt
+    // must be newline-free on Windows, where a shim hands it to cmd.exe.
+    args.push(flattenPromptForWindowsShell(
+      appendFilesInputTag(appendImagesInputTag(command?.trim() || '', images), files),
+    ));
+  }
+
+  args.push('--output-format', 'stream-json');
+  // Ground rule: `--project` attributes the conversation and is the only scope
+  // a permission grant applies in; `--add-dir` adds the workspace root so the
+  // session index can attribute it too. Both, always.
+  args.push('--project', antigravityProjectId);
+  if (projectPath) {
+    args.push('--add-dir', projectPath);
+  }
+  if (providerSessionId) {
+    args.push('--conversation', providerSessionId);
+  }
+  if (resolvedModel) {
+    args.push('--model', resolvedModel);
+  }
+  args.push(...resolveAntigravityPermissionArgs(permissionMode));
+
+  return args;
+};
+
+/**
  * Runs one Antigravity turn and streams it to the writer.
  */
 async function spawnAntigravity(
@@ -340,8 +678,10 @@ async function spawnAntigravity(
   // would be swallowed and leave the returned promise pending forever.
   const providerSessionId = context.resolveProviderSessionId(sessionId);
   // Rejected here for the same reason: a bad mode is caller input, and failing
-  // before the process exists keeps it a 400 instead of a half-started turn.
-  const permissionArgs = resolveAntigravityPermissionArgs(permissionMode);
+  // before the process exists — before `resolveAntigravityProjectId` below can
+  // create a project record for it — keeps it a 400 instead of a half-started
+  // turn. `buildAntigravityArgs` derives the flags from the same helper.
+  resolveAntigravityPermissionArgs(permissionMode);
   const resolvedModel = await context.resolveResumeModel(sessionId, model);
   // The Antigravity project whose folder covers this Project — the user's own
   // record, so a grant given in the Antigravity IDE applies here too (ADR
@@ -355,26 +695,19 @@ async function spawnAntigravity(
     // Process-map key: the app session id when the caller supplied one, so
     // abort-by-app-id always works.
     const processKey = sessionId || Date.now().toString();
-    let capturedSessionId = providerSessionId;
     let sessionCreatedSent = false;
     let stdoutLineBuffer = '';
     let stderrLineBuffer = '';
-    // Unified lifecycle contract: exactly one terminal `complete` per run.
-    let completeSent = false;
     let terminalNotificationSent = false;
-    // Per-turn usage: the newest `step_update` usage, never `result.usage`.
-    let latestStepUsage: unknown = null;
-    // Whole allow rules `agy` named while refusing something this turn, and the
-    // last command it tried to run — the two places the complete action text
-    // appears, since `denied_actions` names only the kind.
-    const refusalRuleCandidates = new Set<string>();
-    let lastAttemptedCommand: string | null = null;
+    // Everything the fold carries across lines — the conversation id, the
+    // per-turn usage, the refusal material and the one-terminal-complete flag.
+    let turnState = createAntigravityTurnState(providerSessionId);
 
     const send = (message: NormalizedMessage): void => {
       ws.send(message);
     };
 
-    const currentSessionId = (): string | null => capturedSessionId || sessionId || null;
+    const currentSessionId = (): string | null => turnState.capturedSessionId || sessionId || null;
 
     const notifyTerminalState = ({
       code = null,
@@ -386,7 +719,7 @@ async function spawnAntigravity(
 
       terminalNotificationSent = true;
       // Notifications are app-facing, so they carry the app session id.
-      const finalSessionId = sessionId || capturedSessionId || processKey;
+      const finalSessionId = sessionId || turnState.capturedSessionId || processKey;
       if (code === 0 && !error) {
         notifyRunStopped({
           userId: ws?.userId || null,
@@ -407,221 +740,56 @@ async function spawnAntigravity(
       });
     };
 
-    const registerSession = (nextSessionId: string | null): void => {
+    /**
+     * Adopts a conversation id the CLI announced mid-stream.
+     *
+     * Everything adoption touches lives out here rather than in the fold: the
+     * process map (so abort keeps working after the key changes), the writer's
+     * session id, and the one-off `session_created` a brand-new conversation
+     * owes the client.
+     */
+    const registerSession = (
+      capturedSessionId: string | null,
+      nextSessionId: string | null,
+    ): string | null => {
       if (!nextSessionId || capturedSessionId === nextSessionId) {
-        return;
+        return capturedSessionId;
       }
 
-      capturedSessionId = nextSessionId;
       const run = activeAntigravityProcesses.get(processKey);
-      if (!sessionId && processKey !== capturedSessionId && run) {
+      if (!sessionId && processKey !== nextSessionId && run) {
         activeAntigravityProcesses.delete(processKey);
-        activeAntigravityProcesses.set(capturedSessionId, run);
+        activeAntigravityProcesses.set(nextSessionId, run);
       }
 
       if (ws.setSessionId && typeof ws.setSessionId === 'function') {
-        ws.setSessionId(capturedSessionId);
+        ws.setSessionId(nextSessionId);
       }
 
       if (!providerSessionId && !sessionCreatedSent) {
         sessionCreatedSent = true;
         send(createNormalizedMessage({
           kind: 'session_created',
-          newSessionId: capturedSessionId,
-          sessionId: capturedSessionId,
+          newSessionId: nextSessionId,
+          sessionId: nextSessionId,
           provider: PROVIDER,
         }));
       }
+
+      return nextSessionId;
     };
 
-    /**
-     * Handles one NDJSON line of `agy`'s stream-json output.
-     *
-     * `init` announces the conversation. `step_update` carries everything that
-     * streams — assistant prose as `text_delta`, tool calls by name, and the
-     * per-step `usage`. `result` ends the turn.
-     */
+    const foldContext: AntigravityFoldContext = {
+      send,
+      registerSession,
+      appSessionId: sessionId || null,
+      antigravityProjectId,
+      workspacePath,
+      prompt: command,
+    };
+
     const processAntigravityEventLine = (line: string): void => {
-      if (!line.trim()) {
-        return;
-      }
-
-      let event: AnyRecord;
-      try {
-        const parsed = readObjectRecord(JSON.parse(line));
-        if (!parsed) {
-          return;
-        }
-        event = parsed;
-      } catch {
-        // Not NDJSON: surface it as streamed text rather than dropping it, so a
-        // change in the CLI's output shape still reaches the user.
-        send(createNormalizedMessage({
-          kind: 'stream_delta',
-          content: line,
-          sessionId: currentSessionId(),
-          provider: PROVIDER,
-        }));
-        return;
-      }
-
-      const eventName = readOptionalString(event.event);
-
-      if (eventName === 'init') {
-        const init = readObjectRecord(event.init);
-        registerSession(
-          (readOptionalString(event.conversation_id)
-            ?? readOptionalString(init?.conversation_id)
-            ?? null),
-        );
-        return;
-      }
-
-      if (eventName === 'step_update') {
-        const update = readObjectRecord(event.step_update) as AgyStepUpdate | null;
-        if (!update) {
-          return;
-        }
-
-        registerSession(readOptionalString(update.conversation_id) ?? null);
-
-        const stepType = readOptionalString(update.step_type) ?? '';
-        const stepIndex = readOptionalString(update.step_index) ?? String(update.step_index ?? '');
-        const state = readOptionalString(update.state);
-        const sessionIdForEvent = currentSessionId();
-
-        // Per-step usage is per-call, so this is the number the turn is billed
-        // on.
-        if (update.usage !== undefined) {
-          latestStepUsage = update.usage;
-        }
-
-        // Tool calls: `tool` steps name the tool and carry `tool_info`. Unknown
-        // step types fall through to the generic text path below rather than
-        // being dropped.
-        if (stepType === 'tool') {
-          const toolName = readOptionalString(update.tool_name) ?? 'Tool';
-          const toolInfo = readObjectRecord(update.tool_info);
-          // Kept for the refusal notice: a refused `command` action reports its
-          // kind but not what it wanted to run.
-          lastAttemptedCommand = readOptionalString(toolInfo?.command) ?? lastAttemptedCommand;
-          const toolMessage = createNormalizedMessage({
-            // Keyed on step_index so ACTIVE and DONE emissions of the same step
-            // update one card instead of stacking two.
-            id: `antigravity-tool-${capturedSessionId || sessionId || 'run'}-${stepIndex}`,
-            kind: 'tool_use',
-            sessionId: sessionIdForEvent,
-            provider: PROVIDER,
-            toolName,
-            toolInput: toolInfo ?? {},
-            toolId: `antigravity-tool-${stepIndex}`,
-          });
-
-          // A completed tool step carries its result on the same record.
-          if (state === 'DONE') {
-            const output = readOptionalString(toolInfo?.output)
-              ?? readOptionalString(toolInfo?.result)
-              ?? readOptionalString(update.text_delta);
-            if (output) {
-              toolMessage.toolResult = { content: output };
-            }
-          }
-
-          send(toolMessage);
-          return;
-        }
-
-        // The user's own prompt is already rendered by the client's optimistic
-        // bubble; echoing it back would double it.
-        if (AGY_USER_STEP_TYPES.has(stepType)) {
-          return;
-        }
-
-        const delta = typeof update.text_delta === 'string' ? update.text_delta : '';
-        if (!delta) {
-          return;
-        }
-
-        // Every other step type — the documented `agent_response`, the observed
-        // `system_message`, and anything a future release adds — renders as text.
-        send(createNormalizedMessage({
-          kind: 'stream_delta',
-          content: delta,
-          sessionId: sessionIdForEvent,
-          provider: PROVIDER,
-          role: 'assistant',
-        }));
-        return;
-      }
-
-      if (eventName === 'result') {
-        const result = readObjectRecord(event.result) as AgyResult | null;
-        registerSession(
-          (readOptionalString(event.conversation_id)
-            ?? readOptionalString(result?.conversation_id)
-            ?? null),
-        );
-
-        const deniedActions = Array.isArray(result?.denied_actions) ? result.denied_actions : [];
-        const status = readOptionalString(result?.status);
-
-        // `result.status` and the exit code cannot be trusted: a turn whose every
-        // tool call was refused still reports SUCCESS and exits 0, with an empty
-        // response. The refused-action list is the only signal.
-        if (deniedActions.length > 0) {
-          const refusedActions = deniedActions.map((entry) => (
-            buildRefusedAction(entry, refusalRuleCandidates, lastAttemptedCommand)
-          ));
-          const described = refusedActions.map(describeDeniedAction).join(', ');
-          send(createNormalizedMessage({
-            kind: 'error',
-            content: `Antigravity refused ${refusedActions.length === 1 ? 'this action' : 'these actions'}: ${described}. Grant it for this project, or rerun with permissions bypassed.`,
-            sessionId: currentSessionId(),
-            provider: PROVIDER,
-            // The post-turn notice: headless `agy` cannot prompt, so the
-            // refusal is only actionable after the fact. Allowing a rule
-            // re-runs this prompt as a new turn — the refused turn stays in
-            // the transcript, because `agy` has no rewind (ADR 0014).
-            antigravityRefusal: {
-              projectId: antigravityProjectId,
-              projectPath: workspacePath,
-              prompt: command,
-              actions: refusedActions,
-            },
-          }));
-        } else if (status && status !== 'SUCCESS' && status !== 'RUNNING') {
-          send(createNormalizedMessage({
-            kind: 'error',
-            content: `Antigravity ended with status "${status}".`,
-            sessionId: currentSessionId(),
-            provider: PROVIDER,
-          }));
-        }
-
-        if (latestStepUsage) {
-          const tokenBudget = buildAntigravityTokenBudget(latestStepUsage);
-          if (tokenBudget) {
-            send(createNormalizedMessage({
-              kind: 'status',
-              text: 'token_budget',
-              tokenBudget,
-              sessionId: currentSessionId(),
-              provider: PROVIDER,
-            }));
-          }
-        }
-
-        // Terminal complete, emitted here rather than on process close so the
-        // UI stops waiting as soon as the turn reports.
-        if (!completeSent) {
-          completeSent = true;
-          send(createCompleteMessage({
-            provider: PROVIDER,
-            sessionId: currentSessionId(),
-            exitCode: 0,
-          }));
-        }
-      }
+      turnState = foldAntigravityEventLine(turnState, line, foldContext);
     };
 
     const processAntigravityStderrLine = (line: string): void => {
@@ -632,7 +800,7 @@ async function spawnAntigravity(
       // A refusal notice names the rule that would have allowed the action.
       // Harvested from every stderr line because the notice is not structured
       // and its wording is not a contract.
-      collectGrantRuleCandidates(line, refusalRuleCandidates);
+      collectGrantRuleCandidates(line, turnState.refusalRuleCandidates);
 
       // `agy` reports structured failures as `AGY_ERROR: {json}` on stderr;
       // everything else is ordinary CLI chatter.
@@ -670,36 +838,16 @@ async function spawnAntigravity(
       }));
     };
 
-    const args = ['-p'];
-    const hasAttachments =
-      normalizeAttachmentDescriptors(images).length > 0
-      || normalizeAttachmentDescriptors(files).length > 0;
-
-    if ((command && command.trim()) || hasAttachments) {
-      // Image and file attachments ride along as `<images_input>`/`<files_input>`
-      // path lists appended to the prompt: stream-json input accepts `text`
-      // blocks only, so there is no native attachment block to use. The prompt
-      // must be newline-free on Windows, where a shim hands it to cmd.exe.
-      args.push(flattenPromptForWindowsShell(
-        appendFilesInputTag(appendImagesInputTag(command?.trim() || '', images), files),
-      ));
-    }
-
-    args.push('--output-format', 'stream-json');
-    // Ground rule: `--project` attributes the conversation and is the only scope
-    // a permission grant applies in; `--add-dir` adds the workspace root so the
-    // session index can attribute it too. Both, always.
-    args.push('--project', antigravityProjectId);
-    if (projectPath) {
-      args.push('--add-dir', projectPath);
-    }
-    if (providerSessionId) {
-      args.push('--conversation', providerSessionId);
-    }
-    if (resolvedModel) {
-      args.push('--model', resolvedModel);
-    }
-    args.push(...permissionArgs);
+    const args = buildAntigravityArgs({
+      command,
+      projectPath,
+      images,
+      files,
+      antigravityProjectId,
+      providerSessionId,
+      resolvedModel,
+      permissionMode,
+    });
 
     let agyProcess;
     try {
@@ -758,7 +906,7 @@ async function spawnAntigravity(
     });
 
     agyProcess.on('close', async (code) => {
-      const finalSessionId = sessionId || capturedSessionId || processKey;
+      const finalSessionId = sessionId || turnState.capturedSessionId || processKey;
       activeAntigravityProcesses.delete(finalSessionId);
       activeAntigravityProcesses.delete(processKey);
 
@@ -773,8 +921,8 @@ async function spawnAntigravity(
 
       // Skipped for aborted runs, whose terminal `complete` (aborted: true) the
       // abort handler already sent.
-      if (!completeSent && !run.aborted) {
-        completeSent = true;
+      if (!turnState.completeSent && !run.aborted) {
+        turnState = { ...turnState, completeSent: true };
         send(createCompleteMessage({ provider: PROVIDER, sessionId: finalSessionId, exitCode: code ?? 1 }));
       }
 
@@ -801,7 +949,7 @@ async function spawnAntigravity(
     });
 
     agyProcess.on('error', async (error) => {
-      const finalSessionId = sessionId || capturedSessionId || processKey;
+      const finalSessionId = sessionId || turnState.capturedSessionId || processKey;
       activeAntigravityProcesses.delete(finalSessionId);
       activeAntigravityProcesses.delete(processKey);
 
@@ -816,8 +964,8 @@ async function spawnAntigravity(
         sessionId: finalSessionId,
         provider: PROVIDER,
       }));
-      if (!completeSent && !run.aborted) {
-        completeSent = true;
+      if (!turnState.completeSent && !run.aborted) {
+        turnState = { ...turnState, completeSent: true };
         send(createCompleteMessage({ provider: PROVIDER, sessionId: finalSessionId, exitCode: 1 }));
       }
       notifyTerminalState({ error });
