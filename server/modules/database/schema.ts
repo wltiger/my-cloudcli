@@ -150,6 +150,13 @@ CREATE TABLE IF NOT EXISTS sessions (
     -- normally. Informational only: a fork is a fully independent provider
     -- session, and deleting the source does not affect it.
     forked_from_session_id TEXT,
+    -- When the provider's own index last reported this conversation as still
+    -- working, NULL whenever it reported it idle. Only a provider whose
+    -- conversations can be started outside CloudCLI writes it (today: only
+    -- antigravity, from \`conversation_summaries.not_fully_idle\`) — every
+    -- other provider's "running" comes from the chat run registry, which by
+    -- construction only knows the runs this app started.
+    external_running_at DATETIME,
     isArchived BOOLEAN DEFAULT 0,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,

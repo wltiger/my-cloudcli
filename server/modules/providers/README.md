@@ -144,6 +144,7 @@ Current MCP formats in this repo are:
 | Codex | `.codex/config.toml` | `user`, `project` | `stdio`, `http` |
 | Cursor | `.cursor/mcp.json` | `user`, `project` | `stdio`, `http` |
 | OpenCode | `~/.config/opencode/opencode.json` or `<workspace>/opencode.json` (`.jsonc` is read when present) | `user`, `project` | `stdio`, `http` |
+| Antigravity | `~/.gemini/config/mcp_config.json` (shared with the Antigravity IDE) or `<workspace>/.agents/mcp_config.json` | `user`, `project` | `stdio`, `http` |
 
 5. Implement skills.
 
@@ -164,6 +165,7 @@ Current skill discovery roots are:
 | Codex | `~/.agents/skills`, `~/.codex/skills/.system`, `/etc/codex/skills` | `<workspace>/.agents/skills`, `path.dirname(workspacePath)/.agents/skills`, topmost git root `.agents/skills` | `$` | Overlapping roots are deduplicated before scanning. |
 | Cursor | `~/.cursor/skills` | `<workspace>/.cursor/skills`, `<workspace>/.agents/skills` | `/` | Uses slash-style commands. |
 | OpenCode | `~/.config/opencode/skills`, `~/.claude/skills`, `~/.agents/skills` | Cwd-to-topmost-git-root `.opencode/skills`, `.claude/skills`, and `.agents/skills` | `/` | Reuses OpenCode, Claude, and Agents skill locations. Overlapping roots are deduplicated before scanning. |
+| Antigravity | `~/.gemini/antigravity-cli/skills` (CLI global), `~/.gemini/config/skills` (IDE global) | `<workspace>/.agents/skills` | `/` | Both global candidates are returned rather than one being picked: which of them `agy` actually scans is still unsettled (build guide §13 Q2). |
 
 Command forms currently used by the providers are:
 
@@ -172,6 +174,7 @@ Command forms currently used by the providers are:
 - Codex skills: `$skill-name`
 - Cursor skills: `/skill-name`
 - OpenCode skills: `/skill-name`
+- Antigravity skills: `/skill-name`
 
 6. Implement sessions.
 
@@ -209,6 +212,7 @@ Current session sync roots are:
 | Codex | `~/.codex/sessions/**/*.jsonl` | Uses `~/.codex/session_index.jsonl` for title lookup and the last `task_complete` message for a fallback title. |
 | Cursor | `~/.cursor/projects/**/*.jsonl` | Uses sibling `worker.log` to recover `workspacePath`, then derives the session title from the first user prompt. |
 | OpenCode | `~/.local/share/opencode/opencode.db` | Reads active sessions/messages/parts from OpenCode's shared SQLite database and stores `jsonl_path` as `null` so deleting one app session cannot remove the shared DB. |
+| Antigravity | `~/.gemini/antigravity-cli/conversation_summaries.db` for the list, `~/.gemini/antigravity-cli/brain/<id>/.system_generated/logs/transcript.jsonl` for history | Reads the index `agy` shares with the Antigravity IDE, filtered to `app_data_dir = 'antigravity-cli'` and `nesting_depth = 0`, and stores `jsonl_path` as `null`. A conversation whose directory none of its four sources place is left unindexed rather than guessed at. Writes `sessions.external_running_at` from the index's `not_fully_idle`, which is how a conversation started outside CloudCLI still shows as running. |
 
 8. Register the provider.
 
@@ -358,6 +362,8 @@ Useful tests in this repo:
 - `server/modules/providers/tests/mcp.test.ts`
 - `server/modules/providers/tests/skills.test.ts`
 - `server/modules/providers/tests/opencode-sessions.test.ts`
+- `server/modules/providers/tests/antigravity-sessions.test.ts`, `antigravity-synchronizer.test.ts`
+- `server/modules/providers/tests/sessions-watcher.test.ts` — which files under each watch root trigger `synchronizeFile`
 
 If you touch sessions or session synchronization, add or update focused tests
 alongside the implementation.

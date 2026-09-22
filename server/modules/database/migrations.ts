@@ -432,6 +432,22 @@ const addForkedFromSessionIdColumn = (db: Database): void => {
 };
 
 /**
+ * Adds the `external_running_at` marker for conversations a provider can run
+ * outside CloudCLI.
+ *
+ * Pre-existing rows keep a NULL, which reads as "idle" — the correct answer
+ * for every row written before the marker existed, and the one the next
+ * synchronizer pass overwrites anyway for the provider that owns it.
+ *
+ * Idempotent through `addColumnToTableIfNotExists`: a second run sees the
+ * column in `PRAGMA table_info` and does nothing.
+ */
+const addSessionExternalRunningAtColumn = (db: Database): void => {
+  const columnNames = getTableInfo(db, 'sessions').map((column) => column.name);
+  addColumnToTableIfNotExists(db, 'sessions', columnNames, 'external_running_at', 'DATETIME');
+};
+
+/**
  * Adds the `model` column that records which model each session runs with.
  *
  * Left NULL for pre-existing rows on purpose: the model resolver falls back to
@@ -752,6 +768,7 @@ export const runMigrations = (db: Database) => {
     addSessionEffortColumn(db);
     addSessionPermissionModeColumn(db);
     addForkedFromSessionIdColumn(db);
+    addSessionExternalRunningAtColumn(db);
     ensureProjectsForSessionPaths(db);
     mergeCaseInsensitiveDuplicateProjectPaths(db);
     db.exec(SCHEDULED_MESSAGES_TABLE_SCHEMA_SQL);

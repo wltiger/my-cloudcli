@@ -38,6 +38,9 @@ type SummaryRow = {
   app_data_dir?: string;
   nesting_depth?: number;
   parent_conversation_id?: string;
+  /** `agy`'s "this conversation is still working" flag. */
+  not_fully_idle?: number;
+  killed?: number;
 };
 
 type Fixture = {
@@ -96,14 +99,17 @@ async function withIndex(
       project_id TEXT,
       parent_conversation_id TEXT,
       nesting_depth INTEGER,
-      app_data_dir TEXT
+      app_data_dir TEXT,
+      not_fully_idle INTEGER,
+      killed INTEGER
     );
   `);
   const insert = index.prepare(`
     INSERT INTO conversation_summaries (
       conversation_id, title, preview, step_count, last_modified_time,
-      workspace_uris, project_id, parent_conversation_id, nesting_depth, app_data_dir
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      workspace_uris, project_id, parent_conversation_id, nesting_depth, app_data_dir,
+      not_fully_idle, killed
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
   for (const row of fixture.rows) {
     insert.run(
@@ -117,6 +123,8 @@ async function withIndex(
       row.parent_conversation_id ?? '',
       row.nesting_depth ?? 0,
       row.app_data_dir ?? 'antigravity-cli',
+      row.not_fully_idle ?? 0,
+      row.killed ?? 0,
     );
   }
   index.close();
@@ -431,5 +439,87 @@ test('no index at all means nothing to do, not a failure', { concurrency: false 
 
     assert.equal(await synchronizer.synchronize(), 0);
     assert.equal(await synchronizer.synchronizeFile('anything.jsonl'), null);
+  });
+});
+
+test('a conversation the index reports as still working is marked live, and the marker clears when it goes idle', { concurrency: false }, async () => {
+  const LIVE_MODIFIED_AT = '2026-09-21 10:00:00.000000+00:00';
+
+  await withIndex({
+    rows: [{
+      conversation_id: 'conv-live',
+      preview: 'started in a terminal',
+      last_modified_time: LIVE_MODIFIED_AT,
+      workspace_uris: JSON.stringify([WORKSPACE_URI]),
+      not_fully_idle: 1,
+    }],
+  }, async ({ synchronizer, homeDir }) => {
+    assert.equal(await synchronizer.synchronize(), 1);
+
+    const running = sessionsDb.getSessionByProviderSessionId('conv-live');
+    // The instant recorded is the conversation's own last activity, not the
+    // time of the scan, so a CLI that dies mid-turn ages out instead of being
+    // refreshed forever by the next scan.
+    assert.equal(running?.external_running_at, new Date('2026-09-21T10:00:00.000Z').toISOString());
+    assert.deepEqual(
+      sessionsDb.getExternallyRunningSessions().map((row) => row.session_id),
+      [running?.session_id],
+    );
+
+    // `agy` finishes the turn: the same row now reports idle.
+    const index = new Database(path.join(homeDir, '.gemini', 'antigravity-cli', 'conversation_summaries.db'));
+    index.prepare('UPDATE conversation_summaries SET not_fully_idle = 0').run();
+    index.close();
+
+    await synchronizer.synchronize();
+
+    assert.equal(sessionsDb.getSessionByProviderSessionId('conv-live')?.external_running_at, null);
+    assert.deepEqual(sessionsDb.getExternallyRunningSessions(), []);
+  });
+});
+
+test('a killed conversation is never reported as running', { concurrency: false }, async () => {
+  await withIndex({
+    rows: [{
+      conversation_id: 'conv-killed',
+      preview: 'interrupted',
+      workspace_uris: JSON.stringify([WORKSPACE_URI]),
+      not_fully_idle: 1,
+      killed: 1,
+    }],
+  }, async ({ synchronizer }) => {
+    assert.equal(await synchronizer.synchronize(), 1);
+
+    assert.equal(sessionsDb.getSessionByProviderSessionId('conv-killed')?.external_running_at, null);
+    assert.deepEqual(sessionsDb.getExternallyRunningSessions(), []);
+  });
+});
+
+test('a transcript event is what flips the marker for the one conversation it names', { concurrency: false }, async () => {
+  await withIndex({
+    rows: [
+      {
+        conversation_id: 'conv-a',
+        preview: 'working',
+        workspace_uris: JSON.stringify([WORKSPACE_URI]),
+        not_fully_idle: 1,
+      },
+      {
+        conversation_id: 'conv-b',
+        preview: 'also working',
+        workspace_uris: JSON.stringify([WORKSPACE_URI]),
+        not_fully_idle: 1,
+      },
+    ],
+  }, async ({ synchronizer, transcriptPath }) => {
+    await synchronizer.synchronizeFile(transcriptPath('conv-a'));
+
+    assert.deepEqual(
+      sessionsDb.getExternallyRunningSessions().map((row) => row.provider),
+      ['antigravity'],
+    );
+    // `conv-b` was never scanned, so it has no row at all yet — a file event
+    // must not become a full rescan.
+    assert.equal(sessionsDb.getSessionByProviderSessionId('conv-b'), null);
   });
 });

@@ -84,6 +84,14 @@
   "json": {
     "response": "JSON 响应"
   },
+  "antigravityPermissions": {
+    "title": "为本项目允许这些操作，并重新运行该提示",
+    "allowAndRerun": "允许并重新运行",
+    "allowing": "正在允许…",
+    "allowed": "已允许 · 正在重新运行",
+    "ruleUnknown": "Antigravity 没有报告完整的操作，需要在 Antigravity IDE 中授予该权限。",
+    "grantFailed": "无法授予该权限。"
+  },
   "permissions": {
     "grant": "授予 {{tool}} 权限",
     "added": "权限已添加",

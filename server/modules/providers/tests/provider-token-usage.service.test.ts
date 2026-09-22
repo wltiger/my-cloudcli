@@ -24,6 +24,7 @@ function createSessionRow(overrides: Record<string, unknown> = {}) {
     effort: null,
     permission_mode: null,
     forked_from_session_id: null,
+    external_running_at: null,
     isArchived: 0,
     created_at: '2026-01-01T00:00:00.000Z',
     updated_at: '2026-01-01T00:00:00.000Z',

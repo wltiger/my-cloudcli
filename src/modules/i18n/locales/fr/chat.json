@@ -65,6 +65,14 @@
   "json": {
     "response": "Réponse JSON"
   },
+  "antigravityPermissions": {
+    "title": "Autorisez ces actions pour ce projet et relancez la requête",
+    "allowAndRerun": "Autoriser et relancer",
+    "allowing": "Autorisation…",
+    "allowed": "Autorisé · relance en cours",
+    "ruleUnknown": "Antigravity n'a pas signalé l'action complète, elle doit donc être autorisée dans l'IDE Antigravity.",
+    "grantFailed": "La permission n'a pas pu être accordée."
+  },
   "permissions": {
     "grant": "Autoriser {{tool}}",
     "added": "Permission ajoutée",

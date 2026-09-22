@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project
 
-CloudCLI UI (npm package `@cloudcli-ai/cloudcli`, formerly "Claude Code UI") is a desktop/mobile web UI for driving CLI coding agents — Claude Code, Cursor CLI, Codex, and OpenCode — from a browser. It wraps each agent's own CLI/SDK and session storage (`~/.claude`, `~/.codex`, `~/.cursor`, etc.) rather than duplicating it; changes made in the UI (MCP servers, permissions) are read/written directly to the agent's native config.
+CloudCLI UI (npm package `@cloudcli-ai/cloudcli`, formerly "Claude Code UI") is a desktop/mobile web UI for driving CLI coding agents — Claude Code, Cursor CLI, Codex, OpenCode and Antigravity — from a browser. It wraps each agent's own CLI/SDK and session storage (`~/.claude`, `~/.codex`, `~/.cursor`, `~/.gemini`, etc.) rather than duplicating it; changes made in the UI (MCP servers, permissions) are read/written directly to the agent's native config.
 
 Frontend: React 18 + Vite + Tailwind, with an optional Electron desktop shell.
 Backend: Express + `ws` (WebSocket) on Node 22+, mixed JS/TS mid-migration to TypeScript.
@@ -98,7 +98,7 @@ Backend code follows a strict feature-module layout enforced by oxlint (`eslint-
 
 ### Providers module (multi-agent abstraction)
 
-`server/modules/providers/` is the adapter layer over the four supported CLI agents (`claude`, `codex`, `cursor`, `opencode`). Each provider under `list/<provider>/` implements 7 facets — `runtime`, `models`, `auth`, `mcp`, `skills`, `sessions`, `sessionSynchronizer` — matching interfaces in `server/shared/interfaces.ts`, registered in `provider.registry.ts`.
+`server/modules/providers/` is the adapter layer over the five supported CLI agents (`claude`, `codex`, `cursor`, `opencode`, `antigravity`). Each provider under `list/<provider>/` implements 7 facets — `runtime`, `models`, `auth`, `mcp`, `skills`, `sessions`, `sessionSynchronizer` — matching interfaces in `server/shared/interfaces.ts`, registered in `provider.registry.ts`.
 
 **Read `server/modules/providers/README.md` before adding a provider or touching provider wiring** — it documents the full facet contract, file layout, per-provider MCP/skill/session-sync formats, a wrapper template, and the exact list of files to update in both `server/` and `src/` (it's kept current on purpose; don't duplicate its content here).
 

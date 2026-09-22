@@ -43,6 +43,10 @@ type AntigravitySummaryRow = {
   last_modified_time: string | null;
   workspace_uris: string | null;
   project_id: string | null;
+  /** `agy`'s own "this conversation is still working" flag. */
+  not_fully_idle: number | null;
+  /** Set once a conversation was terminated; a killed run is never live. */
+  killed: number | null;
 };
 
 /**
@@ -60,7 +64,9 @@ const SUMMARY_ROWS_SQL = `
     preview,
     last_modified_time,
     workspace_uris,
-    project_id
+    project_id,
+    not_fully_idle,
+    killed
   FROM conversation_summaries
   WHERE app_data_dir = ?
     AND nesting_depth = 0
@@ -355,7 +361,7 @@ export class AntigravitySessionSynchronizer implements IProviderSessionSynchroni
     // `jsonl_path` stays null: the shared index is not this session's file, and
     // a session row that named it would make deleting one CloudCLI session
     // delete the Antigravity IDE's own state.
-    return sessionsDb.createSession(
+    const appSessionId = sessionsDb.createSession(
       conversationId,
       this.provider,
       projectPath,
@@ -364,5 +370,23 @@ export class AntigravitySessionSynchronizer implements IProviderSessionSynchroni
       modifiedAt,
       null,
     );
+
+    if (appSessionId) {
+      // A conversation `agy` is working on right now is the one case CloudCLI
+      // cannot learn from its own run registry — it was started in a terminal
+      // or in the IDE, so no run of ours exists. `not_fully_idle` is the
+      // index's own answer and costs nothing: it rides the row already read.
+      //
+      // The recorded instant is the conversation's own `last_modified_time`,
+      // not the time of this scan, so an `agy` that died mid-turn (leaving the
+      // flag set with nothing left to clear it) goes stale on its own instead
+      // of being refreshed forever by the next scan.
+      sessionsDb.setSessionExternalRunningAt(
+        appSessionId,
+        row.not_fully_idle && !row.killed ? modifiedAt : null,
+      );
+    }
+
+    return appSessionId;
   }
 }

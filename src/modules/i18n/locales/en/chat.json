@@ -91,6 +91,14 @@
   "json": {
     "response": "JSON Response"
   },
+  "antigravityPermissions": {
+    "title": "Allow these actions for this project and run the prompt again",
+    "allowAndRerun": "Allow and re-run",
+    "allowing": "Allowing…",
+    "allowed": "Allowed · re-running",
+    "ruleUnknown": "Antigravity did not report the whole action, so it has to be allowed in the Antigravity IDE.",
+    "grantFailed": "The permission could not be granted."
+  },
   "permissions": {
     "grant": "Grant permission for {{tool}}",
     "added": "Permission added",

@@ -14,6 +14,17 @@ import type {
 } from '@/shared/types.js';
 import { AppError, sliceTailPage, UNTITLED_SESSION_NAME } from '@/shared/utils.js';
 
+/**
+ * How long an externally started conversation may go without its provider
+ * index moving before it stops counting as running.
+ *
+ * It exists for the one failure the marker cannot clear itself: a CLI killed
+ * mid-turn leaves its own "still working" flag set with no further writes, so
+ * nothing would ever mark the conversation idle again. Generous enough that a
+ * single slow tool call never trips it.
+ */
+const EXTERNAL_RUN_STALE_MS = 10 * 60 * 1_000;
+
 type CreateAppSessionResult = {
   sessionId: string;
   provider: LLMProvider;
@@ -129,14 +140,51 @@ export const sessionsService = {
    *
    * This is intentionally status-only: callers that only need sidebar activity
    * indicators should not attach to chat streams or request replayed messages.
+   *
+   * Two sources, in precedence order. The chat run registry knows every run
+   * CloudCLI started and is the only one that can say a run is interruptible.
+   * `sessions.external_running_at` covers the conversations it cannot see at
+   * all — a provider whose CLI can be driven from a terminal or another app
+   * (today only antigravity) writes that marker from its own index during
+   * synchronization. An externally started run is reported with
+   * `canInterrupt: false`, because there is no process of ours to stop.
    */
   listRunningSessions(): Array<{
     sessionId: string;
     provider: LLMProvider;
     startedAt: number;
     lastSeq: number;
+    canInterrupt?: boolean;
   }> {
-    return chatRunRegistry.listRunningRuns();
+    const runs = chatRunRegistry.listRunningRuns();
+    const ownRunIds = new Set(runs.map((run) => run.sessionId));
+    const staleBefore = Date.now() - EXTERNAL_RUN_STALE_MS;
+
+    const externalRuns = sessionsDb
+      .getExternallyRunningSessions()
+      .flatMap((row) => {
+        if (ownRunIds.has(row.session_id)) {
+          return [];
+        }
+
+        // The marker records when the provider last moved the conversation
+        // on, so a CLI that died mid-turn stops refreshing it and ages out of
+        // this list instead of showing as busy forever.
+        const startedAt = Date.parse(row.external_running_at);
+        if (!Number.isFinite(startedAt) || startedAt < staleBefore) {
+          return [];
+        }
+
+        return [{
+          sessionId: row.session_id,
+          provider: row.provider as LLMProvider,
+          startedAt,
+          lastSeq: 0,
+          canInterrupt: false,
+        }];
+      });
+
+    return [...runs, ...externalRuns];
   },
 
   /**

@@ -65,6 +65,14 @@
   "json": {
     "response": "JSON 응답"
   },
+  "antigravityPermissions": {
+    "title": "이 프로젝트에서 다음 작업을 허용하고 프롬프트를 다시 실행합니다",
+    "allowAndRerun": "허용하고 다시 실행",
+    "allowing": "허용하는 중…",
+    "allowed": "허용됨 · 다시 실행 중",
+    "ruleUnknown": "Antigravity가 전체 작업을 보고하지 않았으므로 Antigravity IDE에서 허용해야 합니다.",
+    "grantFailed": "권한을 부여하지 못했습니다."
+  },
   "permissions": {
     "grant": "{{tool}}에 대한 권한 부여",
     "added": "권한이 추가되었습니다",

@@ -254,8 +254,16 @@ All under `~/.gemini/antigravity-cli/` (the CLI's app data dir; the IDE uses the
 ```
 
 Observed enumerations [V] — `source` ∈ {`USER_EXPLICIT`, `MODEL`, `SYSTEM`}; `type` ∈ {`USER_INPUT`,
-`PLANNER_RESPONSE`, `GENERIC`, `SYSTEM_MESSAGE`}; `status` ∈ {`DONE`, `RUNNING`}. Optional keys: `thinking`,
-`tool_calls[]`, `truncated_fields[]`. `created_at` is UTC RFC3339.
+`PLANNER_RESPONSE`, `GENERIC`, `SYSTEM_MESSAGE`}; `status` ∈ {`DONE`, `RUNNING`, `ERROR`}. Optional keys:
+`thinking`, `tool_calls[]`, `truncated_fields[]`, **`error`**. `created_at` is UTC RFC3339.
+
+> **Corrected during the sessions work (Q1).** A sweep of all 41 `transcript.jsonl` files on the research
+> machine — 513 records — found exactly the four documented `type` values and three `source` values, but two
+> things this table originally omitted: `status` also takes **`ERROR`** (13 records) and **`RUNNING`** (9), and
+> an undocumented **`error`** string field accompanies `status: "ERROR"`. `error` is where a
+> denied-permission message actually lives; `content` only paraphrases it, so read `error` first. `RUNNING`
+> on the last record is the transcript's own answer to "is this conversation live" — but the cheaper answer
+> is `conversation_summaries.not_fully_idle` (§4), which is what the synchronizer uses.
 
 > ⚠️ **This vocabulary is NOT in any published `.proto`** — verified by grep across all 25 SDK proto files.
 > It is internal Cascade (`exa.cortex_pb`) naming. The SDK's `localharness.proto` helps the **runtime**
@@ -288,6 +296,11 @@ group_id`
   a synthetic `default-cli-project`. `workspace_uris` only lists the added workspace roots and is populated
   only if `--add-dir` was passed.
 - Weaker secondary source: `cache/last_conversations.json` maps workspace path → most recent conversation id.
+- `not_fully_idle` (with `killed`) is `agy`'s own "this conversation is still working" flag, and it is the
+  cheapest live-run signal on the machine: it rides a row the synchronizer already reads, where
+  `presence/<id>.lock` costs a stat per conversation and the transcript's trailing `status` costs a file
+  read. It is what `sessions.external_running_at` is written from — the only way a conversation started in a
+  terminal or in the IDE shows as running in CloudCLI, since the chat run registry only knows our own runs.
 
 ---
 
@@ -304,8 +317,21 @@ solves the identical "the CLI's storage isn't ours to touch" problem.
 - **Compaction fallback is mandatory** (ground rule #6): keep a full-re-read path keyed on `step_index`.
 - **Live-session detection** is cheap: `presence/<id>.lock` (zero-byte liveness lock) plus the
   `not_fully_idle` / `status` columns (`status` values look like `CASCADE_RUN_STATUS_IDLE`). [V]
+  **Shipped as `not_fully_idle` (AND NOT `killed`)**, written into `sessions.external_running_at` on every
+  upsert. It is the only one of the three that costs nothing — it rides a row already read — and it is the
+  one that does not need Q4's answer. The instant stored is the row's own `last_modified_time`, not the
+  scan time, so an `agy` killed mid-turn (flag set, nothing left to clear it) ages out of the running list
+  instead of showing busy forever.
 - **Store `jsonl_path: null` for the shared DB**, exactly as opencode does, so deleting an app-tracked
   session can never delete the shared index.
+- **Watcher registration:** the watch root is `~/.gemini/antigravity-cli/brain`, **not** the whole app data
+  directory, and it is the one root `sessions-watcher.service.ts` registers only when it already exists — a
+  machine without `agy` pays nothing, no directory created and no polling watcher attached. Under it, only
+  `transcript.jsonl` is a trigger: `transcript_full.jsonl` is rewritten in lockstep with it, and the
+  `logs/chunks/**` mirrors are `.jsonl` too and would otherwise fire an event per chunk per step. Watching
+  `conversation_summaries.db` as well would buy nothing, because synchronizing a transcript re-reads that
+  conversation's index row anyway. Note that **chokidar 4 matches a string `ignored` entry by equality, not
+  as a glob** — the chunk ignore has to be a RegExp to do anything at all.
 
 ---
 
@@ -483,8 +509,10 @@ Do them in this order; after step 1 the TypeScript compiler will point at almost
 | 12 | `src/modules/mcp/McpServers.tsx:23` | One Tailwind class-map entry. | 🟢 |
 | 13 | `src/modules/settings/tabs/agents-settings/**` (4 files), `src/modules/chat/modals/ModelLibraryPanel.tsx`, `src/modules/onboarding/AgentConnectionsStep.tsx`, `src/modules/skills/ProviderSkills.tsx` | Small per-provider branch/entry each. Onboarding copy and UI category grouping need a judgment call. | 🟢 |
 | 14 | `src/modules/i18n/locales/{en,es,fr,ko,zh-CN}/{chat,settings}.json` | ~5–10 short strings each. Note 6 of 11 locales (`de it ja ru tr zh-TW`) never received opencode's strings either — matching that precedent is acceptable. | 🟢 |
-| 15 | 11 shared cross-provider test files (§12) | Add a case to an existing loop/table. | 🟢 |
-| 16 | **`docs/fork-customizations.md` + `.zh-CN.md`** | **Due with the first code commit.** A whole new provider is a fork-specific customization by definition; per `.claude/CLAUDE.md` the entry ships with the work that diverges from upstream, not as a follow-up. The docs-only planning commits that precede it owe no entry. | — |
+| 15 | `server/modules/providers/services/sessions-watcher.service.ts` | One watch-root entry (`~/.gemini/antigravity-cli/brain`, registered only when it exists), one `isWatcherTargetFile` branch, one RegExp ignore for the chunk mirrors. See §5. | 🟠 The root list and the ignore list are both places upstream edits when *it* adds a provider; keep both sides' entries. |
+| 16 | `server/modules/database/schema.ts` + `migrations.ts`, `repositories/sessions.db.ts`, `server/modules/providers/services/sessions.service.ts` | The `sessions.external_running_at` marker: column + `addSessionExternalRunningAtColumn`, the `setSessionExternalRunningAt` / `getExternallyRunningSessions` pair, and the union in `listRunningSessions`. | 🟠 Another append to the same migration sequence as row 3 — same rule: keep both, ours last. |
+| 17 | 11 shared cross-provider test files (§12) | Add a case to an existing loop/table. | 🟢 |
+| 18 | **`docs/fork-customizations.md` + `.zh-CN.md`** | **Due with the first code commit.** A whole new provider is a fork-specific customization by definition; per `.claude/CLAUDE.md` the entry ships with the work that diverges from upstream, not as a follow-up. The docs-only planning commits that precede it owe no entry. | — |
 
 ---
 
@@ -503,16 +531,20 @@ Do them in this order; after step 1 the TypeScript compiler will point at almost
 
 ---
 
-## 13. Open questions — resolve these empirically before relying on them
+## 13. Open questions
 
-| # | Question | How to settle it |
+Q1, Q3 and Q7 were settled while building. The three that remain all need a live `agy` and a real run, which
+is exactly why they are still open: nothing in the implementation depends on an unverified answer to any of
+them — each is either routed around (Q2, Q4) or outside what this fork ships (Q5, Q6).
+
+| # | Question | Status / how to settle it |
 | --- | --- | --- |
-| Q1 | Is the `transcript.jsonl` `type` vocabulary larger than the four observed values? | Grep `type` across every `transcript.jsonl` on a machine with heavy `agy` history; exercise plan mode, subagents, and checkpoints, which likely emit their own types. |
-| Q2 | Which global skills root does the CLI actually scan — `~/.gemini/antigravity-cli/skills/` or `~/.gemini/config/skills/`? | Put a trivially identifiable skill in each root, invoke `/name` in print mode, see which fires. |
+| ~~Q1~~ | ~~Is the `transcript.jsonl` `type` vocabulary larger than the four observed values?~~ | **Closed — no, but the record shape is.** A sweep of all 41 transcripts on the research machine (513 records) found exactly the four `type` values and three `source` values. It also found two things the research missed: `status` ∈ {`DONE`, `RUNNING`, `ERROR`} and an undocumented `error` field (§4). One machine's corpus, so the four types stay a floor — which is why the normalizer is field-driven rather than `type`-driven, and an unseen type renders as text instead of vanishing. |
+| Q2 | Which global skills root does the CLI actually scan — `~/.gemini/antigravity-cli/skills/` or `~/.gemini/config/skills/`? | **Open, routed around.** The skills facet returns **both** candidates rather than guessing, so a wrong answer costs a spurious root, not a missing skill. Settle it by putting a trivially identifiable skill in each root, invoking `/name` in print mode, and seeing which fires; then drop the loser from `antigravity-skills.provider.ts` and from the skills table in `server/modules/providers/README.md`. |
 | ~~Q3~~ | ~~Better project key than `--add-dir`?~~ | **Closed.** `--project <id>` works and is honoured — `cli.log` logs `Conversation using project ID: <id>`. It is also the only scope a permission grant applies in. ADR 0015. |
-| Q4 | Can a second `agy` process safely observe a conversation another process is actively running? | The `presence/<id>.lock` files suggest exclusivity; untested. Matters if you want live tailing while a turn is in flight. |
-| Q5 | Is `AGENTS.md` honoured as a rules file, and at what precedence vs `GEMINI.md`? | The string exists in the binary; the docs name only `GEMINI.md`. Test with a contradictory instruction in each. |
-| Q6 | Where does the file-based token-storage fallback write when the keyring is unavailable? | Only matters for Linux/container deployments. Run in a container with no D-Bus and watch the filesystem. |
+| Q4 | Can a second `agy` process safely observe a conversation another process is actively running? | **Open, and deliberately no longer load-bearing.** The `presence/<id>.lock` files suggest exclusivity; still untested. Nothing opens a lock or holds a handle — every read is `readFileSync` / `db.close()` in a `finally` — and the live-running marker reads `conversation_summaries.not_fully_idle` rather than the lock for the same reason. The worst case is a stale read corrected on the next scan. Settle it by starting a long turn in one terminal and running `agy --conversation <id>` from another. |
+| Q5 | Is `AGENTS.md` honoured as a rules file, and at what precedence vs `GEMINI.md`? | **Open, outside what this fork ships** — no facet reads either file. The string exists in the binary; the docs name only `GEMINI.md`. Test with a contradictory instruction in each and see which the model follows. |
+| Q6 | Where does the file-based token-storage fallback write when the keyring is unavailable? | **Open, and only matters for Linux/container deployments.** The auth facet infers sign-in from `agy models` rather than reading any credential store (ADR 0013), so the answer changes nothing here today. Run in a container with no D-Bus and watch the filesystem. |
 | ~~Q7~~ | ~~Any CLI-triggerable compaction?~~ | **Closed — no.** The 35-command slash registry extracted from the binary has no `/compact`. `supportsCompact` stays `false`. |
 
 ---

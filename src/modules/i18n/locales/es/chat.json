@@ -65,6 +65,14 @@
   "json": {
     "response": "Respuesta JSON"
   },
+  "antigravityPermissions": {
+    "title": "Permite estas acciones para este proyecto y vuelve a ejecutar el mensaje",
+    "allowAndRerun": "Permitir y volver a ejecutar",
+    "allowing": "Permitiendo…",
+    "allowed": "Permitido · volviendo a ejecutar",
+    "ruleUnknown": "Antigravity no informó de la acción completa, así que debe permitirse en el IDE de Antigravity.",
+    "grantFailed": "No se pudo conceder el permiso."
+  },
   "permissions": {
     "grant": "Conceder permiso para {{tool}}",
     "added": "Permiso añadido",

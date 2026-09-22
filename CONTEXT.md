@@ -1,6 +1,6 @@
 # CloudCLI UI
 
-CloudCLI UI is a desktop/mobile web UI for driving CLI coding agents (Claude Code, Cursor CLI, Codex, OpenCode). It wraps each agent's own CLI/SDK and session storage rather than duplicating it.
+CloudCLI UI is a desktop/mobile web UI for driving CLI coding agents (Claude Code, Cursor CLI, Codex, OpenCode, Antigravity). It wraps each agent's own CLI/SDK and session storage rather than duplicating it.
 
 ## Language
 
