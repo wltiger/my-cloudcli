@@ -1,5 +1,6 @@
 import express, { type Request, type Response } from 'express';
 
+import { grantAntigravityAction } from '@/modules/providers/list/antigravity/antigravity-permissions.js';
 import { providerAuthService } from '@/modules/providers/services/provider-auth.service.js';
 import { providerCapabilitiesService } from '@/modules/providers/services/provider-capabilities.service.js';
 import { providerMcpService } from '@/modules/providers/services/mcp.service.js';
@@ -298,6 +299,36 @@ const parseProvider = (value: unknown): LLMProvider => {
     code: 'UNSUPPORTED_PROVIDER',
     statusCode: 400,
   });
+};
+
+/**
+ * The project the grant is scoped to, plus the rule to allow.
+ *
+ * `projectPath` is a workspace path, not an Antigravity project id: which
+ * record covers it is resolved server-side on every call, so a record the user
+ * re-points in the Antigravity IDE takes effect without anything here going
+ * stale. The rule's own shape is validated by the service.
+ */
+const parseAntigravityGrantPayload = (payload: unknown): { projectPath: string; rule: string } => {
+  const body = payload && typeof payload === 'object' ? payload as Record<string, unknown> : {};
+  const projectPath = typeof body.projectPath === 'string' ? body.projectPath.trim() : '';
+  const rule = typeof body.rule === 'string' ? body.rule.trim() : '';
+
+  if (!projectPath) {
+    throw new AppError('projectPath is required.', {
+      code: 'PROJECT_PATH_REQUIRED',
+      statusCode: 400,
+    });
+  }
+
+  if (!rule) {
+    throw new AppError('rule is required.', {
+      code: 'PERMISSION_RULE_REQUIRED',
+      statusCode: 400,
+    });
+  }
+
+  return { projectPath, rule };
 };
 
 /** Both fields are optional: an empty body forks the whole conversation. */
@@ -672,6 +703,32 @@ router.delete(
       directoryName: readPathParam(req.params.directoryName, 'directoryName'),
     });
     res.json(createApiSuccessResponse(result));
+  }),
+);
+
+// ----------------- Permission grant routes -----------------
+/**
+ * Pre-grants one action for the Antigravity project covering a path.
+ *
+ * Only Antigravity has this: headless `agy` cannot prompt, so a refused action
+ * is only actionable after the turn, by writing an allow rule into the user's
+ * own project record (ADR 0015). Every other provider either prompts mid-run
+ * or keeps its rules in the client's own settings.
+ */
+router.post(
+  '/:provider/permissions/grants',
+  asyncHandler(async (req: Request, res: Response) => {
+    const provider = parseProvider(req.params.provider);
+    if (provider !== 'antigravity') {
+      throw new AppError(`Provider "${provider}" does not pre-grant permissions.`, {
+        code: 'PROVIDER_PERMISSION_GRANTS_UNSUPPORTED',
+        statusCode: 400,
+      });
+    }
+
+    const { projectPath, rule } = parseAntigravityGrantPayload(req.body);
+    const result = await grantAntigravityAction(projectPath, rule);
+    res.json(createApiSuccessResponse({ provider, ...result }));
   }),
 );
 

@@ -2,7 +2,8 @@ import { useTranslation } from 'react-i18next';
 import { memo, useCallback, useMemo } from 'react';
 import type { Dispatch, RefObject, SetStateAction } from 'react';
 
-import type { ChatMessage,
+import type { AntigravityGrantOutcome,
+  ChatMessage,
   Project,
   ProjectSession,
   LLMProvider,
@@ -67,6 +68,12 @@ type ChatMessagesPaneProps = {
   onFileOpen?: (filePath: string, diffInfo?: unknown) => void;
   onShowSettings?: () => void;
   onGrantToolPermission: (suggestion: { entry: string; toolName: string }) => { success: boolean };
+  /** Allows one refused Antigravity action and re-runs the prompt it refused; absent for every other provider and while a turn is in flight. */
+  onAllowAndRerunAntigravity?: (input: {
+    rule: string;
+    prompt: string;
+    projectPath: string;
+  }) => Promise<AntigravityGrantOutcome>;
   showRawParameters?: boolean;
   showThinking?: boolean;
   selectedProject: Project;
@@ -124,6 +131,7 @@ function ChatMessagesPane({
   onFileOpen,
   onShowSettings,
   onGrantToolPermission,
+  onAllowAndRerunAntigravity,
   showRawParameters,
   showThinking,
   selectedProject,
@@ -321,6 +329,7 @@ function ChatMessagesPane({
                     onFileOpen={onFileOpen}
                     onShowSettings={onShowSettings}
                     onGrantToolPermission={onGrantToolPermission}
+                    onAllowAndRerunAntigravity={onAllowAndRerunAntigravity}
                     showRawParameters={showRawParameters}
                     showThinking={showThinking}
                     selectedProject={selectedProject}

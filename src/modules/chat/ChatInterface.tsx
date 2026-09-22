@@ -304,6 +304,7 @@ function ChatInterface({
     handleAbortSession,
     handlePermissionDecision,
     handleGrantToolPermission,
+    handleAllowAndRerunAntigravity,
     handleInputFocusChange,
     isInputFocused,
     commandModalPayload,
@@ -536,6 +537,9 @@ function ChatInterface({
           onFileOpen={onFileOpen}
           onShowSettings={onShowSettings}
           onGrantToolPermission={handleGrantToolPermission}
+          // Re-running is a send, so this is only offered while the session is
+          // idle: a one-click allow must not turn into a queued draft.
+          onAllowAndRerunAntigravity={provider === 'antigravity' && !isProcessing ? handleAllowAndRerunAntigravity : undefined}
           showRawParameters={showRawParameters}
           showThinking={showThinking}
           selectedProject={selectedProject}

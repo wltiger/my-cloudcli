@@ -374,6 +374,27 @@ export type PermissionGrantResult = {
   updatedSettings?: ClaudeSettings;
 };
 
+/** One action headless Antigravity refused, with the whole-action allow rule that would permit it; `rule` is absent when the complete action could not be recovered, in which case the refusal can only be reported, not one-click allowed (matching is exact, so a partial rule would grant nothing). */
+export type AntigravityRefusedAction = {
+  action: string;
+  displayName?: string;
+  rule?: string;
+};
+
+/** The post-turn notice an Antigravity turn leaves behind when actions were refused: headless `agy` cannot prompt, so the refusal is only actionable afterwards — allowing a rule writes it into the user's own project record and re-runs `prompt` as a new turn in the same conversation. */
+export type AntigravityRefusalNotice = {
+  projectId: string;
+  projectPath: string;
+  prompt: string;
+  actions: AntigravityRefusedAction[];
+};
+
+/** Outcome of the one-click allow-and-re-run, reporting the failure text when the grant could not be written so the notice can say why instead of silently doing nothing. */
+export type AntigravityGrantOutcome = {
+  success: boolean;
+  error?: string;
+};
+
 /** A tool-permission request awaiting the user's decision, identified by its requestId and carrying the tool name, input and context needed to render the prompt and reply to the backend. */
 export type PendingPermissionRequest = {
   requestId: string;
@@ -531,6 +552,8 @@ export type NormalizedMessage = {
   compactPostTokens?: number;
   /** The Anchor a Fork of this message is taken at. Absent when it cannot be forked. */
   anchor?: string;
+  /** Antigravity only, on an `error` row: the actions the turn was refused and the rules that would allow them. Headless `agy` cannot prompt mid-turn, so this is the post-turn notice that stands in for a permission request. */
+  antigravityRefusal?: AntigravityRefusalNotice;
 };
 
 /** Discriminator on NormalizedMessage naming which kind of transcript event it carries — plain text, tool use or result, thinking, stream delta or end, error, completion, status, permission request/resolution/cancellation, session creation, interactive prompt, or task notification. */

@@ -22,6 +22,10 @@ import crossSpawn from 'cross-spawn';
 
 import { notifyRunFailed, notifyRunStopped } from '@/modules/notifications/index.js';
 import {
+  ANTIGRAVITY_GRANT_RULE_PATTERN,
+  resolveAntigravityProjectId,
+} from '@/modules/providers/list/antigravity/antigravity-permissions.js';
+import {
   appendFilesInputTag,
   appendImagesInputTag,
   normalizeAttachmentDescriptors,
@@ -140,19 +144,77 @@ const buildAntigravityTokenBudget = (usage: unknown): {
   };
 };
 
-/** Reads a `denied_actions` entry down to the two fields the UI shows. */
-const describeDeniedAction = (entry: unknown): string => {
+/**
+ * One refused action, paired with the rule that would permit it.
+ *
+ * `rule` is absent when the whole action could not be recovered: matching in
+ * `agy` is exact, so a rule naming only the action kind would grant nothing,
+ * and guessing the argument would write something the user did not ask for
+ * into a record the IDE also owns. The notice still names the refusal; only
+ * the one-click button needs the rule.
+ */
+type AntigravityRefusedAction = {
+  action: string;
+  displayName?: string;
+  rule?: string;
+};
+
+/** Names one refused action in the sentence the error row shows. */
+const describeDeniedAction = (entry: AntigravityRefusedAction): string => (
+  entry.displayName && entry.displayName !== entry.action
+    ? `${entry.displayName} (${entry.action})`
+    : entry.action
+);
+
+/**
+ * Pulls whole allow rules out of the refusal text `agy` writes to stderr.
+ *
+ * When an action is refused the CLI names the rule that would have allowed it,
+ * which is the only place the complete command/path/URL appears — the
+ * `denied_actions` entry itself carries just the kind and a display name.
+ */
+const collectGrantRuleCandidates = (line: string, into: Set<string>): void => {
+  const matches = line.match(/\b(?:read_file|write_file|read_url|execute_url|command|unsandboxed|mcp)\([^)]+\)/g);
+  for (const candidate of matches ?? []) {
+    into.add(candidate);
+  }
+};
+
+/**
+ * Turns one `denied_actions` entry into a refused action the UI can act on.
+ *
+ * Sources for the rule, in order of how much they are trusted: the entry's own
+ * `action` when it already is a whole rule, the rule `agy` named on stderr for
+ * the same kind, and finally the command of the tool call that was refused —
+ * an observation of what was attempted, not a guess at what to allow.
+ */
+const buildRefusedAction = (
+  entry: unknown,
+  stderrRules: Set<string>,
+  lastCommand: string | null,
+): AntigravityRefusedAction => {
   const record = readObjectRecord(entry);
-  if (!record) {
-    return String(entry);
+  const action = readOptionalString(record?.action) ?? 'unknown action';
+  const displayName = readOptionalString(record?.display_name);
+
+  if (ANTIGRAVITY_GRANT_RULE_PATTERN.test(action)) {
+    return { action, displayName, rule: action };
   }
 
-  const displayName = readOptionalString(record.display_name);
-  const action = readOptionalString(record.action);
-  if (displayName && action) {
-    return `${displayName} (${action})`;
+  for (const candidate of stderrRules) {
+    if (candidate.startsWith(`${action}(`)) {
+      // Consumed, so a turn that was refused twice over the same kind pairs
+      // each refusal with its own rule instead of repeating the first.
+      stderrRules.delete(candidate);
+      return { action, displayName, rule: candidate };
+    }
   }
-  return displayName || action || 'unknown action';
+
+  if (action === 'command' && lastCommand) {
+    return { action, displayName, rule: `command(${lastCommand})` };
+  }
+
+  return { action, displayName };
 };
 
 /**
@@ -207,24 +269,6 @@ function killAntigravityProcessTree(childProcess: ChildProcess): Promise<void> {
 }
 
 /**
- * Resolves the Antigravity project id the spawned CLI should be given.
- *
- * `--project` is what attributes a conversation *and* the only scope a
- * permission grant applies in (ADR 0015), so it is always passed. CloudCLI's
- * own project id is the identity that maps: it is stable per Project, and
- * resolving rather than creating is what lets a grant the user gave in the
- * Antigravity IDE itself apply to a run started here.
- */
-const resolveAntigravityProjectId = (options: AnyRecord): string => {
-  const explicitProject = readOptionalString(options.antigravityProjectId ?? options.projectId);
-  if (explicitProject) {
-    return explicitProject;
-  }
-
-  return readOptionalString(options.sessionId) || 'cloudcli-default';
-};
-
-/**
  * Maps the UI permission mode onto `agy`'s flags.
  *
  * Only two modes do anything headless: `--mode accept-edits` and `--mode plan`
@@ -262,6 +306,12 @@ async function spawnAntigravity(
   // would be swallowed and leave the returned promise pending forever.
   const providerSessionId = context.resolveProviderSessionId(sessionId);
   const resolvedModel = await context.resolveResumeModel(sessionId, model);
+  // The Antigravity project whose folder covers this Project — the user's own
+  // record, so a grant given in the Antigravity IDE applies here too (ADR
+  // 0015). Recomputed every run and never stored: the records are the IDE's to
+  // move and rename. One is created only when nothing covers the path.
+  const workspacePath = readOptionalString(projectPath) ?? readOptionalString(cwd) ?? process.cwd();
+  const antigravityProjectId = await resolveAntigravityProjectId(workspacePath);
 
   return new Promise<void>((resolve, reject) => {
     const workingDir = cwd || projectPath || process.cwd();
@@ -277,6 +327,11 @@ async function spawnAntigravity(
     let terminalNotificationSent = false;
     // Per-turn usage: the newest `step_update` usage, never `result.usage`.
     let latestStepUsage: unknown = null;
+    // Whole allow rules `agy` named while refusing something this turn, and the
+    // last command it tried to run — the two places the complete action text
+    // appears, since `denied_actions` names only the kind.
+    const refusalRuleCandidates = new Set<string>();
+    let lastAttemptedCommand: string | null = null;
 
     const send = (message: NormalizedMessage): void => {
       ws.send(message);
@@ -410,6 +465,9 @@ async function spawnAntigravity(
         if (stepType === 'tool') {
           const toolName = readOptionalString(update.tool_name) ?? 'Tool';
           const toolInfo = readObjectRecord(update.tool_info);
+          // Kept for the refusal notice: a refused `command` action reports its
+          // kind but not what it wanted to run.
+          lastAttemptedCommand = readOptionalString(toolInfo?.command) ?? lastAttemptedCommand;
           const toolMessage = createNormalizedMessage({
             // Keyed on step_index so ACTIVE and DONE emissions of the same step
             // update one card instead of stacking two.
@@ -474,12 +532,25 @@ async function spawnAntigravity(
         // tool call was refused still reports SUCCESS and exits 0, with an empty
         // response. The refused-action list is the only signal.
         if (deniedActions.length > 0) {
-          const described = deniedActions.map(describeDeniedAction).join(', ');
+          const refusedActions = deniedActions.map((entry) => (
+            buildRefusedAction(entry, refusalRuleCandidates, lastAttemptedCommand)
+          ));
+          const described = refusedActions.map(describeDeniedAction).join(', ');
           send(createNormalizedMessage({
             kind: 'error',
-            content: `Antigravity refused ${deniedActions.length === 1 ? 'this action' : 'these actions'}: ${described}. Grant it for this project, or rerun with permissions bypassed.`,
+            content: `Antigravity refused ${refusedActions.length === 1 ? 'this action' : 'these actions'}: ${described}. Grant it for this project, or rerun with permissions bypassed.`,
             sessionId: currentSessionId(),
             provider: PROVIDER,
+            // The post-turn notice: headless `agy` cannot prompt, so the
+            // refusal is only actionable after the fact. Allowing a rule
+            // re-runs this prompt as a new turn — the refused turn stays in
+            // the transcript, because `agy` has no rewind (ADR 0014).
+            antigravityRefusal: {
+              projectId: antigravityProjectId,
+              projectPath: workspacePath,
+              prompt: command,
+              actions: refusedActions,
+            },
           }));
         } else if (status && status !== 'SUCCESS' && status !== 'RUNNING') {
           send(createNormalizedMessage({
@@ -520,6 +591,11 @@ async function spawnAntigravity(
       if (!line.trim()) {
         return;
       }
+
+      // A refusal notice names the rule that would have allowed the action.
+      // Harvested from every stderr line because the notice is not structured
+      // and its wording is not a contract.
+      collectGrantRuleCandidates(line, refusalRuleCandidates);
 
       // `agy` reports structured failures as `AGY_ERROR: {json}` on stderr;
       // everything else is ordinary CLI chatter.
@@ -576,7 +652,7 @@ async function spawnAntigravity(
     // Ground rule: `--project` attributes the conversation and is the only scope
     // a permission grant applies in; `--add-dir` adds the workspace root so the
     // session index can attribute it too. Both, always.
-    args.push('--project', resolveAntigravityProjectId(options));
+    args.push('--project', antigravityProjectId);
     if (projectPath) {
       args.push('--add-dir', projectPath);
     }

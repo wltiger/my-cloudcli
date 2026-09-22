@@ -314,6 +314,10 @@ export function normalizedToChatMessages(messages: NormalizedMessage[]): ChatMes
           type: 'error',
           content: msg.content || 'Unknown error',
           timestamp: msg.timestamp,
+          // Antigravity attaches its post-turn refusal here: the error row is
+          // the only place a refused action surfaces, because headless `agy`
+          // cannot prompt while the turn is running.
+          antigravityRefusal: msg.antigravityRefusal,
           ...sharedMetadata,
         });
         break;
