@@ -605,3 +605,17 @@ Headless `agy` cannot prompt. A tool needing permission is auto-denied, and the 
   per-invocation allow flag.
 - **Concurrency:** the record is shared with the Antigravity IDE and the user's terminal. Read, modify,
   write the smallest possible change; never hold a transient grant across a run.
+
+**What a refused turn actually looks like [V] `agy` 1.2.8** — from the first live check, headless, empty
+allow list, asked to run `echo FIRSTCHECK_SENTINEL`:
+
+- **stderr names no rule.** The whole notice is boilerplate — `… auto-denied. Add an allow-rule under
+  permissions.allow in settings.json (e.g. command(<target>)).` The `command(<target>)` in it is the
+  *form* of a rule, not the refused one, so scraping it would offer a grant that matches nothing. Filter
+  any candidate whose argument is a bare `<placeholder>`.
+- **The command text lives on the tool step**, and is the only place it appears:
+  `step_update.tool_info.parameters.CommandLine` for `tool_name: "run_command"` (a per-tool `parameters`
+  object, not a flat `command` field). Where the other action kinds keep their arguments is still [?].
+- **`denied_actions` carries the kind only:** `[{"action":"command","display_name":"RunCommand"}]`.
+- **`result.status` is `SUCCESS`** on that same refused turn, with `response: ""` — §14's "never trust the
+  status" rule confirmed live, not just inferred.

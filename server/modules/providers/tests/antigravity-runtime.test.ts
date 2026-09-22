@@ -92,7 +92,33 @@ test('unparseable usage numbers count as zero rather than NaN', () => {
 // Refusal reporting — a refused turn still exits 0, so this is the only signal
 // ---------------------------------------------------------------------------
 
-test('stderr rules are harvested whole, arguments included', () => {
+/**
+ * The whole stderr of the first live refused run, verbatim (`agy` 1.2.8,
+ * headless, empty allow list, asked to run `echo FIRSTCHECK_SENTINEL`).
+ *
+ * It names no rule. `command(<target>)` is the notice spelling out the *form*
+ * a rule takes, and harvesting it would hand the one-click button a string
+ * that can never match anything the CLI runs.
+ */
+const LIVE_REFUSAL_STDERR = 'jetski: no output produced — a tool required the "command" permission that headless mode cannot prompt for, so it was auto-denied. Add an allow-rule under permissions.allow in settings.json (e.g. command(<target>)). Alternatively, re-run with --dangerously-skip-permissions to auto-approve all tools.';
+
+test('the refusal notice agy actually prints yields no rule at all', () => {
+  const rules = new Set<string>();
+  collectGrantRuleCandidates(LIVE_REFUSAL_STDERR, rules);
+
+  assert.deepEqual([...rules], []);
+});
+
+test('a rule that is only a placeholder is never a candidate', () => {
+  const rules = new Set<string>();
+  collectGrantRuleCandidates('add command(<target>) or read_file(<path>) to allow this', rules);
+
+  assert.deepEqual([...rules], []);
+});
+
+test('a genuinely named rule is still harvested whole, arguments included', () => {
+  // 1.2.8's wording names nothing, but the wording is not a contract — this is
+  // the path a later release that does name the refused rule would take.
   const rules = new Set<string>();
   collectGrantRuleCandidates(
     'Permission required: add command(npm run build) to allow this action.',
@@ -109,6 +135,16 @@ test('several rules on one line are all harvested, ordinary chatter is not', () 
   collectGrantRuleCandidates('running npm run build in /tmp', rules);
 
   assert.deepEqual([...rules], ['read_file(/tmp/a.txt)', 'write_file(/tmp/a.txt)']);
+});
+
+test('a real rule survives an angle bracket, and outlives a placeholder beside it', () => {
+  // Why the filter anchors on the whole argument rather than rejecting every
+  // argument containing a bracket: `>` is an ordinary shell redirection, and a
+  // command using one is exactly the sort of rule the user needs the button for.
+  const rules = new Set<string>();
+  collectGrantRuleCandidates('e.g. command(<target>) — refused: command(echo ok > out.txt)', rules);
+
+  assert.deepEqual([...rules], ['command(echo ok > out.txt)']);
 });
 
 test('a refusal that names its own whole rule is offered as-is', () => {
@@ -418,6 +454,54 @@ test('one turn threads its state from the first line to the terminal complete', 
   assert.equal(complete.sessionId, 'conv-4');
   assert.equal(state.completeSent, true);
   assert.equal(state.lastAttemptedCommand, 'npm run build');
+});
+
+test('the first live refusal on agy 1.2.8 offers the command that was refused', () => {
+  // Every shape below is verbatim from that run: headless, default permission
+  // mode, an empty allow list, asked to run `echo FIRSTCHECK_SENTINEL`.
+  const liveToolStep = {
+    event: 'step_update',
+    step_update: {
+      conversation_id: '19a2d078-e6eb-4ba1-94b8-b34d5e6aa251',
+      step_index: 2,
+      state: 'ACTIVE',
+      step_type: 'tool',
+      tool_name: 'run_command',
+      tool_info: { name: 'run_command', parameters: { CommandLine: 'echo FIRSTCHECK_SENTINEL' } },
+    },
+  };
+  const liveResult = {
+    event: 'result',
+    result: {
+      conversation_id: '19a2d078-e6eb-4ba1-94b8-b34d5e6aa251',
+      // SUCCESS on a turn that did nothing it was asked to: the exit code and
+      // the status are both useless, which is why `denied_actions` is read.
+      status: 'SUCCESS',
+      response: '',
+      denied_actions: [{ action: 'command', display_name: 'RunCommand' }],
+    },
+  };
+
+  const { state } = foldEvents([liveToolStep]);
+  // Exactly what `spawnAntigravity`'s stderr handler does with the line.
+  collectGrantRuleCandidates(LIVE_REFUSAL_STDERR, state.refusalRuleCandidates);
+
+  assert.deepEqual([...state.refusalRuleCandidates], [], 'the notice names no rule');
+  assert.equal(state.lastAttemptedCommand, 'echo FIRSTCHECK_SENTINEL');
+
+  // Priorities 1 and 2 both come up empty on this data — the entry carries a
+  // bare kind and stderr offered nothing — so the rule comes from the step.
+  const refused = buildRefusedAction(
+    liveResult.result.denied_actions[0],
+    state.refusalRuleCandidates,
+    state.lastAttemptedCommand,
+  );
+
+  assert.deepEqual(refused, {
+    action: 'command',
+    displayName: 'RunCommand',
+    rule: 'command(echo FIRSTCHECK_SENTINEL)',
+  });
 });
 
 // ---------------------------------------------------------------------------

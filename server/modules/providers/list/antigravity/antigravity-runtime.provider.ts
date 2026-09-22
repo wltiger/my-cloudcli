@@ -179,20 +179,57 @@ const ANTIGRAVITY_GRANT_RULE_SCAN_PATTERN = new RegExp(
 );
 
 /**
+ * An argument that is only a placeholder, as in the `command(<target>)` the
+ * refusal notice prints as an example of the *form* a rule takes.
+ *
+ * Anchored on the whole argument on purpose. A real rule may well contain an
+ * angle bracket — `command(echo ok > out.txt)` is an ordinary redirection — so
+ * rejecting every argument that merely *contains* one would throw away rules
+ * the user does want.
+ */
+const ANTIGRAVITY_PLACEHOLDER_ARGUMENT_PATTERN = /^<[^>]*>$/;
+
+/**
  * Pulls whole allow rules out of the refusal text `agy` writes to stderr.
  *
- * When an action is refused the CLI names the rule that would have allowed it,
- * which is the only place the complete command/path/URL appears — the
- * `denied_actions` entry itself carries just the kind and a display name.
+ * On 1.2.8 this yields nothing: the notice is boilerplate that spells out the
+ * form of a rule (`… e.g. command(<target>)`) rather than naming the one that
+ * was refused, and the example is filtered out here. The scan is kept because
+ * the wording is not a contract — if a later release does name the real rule,
+ * it is the only place the complete command/path/URL would appear, since the
+ * `denied_actions` entry carries just the kind and a display name.
  */
 export const collectGrantRuleCandidates = (line: string, into: Set<string>): void => {
   // `String.prototype.match` resets a global regex's `lastIndex`, so sharing
   // one module-level pattern across calls is safe.
   const matches = line.match(ANTIGRAVITY_GRANT_RULE_SCAN_PATTERN);
   for (const candidate of matches ?? []) {
+    // Never offer a placeholder as a one-click grant: `command(<target>)`
+    // matches nothing `agy` will ever run, and writing it into the project
+    // record the Antigravity IDE also owns would be worse than no button.
+    const argument = candidate.slice(candidate.indexOf('(') + 1, -1);
+    if (ANTIGRAVITY_PLACEHOLDER_ARGUMENT_PATTERN.test(argument)) {
+      continue;
+    }
+
     into.add(candidate);
   }
 };
+
+/**
+ * The command a tool step was about to run, from its `tool_info`.
+ *
+ * On 1.2.8 a tool call's arguments sit in a per-tool `parameters` object, and
+ * `run_command` names its own `CommandLine`. The flat `command` is kept as a
+ * second read in case that shape drifts. Only the `command` action kind has a
+ * verified location like this; for `read_file`, `write_file` and the rest the
+ * parameter name is still unobserved, so they keep the safe default of no rule
+ * and therefore no button.
+ */
+const readAttemptedCommand = (toolInfo: AnyRecord | null): string | undefined => (
+  readOptionalString(readObjectRecord(toolInfo?.parameters)?.CommandLine)
+    ?? readOptionalString(toolInfo?.command)
+);
 
 /**
  * Turns one `denied_actions` entry into a refused action the UI can act on.
@@ -200,7 +237,8 @@ export const collectGrantRuleCandidates = (line: string, into: Set<string>): voi
  * Sources for the rule, in order of how much they are trusted: the entry's own
  * `action` when it already is a whole rule, the rule `agy` named on stderr for
  * the same kind, and finally the command of the tool call that was refused —
- * an observation of what was attempted, not a guess at what to allow.
+ * an observation of what was attempted, not a guess at what to allow. On 1.2.8
+ * only the third fires: the entry carries a bare kind and stderr names no rule.
  */
 export const buildRefusedAction = (
   entry: unknown,
@@ -376,10 +414,11 @@ export const foldAntigravityEventLine = (
       const toolName = readOptionalString(update.tool_name) ?? 'Tool';
       const toolInfo = readObjectRecord(update.tool_info);
       // Kept for the refusal notice: a refused `command` action reports its
-      // kind but not what it wanted to run.
+      // kind but not what it wanted to run, and on 1.2.8 nothing else does
+      // either — this step is the only place the command text appears.
       next = {
         ...next,
-        lastAttemptedCommand: readOptionalString(toolInfo?.command) ?? next.lastAttemptedCommand,
+        lastAttemptedCommand: readAttemptedCommand(toolInfo) ?? next.lastAttemptedCommand,
       };
       const toolMessage = createNormalizedMessage({
         // Keyed on step_index so ACTIVE and DONE emissions of the same step
