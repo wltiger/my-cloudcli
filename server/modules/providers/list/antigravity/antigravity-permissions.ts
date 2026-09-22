@@ -46,8 +46,11 @@ import {
  * Precedence between lists is `deny > ask > allow`; `write_file` on a path
  * implies `read_file`, and denying `read_file` denies `write_file`. CloudCLI
  * only ever appends to `allow`.
+ *
+ * Exported for the antigravity runtime, which builds its own unanchored scan
+ * pattern from the same list — adding a kind stays a one-place edit.
  */
-const ANTIGRAVITY_ACTION_KINDS = [
+export const ANTIGRAVITY_ACTION_KINDS = [
   'read_file',
   'write_file',
   'read_url',

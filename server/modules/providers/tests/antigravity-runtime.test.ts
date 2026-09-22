@@ -13,6 +13,8 @@ import os from 'node:os';
 import path from 'node:path';
 import test, { after } from 'node:test';
 
+import { AppError } from '@/shared/utils.js';
+
 // The runtime reaches the notifications barrel, which opens the shared SQLite
 // connection while it is still being imported. Pointing it at a throwaway file
 // first is what keeps a test from touching the database the app actually uses;
@@ -190,10 +192,15 @@ test('bypassPermissions is the one escape hatch the CLI offers', () => {
   );
 });
 
-test('acceptEdits and plan never reach the command line (ADR 0015)', () => {
+test('acceptEdits, plan and typos are rejected rather than degraded (ADR 0015)', () => {
   // `--mode accept-edits` and `--mode plan` are accepted in print mode and then
-  // ignored with a warning, so passing them would only produce CLI noise.
-  for (const mode of ['acceptEdits', 'plan', 'acceptedits', 'Plan']) {
-    assert.deepEqual(resolveAntigravityPermissionArgs(mode), [], `mode ${mode} must add no flag`);
+  // ignored with a warning, so passing them would only produce CLI noise — and
+  // silently answering [] would run the turn with fewer grants than asked for.
+  for (const mode of ['acceptEdits', 'plan', 'acceptedits', 'Plan', 'bypassPermission']) {
+    assert.throws(
+      () => resolveAntigravityPermissionArgs(mode),
+      (error: unknown) => error instanceof AppError && error.statusCode === 400,
+      `mode ${mode} must be rejected`,
+    );
   }
 });

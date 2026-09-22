@@ -22,6 +22,7 @@ import crossSpawn from 'cross-spawn';
 
 import { notifyRunFailed, notifyRunStopped } from '@/modules/notifications/index.js';
 import {
+  ANTIGRAVITY_ACTION_KINDS,
   ANTIGRAVITY_GRANT_RULE_PATTERN,
   resolveAntigravityProjectId,
 } from '@/modules/providers/list/antigravity/antigravity-permissions.js';
@@ -37,6 +38,7 @@ import type {
   ProviderRuntimeWriter,
 } from '@/shared/types.js';
 import {
+  AppError,
   createCompleteMessage,
   createNormalizedMessage,
   flattenPromptForWindowsShell,
@@ -167,6 +169,16 @@ const describeDeniedAction = (entry: AntigravityRefusedAction): string => (
 );
 
 /**
+ * The same rule shape `ANTIGRAVITY_GRANT_RULE_PATTERN` matches, unanchored and
+ * global so it can be scanned out of a whole stderr line. Derived from the
+ * shared kind list rather than repeating it.
+ */
+const ANTIGRAVITY_GRANT_RULE_SCAN_PATTERN = new RegExp(
+  `\\b(?:${ANTIGRAVITY_ACTION_KINDS.join('|')})\\([^)]+\\)`,
+  'g',
+);
+
+/**
  * Pulls whole allow rules out of the refusal text `agy` writes to stderr.
  *
  * When an action is refused the CLI names the rule that would have allowed it,
@@ -174,7 +186,9 @@ const describeDeniedAction = (entry: AntigravityRefusedAction): string => (
  * `denied_actions` entry itself carries just the kind and a display name.
  */
 export const collectGrantRuleCandidates = (line: string, into: Set<string>): void => {
-  const matches = line.match(/\b(?:read_file|write_file|read_url|execute_url|command|unsandboxed|mcp)\([^)]+\)/g);
+  // `String.prototype.match` resets a global regex's `lastIndex`, so sharing
+  // one module-level pattern across calls is safe.
+  const matches = line.match(ANTIGRAVITY_GRANT_RULE_SCAN_PATTERN);
   for (const candidate of matches ?? []) {
     into.add(candidate);
   }
@@ -268,6 +282,9 @@ function killAntigravityProcessTree(childProcess: ChildProcess): Promise<void> {
   });
 }
 
+/** The only two permission modes the capability matrix offers for this provider. */
+const ANTIGRAVITY_PERMISSION_MODES = ['default', 'bypassPermissions'] as const;
+
 /**
  * Maps the UI permission mode onto `agy`'s flags.
  *
@@ -275,10 +292,27 @@ function killAntigravityProcessTree(childProcess: ChildProcess): Promise<void> {
  * are accepted and then ignored in print mode with a warning, so they are never
  * passed (ADR 0015). Default relies on the grants in the user's own project
  * record; bypassPermissions is the one escape hatch the CLI offers.
+ *
+ * Anything outside those two is rejected instead of quietly resolving to
+ * default. The two modes differ by *less* versus *more* permission, so a typo
+ * treated as default would hand the run fewer grants than the caller asked for
+ * and look like the CLI refusing on its own. An omitted mode is still default:
+ * that is a caller not choosing, not a caller choosing wrong.
  */
-export const resolveAntigravityPermissionArgs = (permissionMode: unknown): string[] => (
-  permissionMode === 'bypassPermissions' ? ['--dangerously-skip-permissions'] : []
-);
+export const resolveAntigravityPermissionArgs = (permissionMode: unknown): string[] => {
+  if (permissionMode === undefined || permissionMode === null) {
+    return [];
+  }
+
+  if (!(ANTIGRAVITY_PERMISSION_MODES as readonly unknown[]).includes(permissionMode)) {
+    throw new AppError(
+      `Unsupported permissionMode "${String(permissionMode)}" for antigravity. Supported modes: ${ANTIGRAVITY_PERMISSION_MODES.join(', ')}.`,
+      { code: 'INVALID_PERMISSION_MODE', statusCode: 400 },
+    );
+  }
+
+  return permissionMode === 'bypassPermissions' ? ['--dangerously-skip-permissions'] : [];
+};
 
 /**
  * Runs one Antigravity turn and streams it to the writer.
@@ -305,6 +339,9 @@ async function spawnAntigravity(
   // before the promise is created: inside an async executor a rejection here
   // would be swallowed and leave the returned promise pending forever.
   const providerSessionId = context.resolveProviderSessionId(sessionId);
+  // Rejected here for the same reason: a bad mode is caller input, and failing
+  // before the process exists keeps it a 400 instead of a half-started turn.
+  const permissionArgs = resolveAntigravityPermissionArgs(permissionMode);
   const resolvedModel = await context.resolveResumeModel(sessionId, model);
   // The Antigravity project whose folder covers this Project — the user's own
   // record, so a grant given in the Antigravity IDE applies here too (ADR
@@ -662,7 +699,7 @@ async function spawnAntigravity(
     if (resolvedModel) {
       args.push('--model', resolvedModel);
     }
-    args.push(...resolveAntigravityPermissionArgs(permissionMode));
+    args.push(...permissionArgs);
 
     let agyProcess;
     try {

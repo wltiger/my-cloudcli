@@ -52,7 +52,7 @@ export const getAntigravityAppDataDir = (): string => (
  * write lock on it, which is also why no session row ever records it as a
  * transcript path (see the synchronizer).
  */
-export const getAntigravitySummariesDatabasePath = (): string => (
+const getAntigravitySummariesDatabasePath = (): string => (
   path.join(getAntigravityAppDataDir(), 'conversation_summaries.db')
 );
 
@@ -89,7 +89,7 @@ const resolveConversationLogDir = (conversationId: string): string | null => {
 };
 
 /** The transcript file for one conversation, whether or not it exists yet. */
-export const getAntigravityTranscriptPath = (conversationId: string): string | null => {
+const getAntigravityTranscriptPath = (conversationId: string): string | null => {
   const logDir = resolveConversationLogDir(conversationId);
   return logDir ? path.join(logDir, 'transcript.jsonl') : null;
 };
@@ -219,7 +219,7 @@ const restoreTruncatedFields = (logDir: string, records: AnyRecord[]): AnyRecord
  * reads step order, which is also what survives `agy` rewriting the file
  * underneath us during its own compaction.
  */
-export const readAntigravityConversationRecords = (conversationId: string): AnyRecord[] => {
+const readAntigravityConversationRecords = (conversationId: string): AnyRecord[] => {
   const logDir = resolveConversationLogDir(conversationId);
   if (!logDir) {
     return [];

@@ -100,9 +100,10 @@ export const parseAgyModelsOutput = (stdout: string): string[] => {
  * CLI does. Callers must not collapse the two: only the second is an answer
  * about sign-in state.
  *
- * Shared with the auth facet, which awaits its own call of this rather than
- * waiting on the background refresh below — sign-in state has to be owned, not
- * borrowed from a cache a request path happens to have warmed.
+ * Shared with the auth facet, which races its own call of this against a much
+ * shorter deadline when the cache below holds nothing fresh — sign-in state is
+ * owned rather than borrowed, but an auth-status poll must never be able to sit
+ * out the full timeout above.
  */
 export function probeAntigravityModelIds(): Promise<string[] | null> {
   return new Promise((resolve) => {
@@ -175,6 +176,18 @@ const refreshAntigravityModelIds = (): Promise<LiveCatalog | null> => {
 
 const isLiveCatalogFresh = (): boolean => (
   liveCatalog !== null && Date.now() - liveCatalog.fetchedAt < LIVE_CATALOG_REFRESH_INTERVAL_MS
+);
+
+/**
+ * The cached live model ids, but only while they are still fresh.
+ *
+ * Exported for the auth facet: a cache the models-list path has already warmed
+ * answers "is this account signed in" for free, so no second `agy models` child
+ * process is spawned for it. `null` means this cache has no current answer —
+ * never that the account is signed out.
+ */
+export const readFreshAntigravityModelIds = (): string[] | null => (
+  isLiveCatalogFresh() && liveCatalog ? liveCatalog.ids : null
 );
 
 /**

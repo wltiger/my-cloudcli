@@ -320,6 +320,16 @@ export class AntigravitySessionSynchronizer implements IProviderSessionSynchroni
     return lastConversationWorkspaces.get(row.conversation_id ?? '') ?? null;
   }
 
+  /**
+   * The app session row a conversation id maps to, under either id it can be
+   * filed as: `provider_session_id` once the runtime has reported it back, and
+   * the session id itself for a row the app created with it directly.
+   */
+  private findSessionForConversation(conversationId: string) {
+    return sessionsDb.getSessionByProviderSessionId(conversationId)
+      ?? sessionsDb.getSessionById(conversationId);
+  }
+
   private upsertSession(
     row: AntigravitySummaryRow,
     lastConversationWorkspaces: Map<string, string>,
@@ -330,8 +340,7 @@ export class AntigravitySessionSynchronizer implements IProviderSessionSynchroni
       return null;
     }
 
-    const pendingAppSession = sessionsDb.getSessionByProviderSessionId(conversationId)
-      ?? sessionsDb.getSessionById(conversationId)
+    const pendingAppSession = this.findSessionForConversation(conversationId)
       ?? sessionsDb.findLatestPendingAppSession(this.provider, projectPath);
     if (pendingAppSession && !pendingAppSession.provider_session_id) {
       // The index can carry a conversation before the runtime has reported its
@@ -340,8 +349,7 @@ export class AntigravitySessionSynchronizer implements IProviderSessionSynchroni
       sessionsDb.assignProviderSessionId(pendingAppSession.session_id, conversationId);
     }
 
-    const existingSession = sessionsDb.getSessionByProviderSessionId(conversationId)
-      ?? sessionsDb.getSessionById(conversationId);
+    const existingSession = this.findSessionForConversation(conversationId);
     const existingName = existingSession?.custom_name;
 
     let nextName: string | undefined;

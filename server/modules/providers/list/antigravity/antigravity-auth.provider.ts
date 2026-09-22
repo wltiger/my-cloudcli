@@ -4,7 +4,10 @@ import path from 'node:path';
 
 import crossSpawn from 'cross-spawn';
 
-import { probeAntigravityModelIds } from '@/modules/providers/list/antigravity/antigravity-models.provider.js';
+import {
+  probeAntigravityModelIds,
+  readFreshAntigravityModelIds,
+} from '@/modules/providers/list/antigravity/antigravity-models.provider.js';
 import type { IProviderAuth } from '@/shared/interfaces.js';
 import type { ProviderAuthStatus } from '@/shared/types.js';
 
@@ -38,6 +41,16 @@ const AGY_ONBOARDING_PATH = path.join(AGY_APP_DATA_DIR, 'cache', 'onboarding.jso
  * material: no token, no email, no account identifier.
  */
 const AGY_NOT_LOGGED_IN_LINE = 'You are not logged into Antigravity.';
+
+/**
+ * How long this facet will wait on its own `agy models` probe.
+ *
+ * Far below the probe's own 15 s timeout on purpose: the client polls auth
+ * status, so a hung CLI would otherwise hold every poll for the full timeout.
+ * The probe is left alone — its timer still kills the late child — and losing
+ * this race simply reads as "no answer from the CLI".
+ */
+const AGY_AUTH_PROBE_DEADLINE_MS = 2_000;
 
 /** Major version this provider's NDJSON mapping was written against. */
 const AGY_KNOWN_MAJOR_VERSION = 1;
@@ -131,6 +144,23 @@ const readLoggedOutFromAgyLog = async (): Promise<boolean> => {
 };
 
 /**
+ * `probeAntigravityModelIds()`, given up on after `AGY_AUTH_PROBE_DEADLINE_MS`.
+ *
+ * The probe itself is untouched: a child that settles late is still killed by
+ * the probe's own timer. Only this caller stops waiting, and `null` — the same
+ * value the probe uses for "could not run" — is what it stops waiting with.
+ */
+const probeAgyModelIdsWithDeadline = (): Promise<string[] | null> => {
+  let deadlineHandle: NodeJS.Timeout | undefined;
+  const deadline = new Promise<null>((resolve) => {
+    deadlineHandle = setTimeout(() => resolve(null), AGY_AUTH_PROBE_DEADLINE_MS);
+  });
+
+  return Promise.race([probeAntigravityModelIds(), deadline])
+    .finally(() => clearTimeout(deadlineHandle));
+};
+
+/**
  * Whether `agy`'s own stored state says the CLI has run on this machine before.
  *
  * Both markers are `agy`'s bookkeeping about itself — the updater's last-result
@@ -161,9 +191,13 @@ const readAgyHasRunBefore = async (): Promise<boolean> => {
  * The signals, cheapest first:
  *  1. `agy`'s own log, whose "You are not logged into Antigravity." line is a
  *     positive statement of being signed out.
- *  2. `agy models`, which returns an empty list when signed out. Awaited here
- *     rather than read from the catalog's cache, so this facet owns its answer
- *     instead of depending on which request path happened to run first.
+ *  2. The models facet's live catalog, but only while it is still fresh.
+ *     `agy models` answers an empty list when signed out, so a cache the
+ *     models-list path has already warmed carries this answer for free.
+ *  3. With no fresh cache, this facet's own `agy models` probe — so the answer
+ *     is still owned here rather than left to whichever request path ran first
+ *     — raced against `AGY_AUTH_PROBE_DEADLINE_MS`. A probe that loses the race
+ *     is treated exactly like one that could not run at all.
  *
  * Nothing here can produce an email or an account identity, so `email` stays
  * null and `method` names the mechanism rather than pretending to be one.
@@ -173,7 +207,7 @@ const readAgySignInState = async (): Promise<{ signedIn: boolean; error: string 
     return { signedIn: false, error: AGY_NOT_SIGNED_IN };
   }
 
-  const modelIds = await probeAntigravityModelIds();
+  const modelIds = readFreshAntigravityModelIds() ?? await probeAgyModelIdsWithDeadline();
   if (modelIds !== null) {
     return modelIds.length > 0
       ? { signedIn: true, error: undefined }

@@ -26,8 +26,14 @@ type ProviderWatchPath = {
   createIfMissing?: boolean;
 };
 
-/** Resolved on each call so the home directory is read when the watcher starts, not when this module loads. */
-function getProviderWatchPaths(): ProviderWatchPath[] {
+/**
+ * Resolved on each call so the home directory is read when the watcher starts, not when this module loads.
+ *
+ * @internal Exported for the watcher tests, which pin which paths each provider
+ * watches and which files under them are synchronization triggers. Reaching the
+ * antigravity branch any other way would mean installing `agy`.
+ */
+export function getProviderWatchPaths(): ProviderWatchPath[] {
   const homeDir = os.homedir();
 
   return [
@@ -60,7 +66,8 @@ function getProviderWatchPaths(): ProviderWatchPath[] {
   ];
 }
 
-const WATCHER_IGNORED_PATTERNS = [
+/** @internal Exported for the watcher tests. */
+export const WATCHER_IGNORED_PATTERNS = [
   '**/node_modules/**',
   '**/.git/**',
   '**/dist/**',
@@ -109,8 +116,10 @@ let watcherRescheduleAfterRefresh = false;
 
 /**
  * Filters watcher events to provider-specific session artifact file types.
+ *
+ * @internal Exported for the watcher tests.
  */
-function isWatcherTargetFile(provider: LLMProvider, filePath: string): boolean {
+export function isWatcherTargetFile(provider: LLMProvider, filePath: string): boolean {
   if (provider === 'opencode') {
     return path.basename(filePath) === 'opencode.db';
   }
@@ -223,8 +232,10 @@ async function flushPendingWatcherUpdate(): Promise<void> {
 
 /**
  * Handles file watcher updates and triggers provider file-level synchronization.
+ *
+ * @internal Exported for the watcher tests.
  */
-async function onUpdate(
+export async function onUpdate(
   eventType: WatcherEventType,
   filePath: string,
   provider: LLMProvider
@@ -333,10 +344,3 @@ export async function closeSessionsWatcher(): Promise<void> {
   watcherRefreshInFlight = false;
   watcherRescheduleAfterRefresh = false;
 }
-
-/**
- * @internal Exported for the watcher tests, which pin which paths each provider
- * watches and which files under them are synchronization triggers. Reaching the
- * antigravity branch any other way would mean installing `agy`.
- */
-export { getProviderWatchPaths, isWatcherTargetFile, WATCHER_IGNORED_PATTERNS, onUpdate };
