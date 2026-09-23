@@ -372,9 +372,12 @@ sanctions a stable "not installed" stub (`README.md:124`).
 - ⚠️ `~/.gemini/oauth_creds.json` belongs to the **Gemini CLI, not `agy`**. Do not read it. `agy` shares the
   `~/.gemini` parent directory but keeps its own state under `~/.gemini/antigravity-cli/` and
   `~/.gemini/config/`. [V]
-- **Detecting login state non-interactively** (pick one, cheapest first): `agy models` returns an empty list
-  when unauthenticated; `~/.gemini/antigravity-cli/log/cli-*.log` contains `You are not logged into
-  Antigravity.`; `remote-control start` errors with `not signed in: …`. [V]
+- **Detecting login state non-interactively**: sign-in state comes from `agy models` ids only (non-empty =
+  signed in, empty = signed out, no answer = signed-out wording). The `You are not logged into Antigravity.`
+  line in `~/.gemini/antigravity-cli/log/cli-*.log` was tried and removed: live-verified on 1.2.8, it is a
+  startup transient emitted ~0.9 s after start, and keyring auth resolves ~30 ms later in the same run, so it
+  is not a sign-in signal. The auth deadline is 8000 ms because a cold `agy models` measures ~3-4 s (keyring
+  ~0.9 s + model fetch ~3.1 s). A failed probe is cached as no-answer (`ids: null`), never as an empty list. [V]
 - A same-OS-user server process **does** inherit an existing login silently. [V] First login cannot be done
   headlessly — OAuth code paste needs a controlling terminal.
 - Alternative auth paths exist in the binary: `GEMINI_API_KEY`, `GOOGLE_GEMINI_BASE_URL`, `AGY_ADC_AUTH`.

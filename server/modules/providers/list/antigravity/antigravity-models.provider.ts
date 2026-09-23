@@ -56,10 +56,22 @@ const AGY_MODELS_TIMEOUT_MS = 15_000;
 /** How long a completed live-list answer is reused before it is refreshed. */
 const LIVE_CATALOG_REFRESH_INTERVAL_MS = 5 * 60 * 1000;
 
+/**
+ * The result of the last live `agy models` refresh.
+ *
+ * `ids` keeps alive the one distinction callers need: `null` is no answer — the
+ * probe could not run, which says nothing about sign-in — while `[]` is the
+ * answer a signed-out CLI gives. Collapsing them used to cache a failed probe as
+ * "signed out" for the whole 5-minute fresh window, so a single unreachable CLI
+ * read as five minutes of "not signed in".
+ */
 type LiveCatalog = {
   fetchedAt: number;
-  /** Model ids the account can actually use; empty when signed out. */
-  ids: string[];
+  /**
+   * Model ids the account can actually use, or `null` when the last refresh had
+   * no answer at all. Empty — never null — means signed out.
+   */
+  ids: string[] | null;
 };
 
 /**
@@ -100,10 +112,11 @@ export const parseAgyModelsOutput = (stdout: string): string[] => {
  * CLI does. Callers must not collapse the two: only the second is an answer
  * about sign-in state.
  *
- * Shared with the auth facet, which races its own call of this against a much
- * shorter deadline when the cache below holds nothing fresh — sign-in state is
- * owned rather than borrowed, but an auth-status poll must never be able to sit
- * out the full timeout above.
+ * Shared with the auth facet, which now awaits `refreshAntigravityModelIds()` —
+ * the coalesced call below — under a much shorter deadline rather than calling
+ * this directly: sign-in state is owned rather than borrowed, but an
+ * auth-status call must never be able to sit out the full timeout above, and
+ * joining one refresh keeps concurrent callers to a single child process.
  */
 export function probeAntigravityModelIds(): Promise<string[] | null> {
   return new Promise((resolve) => {
@@ -152,21 +165,33 @@ export function probeAntigravityModelIds(): Promise<string[] | null> {
 }
 
 /**
- * Refreshes the cached live list in the background, coalescing concurrent
- * callers. Never awaited on a path that answers a request — the catalog is
- * served from the static list until this lands.
+ * Refreshes the cached live list, coalescing concurrent callers into one probe.
+ *
+ * Exported so the auth facet joins this same in-flight refresh instead of
+ * spawning its own throwaway `agy models` child per status call: sign-in state
+ * and the picker then share at most one child between them.
+ *
+ * Resolves to the catalog now cached, whose `ids` is `null` when the probe had
+ * no answer. Never rejects. Not awaited on the models-list path, which serves
+ * the static catalog until this lands, but the auth facet deliberately does
+ * await it — under a deadline of its own.
  */
-const refreshAntigravityModelIds = (): Promise<LiveCatalog | null> => {
+export const refreshAntigravityModelIds = (): Promise<LiveCatalog | null> => {
   if (liveCatalogRefresh) {
     return liveCatalogRefresh;
   }
 
   liveCatalogRefresh = probeAntigravityModelIds()
     .then((ids) => {
-      liveCatalog = { fetchedAt: Date.now(), ids: ids ?? [] };
+      // A failed probe stays a failed probe: caching `[]` here would hand the
+      // auth facet a signed-out answer it never received.
+      liveCatalog = { fetchedAt: Date.now(), ids };
       return liveCatalog;
     })
-    .catch(() => null)
+    .catch(() => {
+      liveCatalog = { fetchedAt: Date.now(), ids: null };
+      return null;
+    })
     .finally(() => {
       liveCatalogRefresh = null;
     });
@@ -184,7 +209,8 @@ const isLiveCatalogFresh = (): boolean => (
  * Exported for the auth facet: a cache the models-list path has already warmed
  * answers "is this account signed in" for free, so no second `agy models` child
  * process is spawned for it. `null` means this cache has no current answer —
- * never that the account is signed out.
+ * whether because it is empty or stale or because the last probe failed — and
+ * so never that the account is signed out.
  */
 export const readFreshAntigravityModelIds = (): string[] | null => (
   isLiveCatalogFresh() && liveCatalog ? liveCatalog.ids : null
@@ -226,7 +252,9 @@ export class AntigravityProviderModels implements IProviderModels {
       void refreshAntigravityModelIds();
     }
 
-    return liveCatalog
+    // A cached no-answer (failed probe) degrades to the catalog rather than
+    // collapsing to an empty picker: the live list is merged, never substituted.
+    return liveCatalog?.ids
       ? mergeLiveModelIds(ANTIGRAVITY_PREDEFINED_MODELS, liveCatalog.ids)
       : ANTIGRAVITY_PREDEFINED_MODELS;
   }

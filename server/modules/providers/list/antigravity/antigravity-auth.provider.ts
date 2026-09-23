@@ -1,12 +1,12 @@
-import { open, readdir, readFile } from 'node:fs/promises';
+import { readFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 
 import crossSpawn from 'cross-spawn';
 
 import {
-  probeAntigravityModelIds,
   readFreshAntigravityModelIds,
+  refreshAntigravityModelIds,
 } from '@/modules/providers/list/antigravity/antigravity-models.provider.js';
 import type { IProviderAuth } from '@/shared/interfaces.js';
 import type { ProviderAuthStatus } from '@/shared/types.js';
@@ -18,17 +18,6 @@ const spawnFunction = crossSpawn;
 /** `agy` keeps its own state under `~/.gemini/antigravity-cli/`, next to the Gemini CLI's. */
 const AGY_APP_DATA_DIR = path.join(os.homedir(), '.gemini', 'antigravity-cli');
 
-/** Rolled per-day log files the CLI writes its own auth state into. */
-const AGY_LOG_DIR = path.join(AGY_APP_DATA_DIR, 'log');
-
-/**
- * How much of the newest log file to read for auth-state lines.
- *
- * The current sign-in state is the newest one, and a long-running CLI grows one
- * day's log well past this — so read the tail, not the whole file.
- */
-const AGY_LOG_TAIL_BYTES = 256 * 1024;
-
 /** Marker `agy`'s updater writes once the CLI has actually run on this machine. */
 const AGY_UPDATE_STATUS_PATH = path.join(AGY_APP_DATA_DIR, 'updater', 'update_status.json');
 
@@ -36,21 +25,21 @@ const AGY_UPDATE_STATUS_PATH = path.join(AGY_APP_DATA_DIR, 'updater', 'update_st
 const AGY_ONBOARDING_PATH = path.join(AGY_APP_DATA_DIR, 'cache', 'onboarding.json');
 
 /**
- * The one auth-state sentence `agy` prints into its own log when it has no
- * usable stored login. It is a statement *about* login state, not credential
- * material: no token, no email, no account identifier.
- */
-const AGY_NOT_LOGGED_IN_LINE = 'You are not logged into Antigravity.';
-
-/**
- * How long this facet will wait on its own `agy models` probe.
+ * How long this facet will wait for the models facet's coalesced `agy models`
+ * refresh before answering without one.
  *
- * Far below the probe's own 15 s timeout on purpose: the client polls auth
- * status, so a hung CLI would otherwise hold every poll for the full timeout.
- * The probe is left alone — its timer still kills the late child — and losing
- * this race simply reads as "no answer from the CLI".
+ * A cold `agy models` needs ~3-4 s on the machine this was measured on (~0.9 s
+ * of keyring auth, then the model fetch), so the old 2 s deadline lost the race
+ * on the first auth-status call after every server restart and misreported a
+ * signed-in account as signed out. This is 2x the measured cold time.
+ *
+ * Still far below the probe's own 15 s timeout: one auth-status call is answered
+ * once per screen mount — the frontend does not poll — but a hung CLI would
+ * otherwise hold that call for the full timeout. The probe is left alone, its
+ * timer still kills the late child, and losing this race simply reads as "no
+ * answer from the CLI".
  */
-const AGY_AUTH_PROBE_DEADLINE_MS = 2_000;
+const AGY_AUTH_PROBE_DEADLINE_MS = 8_000;
 
 /** Major version this provider's NDJSON mapping was written against. */
 const AGY_KNOWN_MAJOR_VERSION = 1;
@@ -59,7 +48,7 @@ const AGY_CLI_NOT_INSTALLED = 'Antigravity CLI is not installed';
 // There is no `agy login` subcommand — signing in happens through `/login`
 // inside the interactive CLI — so every signed-out message has to say where to
 // go instead of promising a button.
-const AGY_NOT_SIGNED_IN = 'Not signed in. Run `agy` in a terminal and sign in there.';
+export const AGY_NOT_SIGNED_IN = 'Not signed in. Run `agy` in a terminal and sign in there.';
 
 /**
  * Reads `agy --version`, returning the raw stdout.
@@ -98,66 +87,30 @@ const readTextFile = async (filePath: string): Promise<string | null> => {
   }
 };
 
-/** The newest `cli-*.log` in agy's log directory, or null when there is none. */
-const findNewestAgyLogFile = async (): Promise<string | null> => {
-  let entries;
-  try {
-    entries = await readdir(AGY_LOG_DIR, { withFileTypes: true });
-  } catch {
-    return null;
-  }
-
-  const logNames = entries
-    .filter((entry) => entry.isFile() && entry.name.startsWith('cli-') && entry.name.endsWith('.log'))
-    .map((entry) => entry.name)
-    .sort();
-  const newest = logNames[logNames.length - 1];
-  return newest ? path.join(AGY_LOG_DIR, newest) : null;
-};
-
 /**
- * Reads agy's own newest log for its "not logged in" line.
+ * `refreshAntigravityModelIds()`, given up on after `AGY_AUTH_PROBE_DEADLINE_MS`.
  *
- * Returns `true` only for a positive "not logged in" reading. A missing log
- * directory, an unreadable file, or a log with no auth line at all all return
- * `false` — the absence of the sentence is not evidence of a login.
+ * The refresh is the models facet's coalesced one, so this call joins work that
+ * is already in flight rather than spawning a second `agy models` child: two
+ * concurrent auth-status calls — or an auth-status call landing next to a
+ * models-list call — share at most one child process. That probe is untouched:
+ * a child that settles late is still killed by its own timer. Only this caller
+ * stops waiting, and `null` — the same value the probe uses for "could not run"
+ * — is what it stops waiting with.
  */
-const readLoggedOutFromAgyLog = async (): Promise<boolean> => {
-  const logPath = await findNewestAgyLogFile();
-  if (!logPath) {
-    return false;
-  }
-
-  let handle;
-  try {
-    handle = await open(logPath, 'r');
-    const { size } = await handle.stat();
-    const start = Math.max(0, size - AGY_LOG_TAIL_BYTES);
-    const buffer = Buffer.alloc(size - start);
-    await handle.read(buffer, 0, buffer.length, start);
-    return buffer.toString('utf8').includes(AGY_NOT_LOGGED_IN_LINE);
-  } catch {
-    return false;
-  } finally {
-    await handle?.close().catch(() => undefined);
-  }
-};
-
-/**
- * `probeAntigravityModelIds()`, given up on after `AGY_AUTH_PROBE_DEADLINE_MS`.
- *
- * The probe itself is untouched: a child that settles late is still killed by
- * the probe's own timer. Only this caller stops waiting, and `null` — the same
- * value the probe uses for "could not run" — is what it stops waiting with.
- */
-const probeAgyModelIdsWithDeadline = (): Promise<string[] | null> => {
+const refreshAgyModelIdsWithDeadline = async (): Promise<string[] | null> => {
   let deadlineHandle: NodeJS.Timeout | undefined;
   const deadline = new Promise<null>((resolve) => {
     deadlineHandle = setTimeout(() => resolve(null), AGY_AUTH_PROBE_DEADLINE_MS);
   });
 
-  return Promise.race([probeAntigravityModelIds(), deadline])
-    .finally(() => clearTimeout(deadlineHandle));
+  try {
+    // `null` from the refresh is a probe that had no answer, and a catalog that
+    // landed with `ids: null` is the same thing — neither is a signed-out list.
+    return (await Promise.race([refreshAntigravityModelIds(), deadline]))?.ids ?? null;
+  } finally {
+    clearTimeout(deadlineHandle);
+  }
 };
 
 /**
@@ -189,25 +142,30 @@ const readAgyHasRunBefore = async (): Promise<boolean> => {
  * not `agy`.
  *
  * The signals, cheapest first:
- *  1. `agy`'s own log, whose "You are not logged into Antigravity." line is a
- *     positive statement of being signed out.
- *  2. The models facet's live catalog, but only while it is still fresh.
+ *  1. The models facet's live catalog, but only while it is still fresh.
  *     `agy models` answers an empty list when signed out, so a cache the
- *     models-list path has already warmed carries this answer for free.
- *  3. With no fresh cache, this facet's own `agy models` probe — so the answer
- *     is still owned here rather than left to whichever request path ran first
- *     — raced against `AGY_AUTH_PROBE_DEADLINE_MS`. A probe that loses the race
- *     is treated exactly like one that could not run at all.
+ *     models-list path has already warmed carries this answer for free — and
+ *     only a *successful* probe ever enters that cache, so its presence is a
+ *     real answer rather than a cached failure.
+ *  2. With no fresh cache, the models facet's coalesced refresh, joined rather
+ *     than duplicated so concurrent callers share one `agy models` child, and
+ *     raced against `AGY_AUTH_PROBE_DEADLINE_MS`. Losing that race is treated
+ *     exactly like a probe that could not run at all.
+ *
+ * `agy models` is therefore the whole answer: a non-empty list is signed in, an
+ * empty one is signed out, and no answer goes to the wording below. Two things
+ * are deliberately not signals. The `You are not logged into Antigravity.` line
+ * in `~/.gemini/antigravity-cli/log/cli-*.log` was tried first and removed: it
+ * is a startup transient every run emits ~0.9 s in, before keyring auth resolves
+ * ~30 ms later, so it cannot separate a signed-in run from a signed-out one.
+ * And a failed probe is never an empty list — see `probeAntigravityModelIds`,
+ * whose `null` (could not run) and `[]` (ran, signed out) this mirrors.
  *
  * Nothing here can produce an email or an account identity, so `email` stays
  * null and `method` names the mechanism rather than pretending to be one.
  */
 const readAgySignInState = async (): Promise<{ signedIn: boolean; error: string | undefined }> => {
-  if (await readLoggedOutFromAgyLog()) {
-    return { signedIn: false, error: AGY_NOT_SIGNED_IN };
-  }
-
-  const modelIds = readFreshAntigravityModelIds() ?? await probeAgyModelIdsWithDeadline();
+  const modelIds = readFreshAntigravityModelIds() ?? await refreshAgyModelIdsWithDeadline();
   if (modelIds !== null) {
     return modelIds.length > 0
       ? { signedIn: true, error: undefined }
