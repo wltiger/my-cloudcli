@@ -437,6 +437,59 @@ test('Claude subagent work surviving a turn boundary and the next prompt', async
     });
   });
 
+  await t.test('a backgrounded subagent survives an empty snapshot race and the next prompt', async () => {
+    await withIsolatedDatabase(async () => {
+      sessionsDb.createAppSession('app-race', 'claude', '/workspace/demo');
+
+      const first = new FakeConnection();
+      const firstRun = startRun('app-race', first);
+      const firstTurn = queryClaudeSDK(
+        'investigate the flaky test',
+        { ...BASE_OPTIONS, sessionId: 'app-race' },
+        firstRun.writer,
+        createContext(),
+      );
+      await waitUntil(() => queries.length === 1, 'the first query to start');
+
+      const live = queries[0];
+      assert.ok(live);
+
+      // The turn explicitly backgrounded a delegation, but the Stop snapshot
+      // lands before the CLI has registered it and reports nothing in flight.
+      // The observed start has to outrank the stale reading, or the work dies
+      // on the wind-down that the released stdin triggers.
+      await live.emit(toolUse('Agent', { subagent_type: 'general-purpose', prompt: 'dig in', run_in_background: true }));
+      await fireStop(live, []);
+      await live.emit(RESULT);
+
+      assert.equal(live.promptStreamClosed, false, 'the observed background start holds despite the empty snapshot');
+      assert.equal(chatRunRegistry.hasBackgroundWorkOutstanding('app-race'), true);
+
+      // The follow-up reuses the held process, exactly like the snapshot-proven case.
+      const second = new FakeConnection();
+      const secondRun = startRun('app-race', second);
+      const secondTurn = queryClaudeSDK(
+        'meanwhile, what does the config say?',
+        { ...BASE_OPTIONS, sessionId: 'app-race' },
+        secondRun.writer,
+        createContext(),
+      );
+      await waitUntil(() => live.prompts.length === 2 || queries.length > 1, 'the follow-up prompt to be pushed');
+
+      assert.equal(queries.length, 1, 'the follow-up reuses the process rather than building a second one');
+      assert.equal(live.interruptCount, 0, 'the backgrounded subagent is never interrupted by a superseding run');
+      assert.equal(live.promptStreamClosed, false, 'the follow-up did not close the held stdin');
+
+      // The work reports back with an empty reading — the hold ends there.
+      await fireStop(live, []);
+      await live.emit(RESULT);
+      await secondTurn;
+      await firstTurn;
+
+      assert.equal(live.promptStreamClosed, true, 'nothing outstanding, so the process is let go');
+    });
+  });
+
   /**
    * Drives a turn that backgrounds two different kinds of work at once — a
    * `Bash run_in_background` and an `Agent` delegation — then takes a follow-up

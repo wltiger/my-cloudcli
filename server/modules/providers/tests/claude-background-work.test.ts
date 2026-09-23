@@ -284,6 +284,31 @@ test('Claude background-work detection via the Stop-hook snapshot', async (t) =>
     assert.deepEqual(connection.kinds(), ['session_created', 'complete']);
   });
 
+  await t.test('an empty Stop snapshot cannot override a background start observed this turn', async () => {
+    // The CLI can take the snapshot before it has registered the task the turn
+    // just backgrounded — the reading is empty while the work is live. Trusting
+    // it is what let a freshly backgrounded shell be swept on wind-down.
+    const { turn, live } = await startTurn('bg-race-bash');
+
+    await live.emit(toolUse('Bash', { command: 'sleep 100', run_in_background: true }));
+    await fireHook(live, 'Stop', { background_tasks: [], session_crons: [] });
+    await live.emit(RESULT);
+
+    assert.equal(live.promptStreamClosed, false, 'the observed start outranks the stale empty reading');
+    await finishHeldTurn(live, turn);
+  });
+
+  await t.test('an empty Stop snapshot still holds a subagent this turn backgrounded', async () => {
+    const { turn, live } = await startTurn('bg-race-agent');
+
+    await live.emit(toolUse('Agent', { subagent_type: 'general-purpose', run_in_background: true }));
+    await fireHook(live, 'Stop', { background_tasks: [], session_crons: [] });
+    await live.emit(RESULT);
+
+    assert.equal(live.promptStreamClosed, false, 'a backgrounded subagent holds even on an empty snapshot');
+    await finishHeldTurn(live, turn);
+  });
+
   await t.test('a turn with no background work at all still releases immediately', async () => {
     const { turn, live } = await startTurn('bg-plain');
 
@@ -359,7 +384,7 @@ test('Claude background-work detection via the Stop-hook snapshot', async (t) =>
     assert.equal(live.promptStreamClosed, true);
   });
 
-  await t.test('without hooks, only a backgrounded Bash holds the process', async () => {
+  await t.test('without hooks, an explicitly backgrounded Bash holds the process', async () => {
     rejectHooksOnce = true;
     const { turn, live } = await startTurn('bg-fallback-bash');
 
@@ -372,7 +397,23 @@ test('Claude background-work detection via the Stop-hook snapshot', async (t) =>
     await finishHeldTurn(live, turn);
   });
 
-  await t.test('without hooks, a subagent or a foreground Bash releases as usual', async () => {
+  await t.test('without hooks, a backgrounded subagent holds the process', async () => {
+    for (const [sessionId, block] of [
+      ['bg-fallback-agent-bg', toolUse('Agent', { subagent_type: 'general-purpose', run_in_background: true })],
+      ['bg-fallback-task-bg', toolUse('Task', { subagent_type: 'general-purpose', run_in_background: true })],
+    ] as Array<[string, AnyRecord]>) {
+      rejectHooksOnce = true;
+      const { turn, live } = await startTurn(sessionId);
+
+      await live.emit(block);
+      await live.emit(RESULT);
+
+      assert.equal(live.promptStreamClosed, false, `${sessionId} holds on the observed background start`);
+      await finishHeldTurn(live, turn);
+    }
+  });
+
+  await t.test('without hooks, a foreground subagent or a foreground Bash releases as usual', async () => {
     for (const [sessionId, block] of [
       ['bg-fallback-agent', toolUse('Agent', { subagent_type: 'general-purpose' })],
       ['bg-fallback-monitor', toolUse('Monitor', { command: 'watch' })],

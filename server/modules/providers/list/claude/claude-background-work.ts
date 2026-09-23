@@ -18,29 +18,40 @@ type ClaudeBackgroundWorkLedger = {
   observeMessage: (sdkMessage: unknown) => void;
   /** Clears the per-turn fallback signal once a turn's `result` has been judged. */
   resetFallbackSignal: () => void;
-  /** True once a hook reported a usable snapshot, which then overrides the fallback. */
+  /** True once a hook reported a usable snapshot of the session's in-flight work. */
   hasSnapshot: () => boolean;
   /** Whether work that outlives this turn is still outstanding. */
   hasOutstandingWork: () => boolean;
+  /**
+   * Why work is outstanding, for the decision log: the hook's reading, an
+   * explicit start observed in this turn's stream, or `null` when nothing is.
+   */
+  outstandingReason: () => 'snapshot' | 'observed-start' | null;
 };
 
 /**
- * Detects the one tool call the fallback still has to recognise.
+ * Detects the tool calls that start work outliving the turn, on the caller's
+ * say-so.
  *
- * A backgrounded `Bash` is the case the CLI sweeps fastest (a five-second grace),
- * so it needs a signal that does not depend on a hook round-trip. Every other
- * tool — subagents above all — is left out on purpose: they are the common case
- * and are almost always finished by the time the turn ends, so flagging them by
- * name would hold a process open for nothing on most turns.
+ * Only an explicit `run_in_background: true` counts. A foreground subagent —
+ * the common case — finishes inside the turn and must not hold a process
+ * open, and it never carries the flag, so it never matches. `Bash` is the
+ * case the CLI sweeps fastest on wind-down (a five-second grace), which is why
+ * this signal has to exist at all; the subagent names are there so the same
+ * guard covers work the CLI keeps alive for up to the bg-wait ceiling.
  */
-function startsBackgroundBash(sdkMessage: unknown): boolean {
+const BACKGROUND_WORK_TOOLS = new Set(['Bash', 'Agent', 'Task']);
+
+function startsBackgroundWork(sdkMessage: unknown): boolean {
   const content = (sdkMessage as AnyRecord)?.message?.content;
   if (!Array.isArray(content)) {
     return false;
   }
 
   return content.some((block: AnyRecord) =>
-    block?.type === 'tool_use' && block.name === 'Bash' && block.input?.run_in_background === true);
+    block?.type === 'tool_use'
+    && BACKGROUND_WORK_TOOLS.has(block.name as string)
+    && block.input?.run_in_background === true);
 }
 
 /**
@@ -62,6 +73,14 @@ function startsBackgroundBash(sdkMessage: unknown): boolean {
  * open forever, while a snapshot simply reports whatever is outstanding right
  * now and cannot drift.
  *
+ * One reading the snapshot is not allowed to answer is the turn's own: an
+ * explicit `run_in_background` start observed in this turn's stream holds the
+ * process regardless of what the snapshot says, because the CLI can take the
+ * snapshot before it has registered the task the turn just started. An empty
+ * reading at that instant is a timing artefact, not an answer — trusting it is
+ * what let a freshly backgrounded shell be swept on wind-down. The bias is
+ * towards holding a little longer, which the run's own idle ceiling ends.
+ *
  * `SubagentStop` is registered too, but only as a stand-in for a `Stop` that
  * never arrives. Its snapshot is self-inclusive — it still lists the subagent
  * that is stopping as running — so taking it as final would hold every subagent
@@ -80,7 +99,9 @@ export function createBackgroundWorkLedger(): ClaudeBackgroundWorkLedger {
   // "nothing outstanding" and killing live work.
   let snapshotOutstanding: boolean | null = null;
   // Fallback signal for the current turn.
-  let backgroundBashStarted = false;
+  let backgroundWorkStarted = false;
+  // One race warning per turn, so a Stop and its SubagentStop do not both report it.
+  let raceWarned = false;
 
   const recordSnapshot = async (input: AnyRecord): Promise<AnyRecord> => {
     const tasks = input?.background_tasks;
@@ -93,10 +114,21 @@ export function createBackgroundWorkLedger(): ClaudeBackgroundWorkLedger {
 
     snapshotOutstanding = (Array.isArray(tasks) && tasks.length > 0)
       || (Array.isArray(crons) && crons.length > 0);
+    if (!snapshotOutstanding && backgroundWorkStarted && !raceWarned) {
+      raceWarned = true;
+      console.warn(
+        '[Claude SDK] Background-work snapshot reports nothing in flight, but this turn explicitly started background work — the task may not be registered yet. Holding on the observed start.',
+      );
+    }
     return {};
   };
 
   const hasSnapshot = (): boolean => snapshotOutstanding !== null;
+
+  const outstandingReason = (): 'snapshot' | 'observed-start' | null =>
+    hasSnapshot() && snapshotOutstanding === true ? 'snapshot'
+      : backgroundWorkStarted ? 'observed-start'
+        : null;
 
   return {
     buildHooks: () => {
@@ -104,14 +136,16 @@ export function createBackgroundWorkLedger(): ClaudeBackgroundWorkLedger {
       return { Stop: matchers, SubagentStop: matchers };
     },
     observeMessage: (sdkMessage) => {
-      if (startsBackgroundBash(sdkMessage)) {
-        backgroundBashStarted = true;
+      if (startsBackgroundWork(sdkMessage)) {
+        backgroundWorkStarted = true;
       }
     },
     resetFallbackSignal: () => {
-      backgroundBashStarted = false;
+      backgroundWorkStarted = false;
+      raceWarned = false;
     },
     hasSnapshot,
-    hasOutstandingWork: () => (hasSnapshot() ? snapshotOutstanding === true : backgroundBashStarted),
+    outstandingReason,
+    hasOutstandingWork: () => outstandingReason() !== null,
   };
 }
