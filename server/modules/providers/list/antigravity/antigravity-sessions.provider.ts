@@ -110,13 +110,150 @@ export const readConversationIdFromTranscriptPath = (filePath: string): string |
 };
 
 /** Fields `truncated_fields` may name that this reader restores from the untruncated transcript. */
-const RESTORABLE_TRUNCATED_FIELDS = new Set(['content', 'thinking']);
+const RESTORABLE_TRUNCATED_FIELDS = new Set(['content', 'thinking', 'tool_calls']);
 
 /** The record types observed on `agy` 1.2.7; treated as a floor, never as a closed set. */
 const USER_INPUT_TYPE = 'USER_INPUT';
 const TOOL_RESULT_TYPE = 'GENERIC';
 const TOOL_RESULT_SOURCE = 'MODEL';
 const USER_INPUT_SOURCE = 'USER_EXPLICIT';
+const SYSTEM_MESSAGE_TYPE = 'SYSTEM_MESSAGE';
+/** Only ever observed at a context compaction (build guide §4). */
+const CHECKPOINT_TYPE = 'CHECKPOINT';
+
+const SYSTEM_MESSAGE_OPEN_TAG = '<SYSTEM_MESSAGE>';
+const SYSTEM_MESSAGE_CLOSE_TAG = '</SYSTEM_MESSAGE>';
+const SYSTEM_MESSAGE_HEADER = '[Message]';
+const SYSTEM_MESSAGE_BODY_ATTRIBUTE = 'content=';
+const SYSTEM_MESSAGE_SENDER_PATTERN = /(?:^|\s)sender=(\S+)/;
+/** A sender shaped like this is another conversation — a sub-agent reporting back. */
+const CONVERSATION_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+/** Length of the one-line summary a system notice renders as. */
+const NOTICE_SUMMARY_MAX_LENGTH = 200;
+
+/**
+ * The id every message of one step carries, on the history and the live path
+ * alike. Shared with the live fold in `antigravity-runtime.provider.ts`.
+ *
+ * Built from the app session id, never the `agy` conversation id: the frontend
+ * prunes a live row against its persisted twin by exact id (or `toolId`), so
+ * both paths have to agree on the one id they both know. Without an app
+ * session id — a run no caller named — the fixed literal makes the row
+ * never-pruned rather than wrongly pruned.
+ */
+export const buildAntigravityMessageId = (
+  appSessionId: string | null,
+  stepIndex: number | string,
+  suffix: 'system' | 'tool' | 'compact',
+): string => `antigravity-${appSessionId || 'session'}-${stepIndex}-${suffix}`;
+
+/**
+ * The compact-boundary divider a `CHECKPOINT` renders, built identically on
+ * the history and the live path so the two rows prune against each other.
+ * Shared with the live fold in `antigravity-runtime.provider.ts`.
+ *
+ * The history path passes the record's own timestamp; the live path omits it
+ * and `createNormalizedMessage` stamps the divider with the current time.
+ */
+export const buildAntigravityCompactBoundary = (
+  appSessionId: string | null,
+  stepIndex: number | string,
+  sessionId: string | null,
+  timestamp?: string,
+): NormalizedMessage => createNormalizedMessage({
+  id: buildAntigravityMessageId(appSessionId, stepIndex, 'compact'),
+  sessionId: sessionId || '',
+  ...(timestamp ? { timestamp } : {}),
+  provider: PROVIDER,
+  kind: 'compact_boundary',
+  // `agy` has no manual compaction.
+  compactTrigger: 'auto',
+});
+
+/**
+ * Splits a `SYSTEM_MESSAGE` into who sent it and what it says, or null when it
+ * is not the envelope this reader knows.
+ *
+ * The content opens with boilerplate that itself names `<SYSTEM_MESSAGE>`
+ * inline, so the real opening tag is the last one before the closing tag. The
+ * `[Message]` header's attributes are read in no fixed order; `content=` is
+ * unquoted and unterminated, so it is necessarily last, and the body runs from
+ * the first `content=` to the closing tag — the body may say `content=` itself.
+ * A missing closing tag (a live buffer cut short) lets the body run to the end.
+ */
+const parseSystemMessageEnvelope = (content: string): { sender: string | null; body: string } | null => {
+  const closeIndex = content.lastIndexOf(SYSTEM_MESSAGE_CLOSE_TAG);
+  const end = closeIndex === -1 ? content.length : closeIndex;
+  const openIndex = content.lastIndexOf(SYSTEM_MESSAGE_OPEN_TAG, end - SYSTEM_MESSAGE_OPEN_TAG.length);
+  if (openIndex === -1) {
+    return null;
+  }
+
+  const inner = content.slice(openIndex + SYSTEM_MESSAGE_OPEN_TAG.length, end).trimStart();
+  const bodyIndex = inner.indexOf(SYSTEM_MESSAGE_BODY_ATTRIBUTE);
+  if (!inner.startsWith(SYSTEM_MESSAGE_HEADER) || bodyIndex === -1) {
+    return null;
+  }
+
+  const attributes = inner.slice(SYSTEM_MESSAGE_HEADER.length, bodyIndex);
+  return {
+    sender: SYSTEM_MESSAGE_SENDER_PATTERN.exec(attributes)?.[1] ?? null,
+    body: inner.slice(bodyIndex + SYSTEM_MESSAGE_BODY_ATTRIBUTE.length).trim(),
+  };
+};
+
+/**
+ * Normalizes one `SYSTEM_MESSAGE` into what it actually is.
+ *
+ * A sub-agent's findings (the sender is a conversation id) render as a full
+ * assistant message with the envelope stripped. Everything else — `system`,
+ * task and timer senders, and any envelope this reader does not recognise —
+ * is a compact notice: the envelope wording is `agy`'s internal naming, not a
+ * contract, so a mismatch degrades to the raw text rather than losing it.
+ * Shared with the live fold so a reload renders the same row.
+ */
+export const normalizeAntigravitySystemMessage = ({
+  content,
+  id,
+  sessionId,
+  timestamp,
+}: {
+  content: string;
+  id: string;
+  sessionId: string | null;
+  timestamp?: string;
+}): NormalizedMessage | null => {
+  const envelope = parseSystemMessageEnvelope(content);
+  const body = envelope ? envelope.body : content.trim();
+  if (!body) {
+    return null;
+  }
+
+  if (envelope?.sender && CONVERSATION_ID_PATTERN.test(envelope.sender)) {
+    return createNormalizedMessage({
+      id,
+      sessionId,
+      timestamp,
+      provider: PROVIDER,
+      kind: 'text',
+      role: 'assistant',
+      content: body,
+    });
+  }
+
+  const line = body.replace(/\s+/g, ' ').trim();
+  return createNormalizedMessage({
+    id,
+    sessionId,
+    timestamp,
+    provider: PROVIDER,
+    kind: 'task_notification',
+    // The only status the renderer paints neutral; there is no "info" state.
+    status: 'completed',
+    summary: line.length > NOTICE_SUMMARY_MAX_LENGTH ? `${line.slice(0, NOTICE_SUMMARY_MAX_LENGTH - 1)}…` : line,
+    content: body,
+  });
+};
 
 /** `<USER_REQUEST>` is the only part of a user record that the user actually typed. */
 const USER_REQUEST_PATTERN = /<USER_REQUEST>([\s\S]*?)<\/USER_REQUEST>/;
@@ -171,9 +308,12 @@ const readTranscriptRecords = (filePath: string): AnyRecord[] => {
 /**
  * Restores the fields `transcript.jsonl` elided, from `transcript_full.jsonl`.
  *
- * Only the fields a record itself names in `truncated_fields`, and only the two
+ * Only the fields a record itself names in `truncated_fields`, and only the ones
  * this reader renders — a name the writer invented would otherwise be copied
- * onto the record under a key nothing here controls.
+ * onto the record under a key nothing here controls. `tool_calls` is an array:
+ * its elided form keeps the shape but cuts an argument's JSON literal short,
+ * which is what leaves a tool card unreadable. Best effort: with no full record
+ * at that step the elided one renders as it is.
  */
 const restoreTruncatedFields = (logDir: string, records: AnyRecord[]): AnyRecord[] => {
   if (!records.some((record) => readTruncatedFields(record).length > 0)) {
@@ -202,7 +342,7 @@ const restoreTruncatedFields = (logDir: string, records: AnyRecord[]): AnyRecord
 
     const restored = { ...record };
     for (const field of truncated) {
-      if (typeof full[field] === 'string') {
+      if (typeof full[field] === 'string' || Array.isArray(full[field])) {
         restored[field] = full[field];
       }
     }
@@ -306,11 +446,13 @@ const buildToolResult = (record: AnyRecord): { content: string; isError: boolean
  * Normalizes one transcript record, with the results of its own tool calls when
  * the caller has them.
  *
- * The dispatch is deliberately field-driven rather than a switch over the four
+ * The dispatch is deliberately field-driven rather than a switch over the
  * observed `type` values: that vocabulary is internal Cascade naming that
  * appears in no published proto (build guide §4, open question Q1), so a type
  * this fork has never seen still renders everything it carries — thinking,
- * prose, tool calls, errors — instead of vanishing from the transcript.
+ * prose, tool calls, errors — instead of vanishing from the transcript. Only
+ * `SYSTEM_MESSAGE` and `CHECKPOINT` are routed by type, because what they carry
+ * is `agy`'s own scaffolding rather than anything the agent said.
  */
 const normalizeAntigravityRecord = (
   record: AnyRecord,
@@ -349,6 +491,24 @@ const normalizeAntigravityRecord = (
     return messages;
   }
 
+  const recordType = readOptionalString(record.type);
+  if (recordType === SYSTEM_MESSAGE_TYPE) {
+    const systemMessage = normalizeAntigravitySystemMessage({
+      content: readOptionalString(record.content) ?? '',
+      id: buildAntigravityMessageId(sessionId, stepIndex, 'system'),
+      sessionId,
+      timestamp,
+    });
+    return systemMessage ? [systemMessage] : [];
+  }
+
+  // Type alone decides: `CHECKPOINT` has only ever meant a compaction, and a
+  // future meaning mismatch degrades to a mislabelled divider, never to the
+  // wall of resume-prompt text the record carries.
+  if (recordType === CHECKPOINT_TYPE) {
+    return [buildAntigravityCompactBoundary(sessionId, stepIndex, sessionId, timestamp)];
+  }
+
   const thinking = readOptionalString(record.thinking);
   if (thinking?.trim()) {
     messages.push(createNormalizedMessage({
@@ -378,9 +538,6 @@ const normalizeAntigravityRecord = (
       content: error,
     }));
   } else if (content?.trim()) {
-    // Assistant prose, and also the system notices `agy` injects into its own
-    // conversation (`SYSTEM_MESSAGE`) — the message shape has no system role, and
-    // dropping them would hide the reason a turn behaved the way it did.
     messages.push(createNormalizedMessage({
       id: `${baseId}-text`,
       sessionId,
@@ -393,18 +550,26 @@ const normalizeAntigravityRecord = (
   }
 
   toolCalls.forEach((call, callIndex) => {
+    const result = toolResults[callIndex];
+    // Keyed on the step that *ran* the call — its result record — because that
+    // is the step the live stream's `tool` update names. Calls execute in the
+    // steps right after the one that made them, so a call whose result never
+    // arrived still gets the id its live card had.
+    const executionStep = result
+      ? readStepIndex(result, stepIndex + 1 + callIndex)
+      : stepIndex + 1 + callIndex;
+    const toolId = buildAntigravityMessageId(sessionId, executionStep, 'tool');
     const toolMessage = createNormalizedMessage({
-      id: `${baseId}-tool-${callIndex}`,
+      id: toolId,
       sessionId,
       timestamp,
       provider: PROVIDER,
       kind: 'tool_use',
       toolName: readOptionalString(call.name) ?? 'Tool',
       toolInput: readToolInput(call),
-      toolId: `${baseId}-tool-${callIndex}`,
+      toolId,
     });
 
-    const result = toolResults[callIndex];
     if (result) {
       toolMessage.toolResult = buildToolResult(result);
     }
@@ -423,10 +588,17 @@ const normalizeAntigravityRecord = (
  * the N records after an N-call step are consumed into that step's cards rather
  * than rendered as N anonymous blobs of tool output. A call whose result never
  * arrived (the conversation ended mid-tool) simply keeps a card with no result.
+ *
+ * It also drops the prompt `agy` re-injects after its backend restarts: a
+ * prompt identical to the last one, with no assistant text in between, is not
+ * shown twice. A deliberate re-send after a reply still is. The rule reads the
+ * previous prompt, so it relies on the records arriving in step order.
  */
 const normalizeAntigravityRecords = (records: AnyRecord[], sessionId: string): NormalizedMessage[] => {
   const consumed = new Set<number>();
   const messages: NormalizedMessage[] = [];
+  let lastPrompt: string | null = null;
+  let repliedSinceLastPrompt = false;
 
   for (let index = 0; index < records.length; index += 1) {
     if (consumed.has(index)) {
@@ -434,6 +606,13 @@ const normalizeAntigravityRecords = (records: AnyRecord[], sessionId: string): N
     }
 
     const record = records[index];
+    if (isUserRecord(record)) {
+      const prompt = unwrapUserRequest(readOptionalString(record.content) ?? '');
+      if (prompt === lastPrompt && !repliedSinceLastPrompt) {
+        continue;
+      }
+    }
+
     const toolResults: AnyRecord[] = [];
     const expectedResults = readToolCalls(record).length;
     for (let next = index + 1; next < records.length && toolResults.length < expectedResults; next += 1) {
@@ -445,7 +624,16 @@ const normalizeAntigravityRecords = (records: AnyRecord[], sessionId: string): N
       consumed.add(next);
     }
 
-    messages.push(...normalizeAntigravityRecord(record, sessionId, index, toolResults));
+    const normalized = normalizeAntigravityRecord(record, sessionId, index, toolResults);
+    for (const message of normalized) {
+      if (message.kind === 'text' && message.role === 'user') {
+        lastPrompt = unwrapUserRequest(readOptionalString(record.content) ?? '');
+        repliedSinceLastPrompt = false;
+      } else if (message.kind === 'text' && message.role === 'assistant') {
+        repliedSinceLastPrompt = true;
+      }
+    }
+    messages.push(...normalized);
   }
 
   return messages;

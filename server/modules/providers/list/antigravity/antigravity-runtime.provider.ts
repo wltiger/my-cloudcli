@@ -27,6 +27,11 @@ import {
   resolveAntigravityProjectId,
 } from '@/modules/providers/list/antigravity/antigravity-permissions.js';
 import {
+  buildAntigravityCompactBoundary,
+  buildAntigravityMessageId,
+  normalizeAntigravitySystemMessage,
+} from '@/modules/providers/list/antigravity/antigravity-sessions.provider.js';
+import {
   appendFilesInputTag,
   appendImagesInputTag,
   normalizeAttachmentDescriptors,
@@ -62,15 +67,18 @@ const activeAntigravityProcesses = new Map<string, AntigravityRun>();
 const AGY_KILL_ESCALATE_MS = 5_000;
 
 /**
- * The two `step_type` values this runtime treats specially.
+ * The `step_type` values this runtime treats specially.
  *
- * `user_input` is suppressed (the client already renders its own bubble) and
- * `tool` becomes a tool card. Everything else — the documented
- * `agent_response`, the observed `system_message`, and anything a future
+ * `user_input` is suppressed (the client already renders its own bubble),
+ * `tool` becomes a tool card, `system_message` is buffered and routed like its
+ * persisted record, and `checkpoint` (a compaction) becomes a divider.
+ * Everything else — the documented `agent_response`, and anything a future
  * release adds — falls through to the generic text path rather than being
  * dropped.
  */
 const AGY_USER_STEP_TYPES = new Set(['user_input']);
+const AGY_SYSTEM_MESSAGE_STEP_TYPE = 'system_message';
+const AGY_CHECKPOINT_STEP_TYPE = 'checkpoint';
 
 /** Prefix `agy` puts on the structured error JSON it writes to stderr. */
 const AGY_ERROR_PREFIX = 'AGY_ERROR:';
@@ -290,6 +298,13 @@ export type AntigravityTurnState = {
   lastAttemptedCommand: string | null;
   /** Unified lifecycle contract: exactly one terminal `complete` per run. */
   completeSent: boolean;
+  /**
+   * `system_message` text per step index, held until the step completes: the
+   * envelope can only be routed once it is whole.
+   */
+  pendingSystemMessages: Record<string, string>;
+  /** Whether a `stream_delta` has been sent that no `stream_end` has closed yet. */
+  streamOpen: boolean;
 };
 
 /** The fold's collaborators: what it emits through, and who owns session adoption. */
@@ -320,6 +335,8 @@ export const createAntigravityTurnState = (
   refusalRuleCandidates: new Set<string>(),
   lastAttemptedCommand: null,
   completeSent: false,
+  pendingSystemMessages: {},
+  streamOpen: false,
 });
 
 /** The session id every message of this turn is tagged with. */
@@ -327,6 +344,66 @@ const turnSessionId = (
   state: AntigravityTurnState,
   context: AntigravityFoldContext,
 ): string | null => state.capturedSessionId || context.appSessionId || null;
+
+/**
+ * Sends one buffered `system_message`, routed exactly as its persisted record is.
+ *
+ * An open assistant stream is closed first, so the client finalizes the prose
+ * above this message instead of folding later prose into that bubble. The id
+ * uses the app session id alone — never the conversation id — because it is
+ * the only id the history reader also knows.
+ */
+const emitSystemMessage = (
+  state: AntigravityTurnState,
+  context: AntigravityFoldContext,
+  stepIndex: string,
+  content: string,
+): AntigravityTurnState => {
+  const message = normalizeAntigravitySystemMessage({
+    content,
+    id: buildAntigravityMessageId(context.appSessionId, stepIndex, 'system'),
+    sessionId: turnSessionId(state, context),
+  });
+  if (!message) {
+    return state;
+  }
+
+  if (state.streamOpen) {
+    context.send(createNormalizedMessage({
+      kind: 'stream_end',
+      sessionId: turnSessionId(state, context),
+      provider: PROVIDER,
+    }));
+  }
+  context.send(message);
+  return { ...state, streamOpen: false };
+};
+
+/**
+ * Sends every `system_message` still buffered when the turn ends — on
+ * `result`, or on process close/error for aborted and crashed runs — so an
+ * interrupted turn does not swallow a notice.
+ *
+ * Returns the state with the buffer cleared; every caller reassigns it, which
+ * is what makes a second call (close and error both fire on a spawn failure) a
+ * no-op.
+ */
+export const flushAntigravityPendingMessages = (
+  state: AntigravityTurnState,
+  context: AntigravityFoldContext,
+): AntigravityTurnState => {
+  const pending = Object.entries(state.pendingSystemMessages)
+    .sort(([left], [right]) => Number(left) - Number(right));
+  if (pending.length === 0) {
+    return state;
+  }
+
+  let next: AntigravityTurnState = { ...state, pendingSystemMessages: {} };
+  for (const [stepIndex, content] of pending) {
+    next = emitSystemMessage(next, context, stepIndex, content);
+  }
+  return next;
+};
 
 /** Hands a newly announced conversation id to the caller and folds the answer back in. */
 const adoptSession = (
@@ -372,7 +449,7 @@ export const foldAntigravityEventLine = (
       sessionId: turnSessionId(state, context),
       provider: PROVIDER,
     }));
-    return state;
+    return state.streamOpen ? state : { ...state, streamOpen: true };
   }
 
   const eventName = readOptionalString(event.event);
@@ -420,16 +497,19 @@ export const foldAntigravityEventLine = (
         ...next,
         lastAttemptedCommand: readAttemptedCommand(toolInfo) ?? next.lastAttemptedCommand,
       };
+      // Keyed on step_index so ACTIVE and DONE emissions of the same step
+      // update one card instead of stacking two — and on the app session id
+      // alone, so the card is pruned once its persisted twin (keyed on the
+      // same step: the one that ran the call) arrives with history.
+      const toolId = buildAntigravityMessageId(context.appSessionId, stepIndex, 'tool');
       const toolMessage = createNormalizedMessage({
-        // Keyed on step_index so ACTIVE and DONE emissions of the same step
-        // update one card instead of stacking two.
-        id: `antigravity-tool-${next.capturedSessionId || context.appSessionId || 'run'}-${stepIndex}`,
+        id: toolId,
         kind: 'tool_use',
         sessionId: sessionIdForEvent,
         provider: PROVIDER,
         toolName,
         toolInput: toolInfo ?? {},
-        toolId: `antigravity-tool-${stepIndex}`,
+        toolId,
       });
 
       // A completed tool step carries its result on the same record.
@@ -453,12 +533,34 @@ export const foldAntigravityEventLine = (
     }
 
     const delta = typeof update.text_delta === 'string' ? update.text_delta : '';
+
+    // A compaction: its text is the internal resume prompt, so only the
+    // divider its persisted `CHECKPOINT` record also renders is shown.
+    if (stepType === AGY_CHECKPOINT_STEP_TYPE) {
+      if (stepState === 'DONE') {
+        context.send(buildAntigravityCompactBoundary(context.appSessionId, stepIndex, sessionIdForEvent));
+      }
+      return next;
+    }
+
+    // Buffered, not streamed: the envelope decides whether this is a notice or
+    // a sub-agent's report, and it is only whole once the step completes.
+    if (stepType === AGY_SYSTEM_MESSAGE_STEP_TYPE) {
+      const buffered = (next.pendingSystemMessages[stepIndex] ?? '') + delta;
+      const { [stepIndex]: _buffered, ...otherPending } = next.pendingSystemMessages;
+      if (stepState !== 'DONE') {
+        return { ...next, pendingSystemMessages: { ...otherPending, [stepIndex]: buffered } };
+      }
+
+      return emitSystemMessage({ ...next, pendingSystemMessages: otherPending }, context, stepIndex, buffered);
+    }
+
     if (!delta) {
       return next;
     }
 
-    // Every other step type — the documented `agent_response`, the observed
-    // `system_message`, and anything a future release adds — renders as text.
+    // Every other step type — the documented `agent_response`, and anything a
+    // future release adds — renders as text.
     context.send(createNormalizedMessage({
       kind: 'stream_delta',
       content: delta,
@@ -466,7 +568,7 @@ export const foldAntigravityEventLine = (
       provider: PROVIDER,
       role: 'assistant',
     }));
-    return next;
+    return next.streamOpen ? next : { ...next, streamOpen: true };
   }
 
   if (eventName === 'result') {
@@ -478,6 +580,7 @@ export const foldAntigravityEventLine = (
         ?? readOptionalString(result?.conversation_id)
         ?? null),
     );
+    next = flushAntigravityPendingMessages(next, context);
 
     const deniedActions = Array.isArray(result?.denied_actions) ? result.denied_actions : [];
     const status = readOptionalString(result?.status);
@@ -957,6 +1060,9 @@ async function spawnAntigravity(
         processAntigravityStderrLine(stderrLineBuffer.trim());
         stderrLineBuffer = '';
       }
+      // A turn that ended without `result` (aborted, crashed) still shows the
+      // system message it was in the middle of.
+      turnState = flushAntigravityPendingMessages(turnState, foldContext);
 
       // Skipped for aborted runs, whose terminal `complete` (aborted: true) the
       // abort handler already sent.
@@ -991,6 +1097,7 @@ async function spawnAntigravity(
       const finalSessionId = sessionId || turnState.capturedSessionId || processKey;
       activeAntigravityProcesses.delete(finalSessionId);
       activeAntigravityProcesses.delete(processKey);
+      turnState = flushAntigravityPendingMessages(turnState, foldContext);
 
       const installed = await context.isProviderInstalled();
       const errorContent = !installed

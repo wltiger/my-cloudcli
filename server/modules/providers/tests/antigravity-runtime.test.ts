@@ -12,7 +12,9 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test, { after } from 'node:test';
+import { fileURLToPath } from 'node:url';
 
+import { AntigravitySessionsProvider } from '@/modules/providers/list/antigravity/antigravity-sessions.provider.js';
 import { AppError } from '@/shared/utils.js';
 
 // The runtime reaches the notifications barrel, which opens the shared SQLite
@@ -31,6 +33,7 @@ const {
   buildRefusedAction,
   collectGrantRuleCandidates,
   createAntigravityTurnState,
+  flushAntigravityPendingMessages,
   foldAntigravityEventLine,
   resolveAntigravityPermissionArgs,
 } = await import('@/modules/providers/list/antigravity/antigravity-runtime.provider.js');
@@ -267,21 +270,26 @@ const stepUpdate = (update: Record<string, unknown>): Record<string, unknown> =>
  * `spawnAntigravity` — so here it only answers with the id the turn is known
  * by afterwards, which is all the fold reads back.
  */
+const createFoldContext = (
+  sent: SentMessage[],
+  options: { appSessionId?: string | null } = {},
+): FoldContext => ({
+  send: (message) => {
+    sent.push(message);
+  },
+  registerSession: (capturedSessionId, nextSessionId) => nextSessionId || capturedSessionId,
+  appSessionId: options.appSessionId === undefined ? 'app-1' : options.appSessionId,
+  antigravityProjectId: 'project-abc',
+  workspacePath: '/tmp/workspace',
+  prompt: 'build it',
+});
+
 const foldEvents = (
   events: Array<Record<string, unknown> | string>,
   options: { appSessionId?: string | null; capturedSessionId?: string | null } = {},
-): { sent: SentMessage[]; state: ReturnType<typeof createAntigravityTurnState> } => {
+): { sent: SentMessage[]; state: ReturnType<typeof createAntigravityTurnState>; context: FoldContext } => {
   const sent: SentMessage[] = [];
-  const context: FoldContext = {
-    send: (message) => {
-      sent.push(message);
-    },
-    registerSession: (capturedSessionId, nextSessionId) => nextSessionId || capturedSessionId,
-    appSessionId: options.appSessionId === undefined ? 'app-1' : options.appSessionId,
-    antigravityProjectId: 'project-abc',
-    workspacePath: '/tmp/workspace',
-    prompt: 'build it',
-  };
+  const context = createFoldContext(sent, options);
 
   let state = createAntigravityTurnState(options.capturedSessionId ?? null);
   for (const event of events) {
@@ -292,7 +300,7 @@ const foldEvents = (
     );
   }
 
-  return { sent, state };
+  return { sent, state, context };
 };
 
 test('assistant prose streams out fragment by fragment, in order, under one session', () => {
@@ -353,8 +361,11 @@ test('ACTIVE and DONE for one step land on a single tool card', () => {
 
   const [active, done] = sent;
   // One id for both emissions is what makes the UI update the card it already
-  // rendered instead of stacking a second one underneath it.
-  assert.equal(active.id, 'antigravity-tool-conv-2-0');
+  // rendered instead of stacking a second one underneath it. It names the app
+  // session, not the conversation `agy` announced: only the app session id is
+  // one the history reader also knows.
+  assert.equal(active.id, 'antigravity-app-1-0-tool');
+  assert.equal(active.toolId, active.id);
   assert.equal(done.id, active.id);
   assert.equal(active.toolResult, undefined);
   assert.deepEqual(done.toolResult, { content: 'built in 3s' });
@@ -367,36 +378,235 @@ test('a second step gets a card of its own', () => {
       stepUpdate({ step_type: 'tool', step_index: 0, state: 'ACTIVE', tool_name: 'ReadFile' }),
       stepUpdate({ step_type: 'tool', step_index: 1, state: 'ACTIVE', tool_name: 'WriteFile' }),
     ],
-    // No conversation id announced yet and no app session either, so the id
-    // falls all the way back to `run`.
+    // No app session id — a run no caller named — so the id falls back to a
+    // fixed literal, and such cards are never pruned.
     { appSessionId: null },
   );
 
   assert.deepEqual(
     sent.map((message) => message.id),
-    ['antigravity-tool-run-0', 'antigravity-tool-run-1'],
+    ['antigravity-session-0-tool', 'antigravity-session-1-tool'],
   );
   assert.deepEqual(
     sent.map((message) => message.toolId),
-    ['antigravity-tool-0', 'antigravity-tool-1'],
+    ['antigravity-session-0-tool', 'antigravity-session-1-tool'],
   );
+});
+
+test('a tool card never takes its id from the conversation id, even on a resumed turn', () => {
+  // A resumed turn knows the conversation id before its first line; the
+  // history reader only knows the app session id, so using the former would
+  // leave every live card unpruned after a reload.
+  const { sent } = foldEvents(
+    [stepUpdate({ step_type: 'tool', step_index: 7, state: 'ACTIVE', tool_name: 'ReadFile', conversation_id: 'conv-9' })],
+    { appSessionId: 'app-1', capturedSessionId: 'conv-9' },
+  );
+
+  assert.equal(sent[0].toolId, 'antigravity-app-1-7-tool');
+  assert.equal(sent[0].sessionId, 'conv-9');
 });
 
 test('an unseen step type still renders what it said', () => {
   const { sent } = foldEvents([
-    stepUpdate({ step_type: 'system_message', step_index: 0, text_delta: 'Reading the repository.' }),
     stepUpdate({ step_type: 'plan_draft', step_index: 1, text_delta: 'Thinking about the layout.' }),
     stepUpdate({ step_index: 2, text_delta: 'No step type at all.' }),
     stepUpdate({ step_type: 'user_input', step_index: 3, text_delta: 'build it' }),
   ]);
 
-  // Only `user_input` is suppressed, because the client already renders its own
-  // bubble for it. Everything else — documented, observed, or added by a future
-  // release — falls through to the text path rather than being dropped.
+  // `user_input` is suppressed, because the client already renders its own
+  // bubble for it. A step type this runtime does not know — documented or
+  // added by a future release — falls through to the text path rather than
+  // being dropped.
   assert.deepEqual(
     sent.map((message) => message.content),
-    ['Reading the repository.', 'Thinking about the layout.', 'No step type at all.'],
+    ['Thinking about the layout.', 'No step type at all.'],
   );
+});
+
+// ---------------------------------------------------------------------------
+// System messages and compaction — routed exactly like their persisted records
+// ---------------------------------------------------------------------------
+
+const REAL_SYSTEM_MESSAGES = JSON.parse(await fs.readFile(
+  path.join(path.dirname(fileURLToPath(import.meta.url)), 'fixtures', 'antigravity-system-messages.json'),
+  'utf8',
+)) as { restartNotice: string; subagentResult: string };
+
+/** Splits one real content into the deltas a live `system_message` step streams it as. */
+const systemMessageSteps = (stepIndex: number, content: string, done = true): Array<Record<string, unknown>> => {
+  const middle = Math.floor(content.length / 2);
+  return [
+    stepUpdate({ step_type: 'system_message', step_index: stepIndex, state: 'ACTIVE', text_delta: content.slice(0, middle) }),
+    stepUpdate({
+      step_type: 'system_message',
+      step_index: stepIndex,
+      state: done ? 'DONE' : 'ACTIVE',
+      text_delta: content.slice(middle),
+    }),
+  ];
+};
+
+test('a live system message is held until its step completes, then shown as a notice', () => {
+  const [active, done] = systemMessageSteps(6, REAL_SYSTEM_MESSAGES.restartNotice);
+
+  const { sent: whileActive } = foldEvents([active]);
+  assert.deepEqual(whileActive, [], 'nothing streams as assistant text');
+
+  const { sent } = foldEvents([active, done]);
+  assert.deepEqual(sent.map((message) => message.kind), ['task_notification']);
+  assert.equal(sent[0].status, 'completed');
+  assert.match(String(sent[0].content), /^\[Notice\] All your subagents/);
+  assert.equal(sent[0].id, 'antigravity-app-1-6-system');
+});
+
+test('a live sub-agent report is shown as one full assistant message', () => {
+  const { sent } = foldEvents(systemMessageSteps(118, REAL_SYSTEM_MESSAGES.subagentResult));
+
+  assert.deepEqual(sent.map((message) => message.kind), ['text']);
+  assert.equal(sent[0].role, 'assistant');
+  assert.match(String(sent[0].content), /^我已经对代码库中与 Claude runtime/);
+  assert.equal(String(sent[0].content).includes('SYSTEM_MESSAGE'), false);
+});
+
+test('an open assistant stream is closed before a mid-turn message, so later prose lands below it', () => {
+  const { sent } = foldEvents([
+    stepUpdate({ step_type: 'agent_response', step_index: 5, text_delta: 'Starting.' }),
+    ...systemMessageSteps(6, REAL_SYSTEM_MESSAGES.subagentResult),
+    stepUpdate({ step_type: 'agent_response', step_index: 7, text_delta: 'Read the report.' }),
+  ]);
+
+  assert.deepEqual(sent.map((message) => message.kind), ['stream_delta', 'stream_end', 'text', 'stream_delta']);
+});
+
+test('no stream_end is sent when no stream is open', () => {
+  const { sent } = foldEvents([
+    ...systemMessageSteps(6, REAL_SYSTEM_MESSAGES.restartNotice),
+    ...systemMessageSteps(7, REAL_SYSTEM_MESSAGES.restartNotice),
+  ]);
+
+  assert.deepEqual(sent.map((message) => message.kind), ['task_notification', 'task_notification']);
+});
+
+test('a line surfaced verbatim also counts as an open stream', () => {
+  const { sent } = foldEvents([
+    'agy printed something that is not an event',
+    ...systemMessageSteps(6, REAL_SYSTEM_MESSAGES.restartNotice),
+  ]);
+
+  assert.deepEqual(sent.map((message) => message.kind), ['stream_delta', 'stream_end', 'task_notification']);
+});
+
+test('a live compaction is a divider on completion, and its prompt text is never shown', () => {
+  const { sent } = foldEvents([
+    stepUpdate({ step_type: 'checkpoint', step_index: 154, state: 'ACTIVE', text_delta: '# Resuming from a compaction\n\n' }),
+    stepUpdate({ step_type: 'checkpoint', step_index: 154, state: 'DONE', text_delta: 'You are continuing work…' }),
+  ]);
+
+  assert.deepEqual(sent.map((message) => message.kind), ['compact_boundary']);
+  assert.equal(sent[0].compactTrigger, 'auto');
+  assert.equal(sent[0].id, 'antigravity-app-1-154-compact');
+});
+
+test('a system message still pending when the result arrives is shown before the turn completes', () => {
+  const { sent, state } = foldEvents([
+    systemMessageSteps(6, REAL_SYSTEM_MESSAGES.restartNotice)[0],
+    { event: 'result', result: { status: 'SUCCESS' } },
+  ]);
+
+  assert.deepEqual(sent.map((message) => message.kind), ['task_notification', 'complete']);
+  assert.deepEqual(state.pendingSystemMessages, {});
+});
+
+test('a turn that ends without a result flushes its pending message once, however many terminals fire', () => {
+  // Both `close` and `error` fire on a spawn failure; each reassigns the state
+  // the flush returns, so the second finds nothing left to send.
+  const { sent, state, context } = foldEvents([
+    systemMessageSteps(6, REAL_SYSTEM_MESSAGES.restartNotice)[0],
+  ]);
+  assert.equal(sent.length, 0);
+
+  const afterClose = flushAntigravityPendingMessages(state, context);
+  const afterError = flushAntigravityPendingMessages(afterClose, context);
+
+  assert.deepEqual(sent.map((message) => message.kind), ['task_notification']);
+  assert.deepEqual(afterError.pendingSystemMessages, {});
+});
+
+test('a sub-agent report cut short by the turn ending is flushed as the full message it was', () => {
+  const [active] = systemMessageSteps(118, REAL_SYSTEM_MESSAGES.subagentResult);
+  const { sent, state, context } = foldEvents([
+    stepUpdate({ step_type: 'agent_response', step_index: 117, text_delta: 'Waiting on the sub-agent.' }),
+    active,
+  ]);
+
+  flushAntigravityPendingMessages(state, context);
+
+  assert.deepEqual(sent.map((message) => message.kind), ['stream_delta', 'stream_end', 'text']);
+  assert.equal(sent[2].role, 'assistant');
+  assert.match(String(sent[2].content), /^我已经对代码库中与 Claude runtime/);
+});
+
+// ---------------------------------------------------------------------------
+// Cross-path ids — one real turn, live and persisted, must name the same rows
+// ---------------------------------------------------------------------------
+
+test('a real turn folded live names every backend-owned row by the id history gives it', async () => {
+  // Steps 150-163 of the real session 07ad229e…: the transcript records
+  // verbatim, beside the stdout that turn is reconstructed to have streamed.
+  // The app session id differs from the conversation id and the fold starts
+  // with the conversation already captured — a resumed turn — so a scheme that
+  // preferred the conversation id would fail here.
+  const fixtureDir = path.join(path.dirname(fileURLToPath(import.meta.url)), 'fixtures', 'antigravity-turn-150');
+  const conversationId = '07ad229e-e089-45b1-bfc7-0eb71b80a2a2';
+  const appSessionId = 'app-session-5f1c';
+
+  const sent: SentMessage[] = [];
+  const context = createFoldContext(sent, { appSessionId });
+  let state = createAntigravityTurnState(conversationId);
+  for (const line of (await fs.readFile(path.join(fixtureDir, 'stdout.ndjson'), 'utf8')).split('\n')) {
+    state = foldAntigravityEventLine(state, line, context);
+  }
+  flushAntigravityPendingMessages(state, context);
+
+  const homeDir = await fs.mkdtemp(path.join(os.tmpdir(), 'antigravity-cross-path-'));
+  const originalHomedir = os.homedir;
+  (os as any).homedir = () => homeDir;
+  try {
+    const logDir = path.join(homeDir, '.gemini', 'antigravity-cli', 'brain', conversationId, '.system_generated', 'logs');
+    await fs.mkdir(logDir, { recursive: true });
+    await fs.copyFile(path.join(fixtureDir, 'transcript.jsonl'), path.join(logDir, 'transcript.jsonl'));
+
+    const { messages: persisted } = await new AntigravitySessionsProvider().fetchHistory(appSessionId, {
+      providerSessionId: conversationId,
+    });
+
+    const backendOwned = (messages: Array<{ kind?: unknown; role?: unknown }>) => messages.filter((message) => (
+      message.kind === 'tool_use'
+      || message.kind === 'task_notification'
+      || message.kind === 'compact_boundary'
+    ));
+    const liveRows = backendOwned(sent) as SentMessage[];
+    const persistedRows = backendOwned(persisted) as typeof persisted;
+
+    // Every live row has a persisted twin by exact id (and tool cards by toolId),
+    // which is what the client prunes on.
+    assert.deepEqual(
+      [...new Set(liveRows.map((message) => `${message.kind}:${message.id}`))],
+      persistedRows.map((message) => `${message.kind}:${message.id}`),
+    );
+    assert.deepEqual(
+      [...new Set(liveRows.filter((message) => message.kind === 'tool_use').map((message) => message.toolId))],
+      persistedRows.filter((message) => message.kind === 'tool_use').map((message) => message.toolId),
+    );
+    // The turn exercises all three kinds: one notice, five tool cards, one divider.
+    assert.deepEqual(
+      persistedRows.map((message) => message.kind),
+      ['task_notification', 'tool_use', 'compact_boundary', 'tool_use', 'tool_use', 'tool_use', 'tool_use'],
+    );
+  } finally {
+    (os as any).homedir = originalHomedir;
+    await fs.rm(homeDir, { recursive: true, force: true });
+  }
 });
 
 test('a truncated final line is streamed verbatim rather than dropped', () => {

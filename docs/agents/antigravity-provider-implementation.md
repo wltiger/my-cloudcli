@@ -254,7 +254,7 @@ All under `~/.gemini/antigravity-cli/` (the CLI's app data dir; the IDE uses the
 ```
 
 Observed enumerations [V] — `source` ∈ {`USER_EXPLICIT`, `MODEL`, `SYSTEM`}; `type` ∈ {`USER_INPUT`,
-`PLANNER_RESPONSE`, `GENERIC`, `SYSTEM_MESSAGE`}; `status` ∈ {`DONE`, `RUNNING`, `ERROR`}. Optional keys:
+`PLANNER_RESPONSE`, `GENERIC`, `SYSTEM_MESSAGE`, `CHECKPOINT`}; `status` ∈ {`DONE`, `RUNNING`, `ERROR`}. Optional keys:
 `thinking`, `tool_calls[]`, `truncated_fields[]`, **`error`**. `created_at` is UTC RFC3339.
 
 > **Corrected during the sessions work (Q1).** A sweep of all 41 `transcript.jsonl` files on the research
@@ -265,9 +265,40 @@ Observed enumerations [V] — `source` ∈ {`USER_EXPLICIT`, `MODEL`, `SYSTEM`};
 > on the last record is the transcript's own answer to "is this conversation live" — but the cheaper answer
 > is `conversation_summaries.not_fully_idle` (§4), which is what the synchronizer uses.
 
+> **Newly observed on one 175-record session (`07ad229e…`, 2026-09-23) — what the display work in issue #73
+> is built on.** [V]
+>
+> - **`CHECKPOINT` is a fifth `type`** (`source: "SYSTEM"`), written at a context compaction. Its `content` is
+>   the resume prompt `agy` feeds itself (`# Resuming from a compaction …`) and is usually elided in
+>   `truncated_fields`. The stream's documented `checkpoint` `step_type` is the live side of the same thing:
+>   it means *compaction*. Rendered as an `auto` `compact_boundary` on both paths, by type alone.
+> - **A `SYSTEM_MESSAGE` wraps its payload in an envelope.** The content opens with boilerplate that itself
+>   names the tag inline — `The following is a <SYSTEM_MESSAGE> not actually sent by the user…` — then a blank
+>   line, the real `<SYSTEM_MESSAGE>` on its own line, a `[Message] timestamp=… sender=… priority=… content=…`
+>   header, and a closing `</SYSTEM_MESSAGE>`. So the real opening tag is the *last* one before the closing
+>   tag. `content=` is unquoted and runs to the closing tag (the body may contain `content=` itself). Seen
+>   senders: `system` (the server-restart notice, `priority=MESSAGE_PRIORITY_LOW`, ~520 chars, three times in
+>   one session) and a **conversation id** (a sub-agent's ~6 KB report, `priority=MESSAGE_PRIORITY_HIGH`).
+>   `source: "SYSTEM"` and `priority` corroborate the routing but are not used for it: a conversation-id
+>   sender is a sub-agent result (full assistant text); anything else, or an envelope that does not parse, is
+>   a compact notice showing the raw text. The live `system_message` step streams the same content as
+>   `text_delta`s, so it is buffered until the step completes.
+> - **After a backend restart `agy` re-injects the last `USER_INPUT`.** Observed at steps 0 and 5, 35 s apart,
+>   identical `<USER_REQUEST>` with a fresh `<ADDITIONAL_METADATA>`, no assistant text in between, the restart
+>   notice immediately after. History drops an identical prompt with no assistant `text` since the previous
+>   one; the live stream never renders `user_input` anyway.
+> - **`truncated_fields` can name `tool_calls`.** The elided form is still a well-formed array, but an
+>   argument's JSON literal is cut short (`…\n<truncated 7653 bytes>`), so it no longer decodes; the full array
+>   is in `transcript_full.jsonl` at the same `step_index`.
+> - **A live `tool` step carries the step index of the record that *ran* the call — the `GENERIC` result
+>   record — not the `PLANNER_RESPONSE` that made it.** Inferred from the verbatim 1.2.8 refusal capture
+>   (a fresh conversation's first tool update is `step_index: 2`, where the transcript has `USER_INPUT` 0,
+>   `PLANNER_RESPONSE` 1, result 2); not yet confirmed against a same-turn stdout/transcript pair. Tool-card
+>   ids are keyed on that step on both paths.
+
 > ⚠️ **This vocabulary is NOT in any published `.proto`** — verified by grep across all 25 SDK proto files.
 > It is internal Cascade (`exa.cortex_pb`) naming. The SDK's `localharness.proto` helps the **runtime**
-> facet, not this one. **Treat the four `type` values as an observed floor, not a closed set** [?], and pass
+> facet, not this one. **Treat the five `type` values as an observed floor, not a closed set** [?], and pass
 > unknown values through as generic text.
 
 ### Normalization notes

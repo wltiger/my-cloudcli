@@ -12,6 +12,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
+import { fileURLToPath } from 'node:url';
 
 import { AntigravitySessionsProvider } from '@/modules/providers/list/antigravity/antigravity-sessions.provider.js';
 import type { NormalizedMessage } from '@/shared/types.js';
@@ -25,6 +26,24 @@ const patchHomeDir = (nextHomeDir: string) => {
 };
 
 const CONVERSATION_ID = 'conv-0001';
+
+/**
+ * Two `SYSTEM_MESSAGE` contents copied whole from a real `agy` session
+ * (07ad229e…, steps 6 and 118): a server-restart notice and a sub-agent's
+ * report. Kept with the boilerplate prefix on purpose — it names
+ * `<SYSTEM_MESSAGE>` inline before the real tag, which is the trap a fixture
+ * starting at the tag could never spring.
+ */
+const REAL_SYSTEM_MESSAGES = JSON.parse(await fs.readFile(
+  path.join(path.dirname(fileURLToPath(import.meta.url)), 'fixtures', 'antigravity-system-messages.json'),
+  'utf8',
+)) as { restartNotice: string; subagentResult: string };
+
+/** The boilerplate every real `SYSTEM_MESSAGE` opens with, up to and including the real tag. */
+const SYSTEM_MESSAGE_PREFIX = REAL_SYSTEM_MESSAGES.restartNotice.slice(
+  0,
+  REAL_SYSTEM_MESSAGES.restartNotice.indexOf('[Message]'),
+);
 
 /** One `transcript.jsonl` record, with the fields every real record carries. */
 const record = (
@@ -45,6 +64,9 @@ const modelRecord = (stepIndex: number, fields: Record<string, unknown>) =>
 
 const toolResultRecord = (stepIndex: number, content: string, extra: Record<string, unknown> = {}) =>
   record(stepIndex, { source: 'MODEL', type: 'GENERIC', content, ...extra });
+
+const systemRecord = (stepIndex: number, content: string) =>
+  record(stepIndex, { source: 'SYSTEM', type: 'SYSTEM_MESSAGE', content });
 
 /** A plain assistant text record: no tool calls, so it renders as one bubble. */
 const assistantTextRecord = (stepIndex: number, content: string) =>
@@ -264,12 +286,218 @@ test('a step type this fork has never seen still renders everything it carries',
   });
 });
 
-test('a system notice agy injects into its own conversation is shown, not dropped', async () => {
+test('a system message in a shape this reader does not know is still shown, compactly and raw', async () => {
+  // The envelope is `agy`'s internal naming, not a contract: a mismatch must
+  // degrade to the raw text as a notice, never vanish and never throw.
   await withTranscript({
-    transcript: [record(1, { source: 'SYSTEM', type: 'SYSTEM_MESSAGE', content: 'Auto-compaction ran.' })],
+    transcript: [systemRecord(1, 'Auto-compaction ran.')],
   }, async (provider) => {
     const { messages } = await history(provider);
+
+    assert.deepEqual(kinds(messages), ['task_notification']);
     assert.equal(messages[0]?.content, 'Auto-compaction ran.');
+    assert.equal(messages[0]?.summary, 'Auto-compaction ran.');
+  });
+});
+
+test('a real server-restart notice renders as a compact notice, envelope stripped', async () => {
+  await withTranscript({
+    transcript: [systemRecord(6, REAL_SYSTEM_MESSAGES.restartNotice)],
+  }, async (provider) => {
+    const { messages } = await history(provider);
+
+    assert.deepEqual(kinds(messages), ['task_notification']);
+    const notice = messages[0]!;
+    // The only status the renderer paints as a neutral dot rather than amber.
+    assert.equal(notice.status, 'completed');
+    assert.match(String(notice.content), /^\[Notice\] All your subagents and background tasks have been stopped due to server restart\./);
+    assert.match(String(notice.content), /restart as needed\.$/);
+    for (const scaffolding of ['not actually sent by the user', '<SYSTEM_MESSAGE>', '</SYSTEM_MESSAGE>', '[Message]', 'sender=']) {
+      assert.equal(String(notice.content).includes(scaffolding), false, `content must not carry ${scaffolding}`);
+    }
+    assert.equal(String(notice.summary).includes('\n'), false, 'the summary is one line');
+    assert.equal(notice.id, `antigravity-${CONVERSATION_ID}-6-system`);
+  });
+});
+
+test('a real sub-agent report renders as one full assistant message, envelope stripped', async () => {
+  await withTranscript({
+    transcript: [systemRecord(118, REAL_SYSTEM_MESSAGES.subagentResult)],
+  }, async (provider) => {
+    const { messages } = await history(provider);
+
+    assert.deepEqual(kinds(messages), ['text']);
+    const report = messages[0]!;
+    assert.equal(report.role, 'assistant');
+    assert.match(String(report.content), /^我已经对代码库中与 Claude runtime/);
+    assert.match(String(report.content), /避免被折叠合并到普通工具调用组中。$/);
+    assert.equal(String(report.content).includes('SYSTEM_MESSAGE'), false);
+    assert.equal(String(report.content).includes('sender='), false);
+    // Nothing of the report itself is cut: only the envelope around it.
+    assert.ok(String(report.content).length > 5_000);
+  });
+});
+
+test('a body that itself says content= is kept whole, whatever order the header uses', async () => {
+  await withTranscript({
+    transcript: [
+      systemRecord(1, `${SYSTEM_MESSAGE_PREFIX}[Message] sender=system priority=MESSAGE_PRIORITY_LOW timestamp=2026-09-23T09:26:28Z content=set content=42 in the config\n</SYSTEM_MESSAGE>`),
+    ],
+  }, async (provider) => {
+    const { messages } = await history(provider);
+
+    assert.deepEqual(kinds(messages), ['task_notification']);
+    assert.equal(messages[0]?.content, 'set content=42 in the config');
+  });
+});
+
+test('a sender that is neither system nor a conversation id is a notice, not agent speech', async () => {
+  await withTranscript({
+    transcript: [
+      systemRecord(1, `${SYSTEM_MESSAGE_PREFIX}[Message] timestamp=2026-09-23T09:26:28Z sender=task-build-7 priority=MESSAGE_PRIORITY_LOW content=build finished\n</SYSTEM_MESSAGE>`),
+    ],
+  }, async (provider) => {
+    const { messages } = await history(provider);
+
+    assert.deepEqual(kinds(messages), ['task_notification']);
+    assert.equal(messages[0]?.content, 'build finished');
+  });
+});
+
+test('a single record normalized on its own routes a system message the same way', async () => {
+  await withTranscript({ transcript: [] }, async (provider) => {
+    const messages = provider.normalizeMessage(systemRecord(6, REAL_SYSTEM_MESSAGES.restartNotice), 'session-abc');
+
+    assert.deepEqual(kinds(messages), ['task_notification']);
+    assert.equal(messages[0]?.id, 'antigravity-session-abc-6-system');
+  });
+});
+
+test('a compaction checkpoint is a small automatic divider, not a wall of prompt text', async () => {
+  await withTranscript({
+    // Its `content` is elided and there is no full transcript: nothing needs it.
+    transcript: [
+      record(154, {
+        source: 'SYSTEM',
+        type: 'CHECKPOINT',
+        content: '# Resuming from a compaction\n\nYou are continuing work on the task described above…',
+        truncated_fields: ['content'],
+      }),
+    ],
+  }, async (provider) => {
+    const { messages } = await history(provider);
+
+    assert.deepEqual(kinds(messages), ['compact_boundary']);
+    assert.equal(messages[0]?.compactTrigger, 'auto');
+    assert.equal(messages[0]?.compactPreTokens, undefined);
+    assert.equal(messages[0]?.compactPostTokens, undefined);
+    assert.equal(messages[0]?.id, `antigravity-${CONVERSATION_ID}-154-compact`);
+  });
+});
+
+test('a prompt agy re-injects after a restart shows once, with both attempts under it', async () => {
+  // The shape of the real session: the first attempt died on a denied command
+  // with no reply, `agy` restarted and replayed the prompt with a fresh
+  // metadata block, then announced the restart.
+  const prompt = (time: string) => `<USER_REQUEST>\ncheck the background tasks\n</USER_REQUEST>\n<ADDITIONAL_METADATA>\nThe current local time is: ${time}.\n</ADDITIONAL_METADATA>`;
+  await withTranscript({
+    transcript: [
+      userRecord(0, prompt('2026-09-23T17:25:44+08:00')),
+      modelRecord(1, { tool_calls: [{ name: 'view_file', args: { AbsolutePath: '"a.md"' } }] }),
+      toolResultRecord(2, 'contents of a'),
+      modelRecord(3, { tool_calls: [{ name: 'run_command', args: { CommandLine: '"git log"' } }] }),
+      toolResultRecord(4, '', { status: 'ERROR', error: 'user denied permission' }),
+      userRecord(5, prompt('2026-09-23T17:26:28+08:00')),
+      systemRecord(6, REAL_SYSTEM_MESSAGES.restartNotice),
+      modelRecord(7, { tool_calls: [{ name: 'view_file', args: { AbsolutePath: '"b.md"' } }] }),
+      toolResultRecord(8, 'contents of b'),
+    ],
+  }, async (provider) => {
+    const { messages } = await history(provider);
+
+    assert.deepEqual(kinds(messages), ['text', 'tool_use', 'tool_use', 'task_notification', 'tool_use']);
+    assert.equal(messages.filter((message) => message.role === 'user').length, 1);
+  });
+});
+
+test('a prompt deliberately re-sent after a reply shows twice', async () => {
+  await withTranscript({
+    transcript: [
+      userRecord(0, '<USER_REQUEST>try again</USER_REQUEST>'),
+      assistantTextRecord(1, 'It failed.'),
+      userRecord(2, '<USER_REQUEST>try again</USER_REQUEST>'),
+      assistantTextRecord(3, 'It worked.'),
+    ],
+  }, async (provider) => {
+    const { messages } = await history(provider);
+
+    assert.deepEqual(
+      messages.map((message) => `${message.role}:${message.content}`),
+      ['user:try again', 'assistant:It failed.', 'user:try again', 'assistant:It worked.'],
+    );
+  });
+});
+
+/** A `write_to_file` argument as `agy` persists it: its own JSON string literal. */
+const WRITTEN_FILE = '# Spec\n\nline two of the spec';
+const WRITTEN_FILE_LITERAL = JSON.stringify(WRITTEN_FILE);
+/** The elided form: a well-formed array whose one argument's literal is cut short. */
+const ELIDED_CODE_CONTENT = `${WRITTEN_FILE_LITERAL.slice(0, 12)}\n<truncated 18 bytes>`;
+const ELIDED_WRITE_CALL = modelRecord(152, {
+  tool_calls: [{ name: 'write_to_file', args: { CodeContent: ELIDED_CODE_CONTENT, TargetFile: '"spec.md"' } }],
+  truncated_fields: ['tool_calls'],
+});
+
+test('a tool call the transcript truncated is restored into a readable argument', async () => {
+  await withTranscript({
+    transcript: [ELIDED_WRITE_CALL, toolResultRecord(153, 'Created file spec.md')],
+    full: [
+      modelRecord(152, {
+        tool_calls: [{ name: 'write_to_file', args: { CodeContent: WRITTEN_FILE_LITERAL, TargetFile: '"spec.md"' } }],
+      }),
+      toolResultRecord(153, 'Created file spec.md'),
+    ],
+  }, async (provider) => {
+    const { messages } = await history(provider);
+
+    assert.deepEqual(kinds(messages), ['tool_use']);
+    assert.deepEqual(messages[0]?.toolInput, { CodeContent: WRITTEN_FILE, TargetFile: 'spec.md' });
+    assert.equal(messages[0]?.toolResult?.content, 'Created file spec.md');
+  });
+});
+
+test('a truncated tool call with no full transcript still renders its card', async () => {
+  await withTranscript({
+    transcript: [ELIDED_WRITE_CALL, toolResultRecord(153, 'Created file spec.md')],
+  }, async (provider) => {
+    const { messages } = await history(provider);
+
+    // Best effort: the argument stays as elided — no worse than before.
+    assert.deepEqual(kinds(messages), ['tool_use']);
+    assert.deepEqual(messages[0]?.toolInput, { CodeContent: ELIDED_CODE_CONTENT, TargetFile: 'spec.md' });
+  });
+});
+
+test('a tool card is keyed on the step that ran the call, the step its live card names', async () => {
+  await withTranscript({
+    transcript: [
+      modelRecord(1, {
+        tool_calls: [{ name: 'read_file', args: { Path: '"a.txt"' } }, { name: 'read_file', args: { Path: '"b.txt"' } }],
+      }),
+      toolResultRecord(2, 'contents of a'),
+      toolResultRecord(3, 'contents of b'),
+      // Its result never arrived: keyed on the step it would have run in.
+      modelRecord(4, { tool_calls: [{ name: 'run_command', args: {} }] }),
+    ],
+  }, async (provider) => {
+    const { messages } = await history(provider);
+
+    assert.deepEqual(messages.map((message) => message.toolId), [
+      `antigravity-${CONVERSATION_ID}-2-tool`,
+      `antigravity-${CONVERSATION_ID}-3-tool`,
+      `antigravity-${CONVERSATION_ID}-5-tool`,
+    ]);
+    assert.deepEqual(messages.map((message) => message.id), messages.map((message) => message.toolId));
   });
 });
 
