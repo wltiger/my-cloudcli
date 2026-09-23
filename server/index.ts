@@ -360,6 +360,11 @@ async function removeLocalServerMarker() {
 // Initialize database and start server
 async function startServer() {
     try {
+        // One unambiguous line per boot, so a later "was the server alive at
+        // time T?" question is answerable from the console alone: a gap between
+        // two of these is a death (crash, force-kill, machine reboot).
+        console.log(`${terminalTextStyles.info('[INFO]')} CloudCLI server starting: pid=${process.pid} port=${SERVER_PORT} at ${new Date().toISOString()}`);
+
         // Initialize authentication database
         await initializeDatabase();
 
@@ -411,8 +416,11 @@ async function startServer() {
 
         await closeSessionsWatcher();
         closeScheduledMessageDispatcher();
-        // Clean up plugin processes on shutdown
-        const shutdownRuntimeServices = async () => {
+        // Clean up plugin processes on shutdown. A force-kill (e.g. the
+        // launcher's Stop-Process -Force) never reaches this line, so the
+        // log above plus its absence is the crash/kill discriminator.
+        const shutdownRuntimeServices = async (signal: string) => {
+            console.log(`${terminalTextStyles.info('[INFO]')} CloudCLI server shutting down (${signal}): pid=${process.pid} at ${new Date().toISOString()}`);
             try {
                 await browserUseService.stopAllSessions();
             } catch (err) {
@@ -430,8 +438,8 @@ async function startServer() {
             }
             process.exit(0);
         };
-        process.on('SIGTERM', () => void shutdownRuntimeServices());
-        process.on('SIGINT', () => void shutdownRuntimeServices());
+        process.on('SIGTERM', () => void shutdownRuntimeServices('SIGTERM'));
+        process.on('SIGINT', () => void shutdownRuntimeServices('SIGINT'));
     } catch (error) {
         console.error('[ERROR] Failed to start server:', error);
         process.exit(1);
