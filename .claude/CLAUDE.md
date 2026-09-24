@@ -53,6 +53,18 @@ Chain a rewrite and its publish with `&&`. A script that dies after `gh issue vi
 file in place, and an unchained `gh issue edit --body-file` then republishes the unmodified body - a no-op that reads
 as success.
 
+## node_modules: a running global CloudCLI instance pins the repo's native modules (Windows)
+
+The global `@cloudcli-ai/cloudcli` install can be a junction into this repo (on this machine `C:\nvm4w\nodejs\node_modules\@cloudcli-ai\cloudcli` → `D:\code\opensource\claudecodeui`; check `npm root -g`). A CloudCLI instance running from that install (default port 3001) holds the repo's compiled `.node` files (bcrypt, better-sqlite3, node-pty, sharp) open in memory. On Windows a loaded `.node` image cannot be unlinked, so **`npm ci` while the instance runs fails with EPERM — and since `npm ci` deletes `node_modules` first, it leaves the tree half-deleted**: the running instance keeps working off its in-memory modules, but the repo is broken for the next start.
+
+Before touching `node_modules`, check whether an instance is running: `Get-NetTCPConnection -LocalPort 3001`. If it is: use incremental `npm install` only (verified safe — it never deletes version-unchanged native packages); `npm ci` needs the instance stopped first, and that is the user's call since it is often their live app.
+
+## npm test on Windows has a stable pre-existing failure set
+
+`npm test` on Windows carries a stable set of backend failures that are unrelated to code or dependency versions (baseline-verified on this machine 2026-09-24 against a clean pre-upgrade tree): POSIX-slash path assertions, the `checkCredentials`/`withTempHome` isolation (Windows `os.homedir()` resolves via `USERPROFILE`, so the temp home is not actually isolated and reads the real `~/.claude`), `buildClaudeUserContent` with a symlinked cwd, plus two uninvestigated Claude runtime suites. A few more are load-flaky (heavy rounds only: `agent.routes` uncaughtException, `provider.routes` fetch failed, the transcript anchor test).
+
+After any dependency change these failures come back identically and read like a regression. To attribute a new failure, diff the failure set against this baseline first — what is on the list is expected; what is not is what to investigate.
+
 ## Local UI testing (dev server / browser automation)
 
 The default auth DB lives at `~/.cloudcli/auth.db` and is shared with any other CloudCLI install (official npm package, other clones) on this machine — it holds the real user account and session data. **Never test against it.**
