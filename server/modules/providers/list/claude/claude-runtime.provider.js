@@ -280,6 +280,16 @@ function mapCliOptionsToSDK(options = {}) {
 
   let allowedTools = [...(settings.allowedTools || [])];
 
+  // Task-tracking tools left the default tool surface on newer models (SDK 0.3.233);
+  // the UI's checklist renders from TodoWrite, so name them explicitly. A tool the
+  // user disallowed stays disallowed.
+  const disallowedTools = new Set(settings.disallowedTools || []);
+  for (const tool of ['TodoRead', 'TodoWrite', 'TaskCreate', 'TaskGet', 'TaskUpdate', 'TaskList']) {
+    if (!allowedTools.includes(tool) && !disallowedTools.has(tool)) {
+      allowedTools.push(tool);
+    }
+  }
+
   if (permissionMode === 'plan') {
     const planModeTools = ['Read', 'Task', 'exit_plan_mode', 'TodoRead', 'TodoWrite', 'WebFetch', 'WebSearch'];
     for (const tool of planModeTools) {
