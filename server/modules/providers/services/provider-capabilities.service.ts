@@ -66,6 +66,11 @@ type ProviderCapabilities = {
  * - Clear reaches no provider API at all (ADR 0005), so the flag records which
  *   providers it was verified on — Claude and OpenCode (#24) — rather than what
  *   a runtime can do. Codex and Cursor are simply unverified.
+ * - Antigravity: headless print mode cannot prompt for permission, so only
+ *   default and bypassPermissions are offered (ADR 0015); its /rewind and /fork
+ *   are TUI-only overlays, so Fork and Edit are unavailable (ADR 0014); it has
+ *   no /compact command, and reasoning effort is baked into the model id rather
+ *   than a runtime flag.
  */
 const PROVIDER_CAPABILITIES: Record<LLMProvider, ProviderCapabilities> = {
   claude: {
@@ -151,6 +156,32 @@ const PROVIDER_CAPABILITIES: Record<LLMProvider, ProviderCapabilities> = {
     // `rewindRestoresFiles` above is what the notice over the composer reads to
     // say so before the reader sends.
     supportsMessageEditing: true,
+    supportsSessionForking: false,
+  },
+  antigravity: {
+    provider: 'antigravity',
+    // ADR 0015: accept-edits and plan are accepted in print mode and then
+    // ignored with a warning, so only the two modes that do something are listed.
+    permissionModes: ['default', 'bypassPermissions'],
+    defaultPermissionMode: 'default',
+    supportsImages: true,
+    supportsFiles: true,
+    supportsAbort: true,
+    // Headless `agy` cannot prompt at all (ADR 0015): a fully refused run still
+    // exits 0 and reports success — the only signal is the refused-action list.
+    supportsPermissionRequests: false,
+    supportsTokenUsage: true,
+    // Reasoning effort is baked into the model id and not uniform across
+    // models, so it is expressed by choosing a model; the effort flag is never
+    // passed.
+    supportsEffort: false,
+    // `agy` has no /compact command; its compaction is internal and untriggerable.
+    supportsCompact: false,
+    // ADR 0014: /rewind and /fork exist only as TUI overlays.
+    supportsFork: false,
+    supportsClear: true,
+    rewindRestoresFiles: false,
+    supportsMessageEditing: false,
     supportsSessionForking: false,
   },
 };

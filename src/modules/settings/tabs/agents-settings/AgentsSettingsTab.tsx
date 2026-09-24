@@ -40,7 +40,7 @@ export default function AgentsSettingsTab({
   ), [selectedAgent]);
 
   const visibleAgents = useMemo<AgentProvider[]>(() => {
-    return ['claude', 'cursor', 'codex', 'opencode'];
+    return ['claude', 'cursor', 'codex', 'opencode', 'antigravity'];
   }, []);
 
   const agentContextById = useMemo<AgentContextByProvider>(() => ({
@@ -60,12 +60,17 @@ export default function AgentsSettingsTab({
       authStatus: providerAuthStatus.opencode,
       onLogin: () => onProviderLogin('opencode'),
     },
+    antigravity: {
+      authStatus: providerAuthStatus.antigravity,
+      onLogin: () => onProviderLogin('antigravity'),
+    },
   }), [
     onProviderLogin,
     providerAuthStatus.claude,
     providerAuthStatus.codex,
     providerAuthStatus.cursor,
     providerAuthStatus.opencode,
+    providerAuthStatus.antigravity,
   ]);
 
   useEffect(() => {

@@ -10,32 +10,83 @@ import type { LLMProvider } from '@/shared/types.js';
 
 type WatcherEventType = 'add' | 'change';
 
-const PROVIDER_WATCH_PATHS: Array<{ provider: LLMProvider; rootPath: string }> = [
-  {
-    provider: 'claude',
-    rootPath: path.join(os.homedir(), '.claude', 'projects'),
-  },
-  {
-    provider: 'cursor',
-    rootPath: path.join(os.homedir(), '.cursor', 'projects'),
-  },
-  {
-    provider: 'codex',
-    rootPath: path.join(os.homedir(), '.codex', 'sessions'),
-  },
-  {
-    provider: 'opencode',
-    rootPath: path.join(os.homedir(), '.local', 'share', 'opencode'),
-  },
-];
+type ProviderWatchPath = {
+  provider: LLMProvider;
+  rootPath: string;
+  /**
+   * Whether a missing root is created so the watcher can attach to it before
+   * the provider ever writes there.
+   *
+   * True everywhere it is omitted, which is the historical behaviour: those
+   * roots are cheap directories under a CLI's own dotfolder. A provider that
+   * sets it to `false` is skipped entirely when its root is absent, so a
+   * machine without that CLI installed pays nothing — no directory created
+   * and no polling watcher attached.
+   */
+  createIfMissing?: boolean;
+};
 
-const WATCHER_IGNORED_PATTERNS = [
+/**
+ * Resolved on each call so the home directory is read when the watcher starts, not when this module loads.
+ *
+ * @internal Exported for the watcher tests, which pin which paths each provider
+ * watches and which files under them are synchronization triggers. Reaching the
+ * antigravity branch any other way would mean installing `agy`.
+ */
+export function getProviderWatchPaths(): ProviderWatchPath[] {
+  const homeDir = os.homedir();
+
+  return [
+    {
+      provider: 'claude',
+      rootPath: path.join(homeDir, '.claude', 'projects'),
+    },
+    {
+      provider: 'cursor',
+      rootPath: path.join(homeDir, '.cursor', 'projects'),
+    },
+    {
+      provider: 'codex',
+      rootPath: path.join(homeDir, '.codex', 'sessions'),
+    },
+    {
+      provider: 'opencode',
+      rootPath: path.join(homeDir, '.local', 'share', 'opencode'),
+    },
+    {
+      // `brain/` only, not the whole `antigravity-cli` app data directory. The
+      // transcript under it is the artifact that grows as a turn advances, and
+      // synchronizing one re-reads that conversation's row in the shared index
+      // anyway — so watching the index file as well would buy nothing and cost
+      // a polling watcher on a WAL sqlite database the Antigravity IDE writes.
+      provider: 'antigravity',
+      rootPath: path.join(homeDir, '.gemini', 'antigravity-cli', 'brain'),
+      createIfMissing: false,
+    },
+  ];
+}
+
+/** @internal Exported for the watcher tests. */
+export const WATCHER_IGNORED_PATTERNS = [
   '**/node_modules/**',
   '**/.git/**',
   '**/dist/**',
   '**/build/**',
   '**/subagents/**',
   '**/tool-results/**',
+  // Antigravity mirrors both transcripts into 100 KiB chunks under
+  // `…/logs/chunks/transcript{,_full}/NNNNNNNN.jsonl`. They are `.jsonl`, they
+  // are rewritten on every append, and they carry nothing the top-level
+  // transcript does not — the top-level file is byte-exactly their
+  // concatenation — so a busy conversation would otherwise fire an event per
+  // chunk per step.
+  //
+  // A RegExp rather than a glob string on purpose: chokidar 4 matches a string
+  // matcher by equality, not as a pattern (`createPattern` in its index.js), so
+  // the `**/…` entries around this one never match anything. Regexes and
+  // functions are the two forms it still evaluates, and it normalizes paths to
+  // forward slashes before testing, which is why this needs no `\\` branch.
+  /\/logs\/chunks\//,
   '**/*.tmp',
   '**/*.swp',
   '**/.DS_Store',
@@ -65,13 +116,34 @@ let watcherRescheduleAfterRefresh = false;
 
 /**
  * Filters watcher events to provider-specific session artifact file types.
+ *
+ * @internal Exported for the watcher tests.
  */
-function isWatcherTargetFile(provider: LLMProvider, filePath: string): boolean {
+export function isWatcherTargetFile(provider: LLMProvider, filePath: string): boolean {
   if (provider === 'opencode') {
     return path.basename(filePath) === 'opencode.db';
   }
 
+  if (provider === 'antigravity') {
+    // Named rather than suffixed, because the tree under `brain/` holds three
+    // kinds of `.jsonl`: the transcript, the untruncated `transcript_full.jsonl`
+    // beside it, and the chunk mirrors. Only the first one is a synchronization
+    // trigger — the other two are rewritten in lockstep with it and would each
+    // repeat the same work. This is also the second line of defence for the
+    // chunks, which the ignore pattern already keeps out.
+    return path.basename(filePath) === 'transcript.jsonl';
+  }
+
   return filePath.endsWith('.jsonl');
+}
+
+async function pathExists(targetPath: string): Promise<boolean> {
+  try {
+    await fsPromises.access(targetPath);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function clearPendingWatcherFlushTimer(): void {
@@ -160,8 +232,10 @@ async function flushPendingWatcherUpdate(): Promise<void> {
 
 /**
  * Handles file watcher updates and triggers provider file-level synchronization.
+ *
+ * @internal Exported for the watcher tests.
  */
-async function onUpdate(
+export async function onUpdate(
   eventType: WatcherEventType,
   filePath: string,
   provider: LLMProvider
@@ -204,9 +278,15 @@ export async function initializeSessionsWatcher(): Promise<void> {
     failures: initialSync.failures,
   });
 
-  for (const { provider, rootPath } of PROVIDER_WATCH_PATHS) {
+  for (const { provider, rootPath, createIfMissing = true } of getProviderWatchPaths()) {
     try {
-      await fsPromises.mkdir(rootPath, { recursive: true });
+      if (createIfMissing) {
+        await fsPromises.mkdir(rootPath, { recursive: true });
+      } else if (!await pathExists(rootPath)) {
+        // Nothing to watch and nothing to create: the CLI is not installed, or
+        // has never been run on this machine.
+        continue;
+      }
 
       const watcher = chokidar.watch(rootPath, {
         ignored: WATCHER_IGNORED_PATTERNS,

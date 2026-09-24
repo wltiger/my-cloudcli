@@ -23,7 +23,8 @@
     "claude": "Claude",
     "cursor": "Cursor",
     "codex": "Codex",
-    "opencode": "OpenCode"
+    "opencode": "OpenCode",
+    "antigravity": "Antigravity"
   },
   "tools": {
     "settings": "Ajustes de herramientas",
@@ -63,6 +64,14 @@
   },
   "json": {
     "response": "Respuesta JSON"
+  },
+  "antigravityPermissions": {
+    "title": "Permite estas acciones para este proyecto y vuelve a ejecutar el mensaje",
+    "allowAndRerun": "Permitir y volver a ejecutar",
+    "allowing": "Permitiendo…",
+    "allowed": "Permitido · volviendo a ejecutar",
+    "ruleUnknown": "Antigravity no informó de la acción completa, así que debe permitirse en el IDE de Antigravity.",
+    "grantFailed": "No se pudo conceder el permiso."
   },
   "permissions": {
     "grant": "Conceder permiso para {{tool}}",
@@ -164,6 +173,7 @@
       "cursor": "Listo para usar Cursor con {{model}}. Escribe tu mensaje abajo.",
       "codex": "Listo para usar Codex con {{model}}. Escribe tu mensaje abajo.",
       "opencode": "Listo para usar OpenCode con {{model}}. Escribe tu mensaje abajo.",
+      "antigravity": "Listo para usar Antigravity con {{model}}. Escribe tu mensaje abajo.",
       "default": "Selecciona un proveedor arriba para empezar"
     },
     "pressToSearch": "Pulsa <kbd>{{shortcut}}</kbd> para buscar sesiones, archivos y commits"

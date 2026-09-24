@@ -14,7 +14,7 @@ import { useDropzone } from 'react-dropzone';
 import { api } from '@/shared/api';
 import { PROVIDER_PERMISSION_PREFERENCE_KEYS } from '@/shared/constants';
 import { readUserPreference } from '@/shared/userSettings';
-import type { CommandModalPayload, CostCommandData, HelpCommandData, MarkSessionProcessing, ModelCommandData, QueuedDraft, SessionActivityMap, StatusCommandData,QueuedSendOptions,ChatAttachment,ChatMessage,PendingPermissionRequest,PermissionMode,SessionEstablishedContext,Project,ProjectSession,LLMProvider,SlashCommand } from '@/shared/types';
+import type { AntigravityGrantOutcome, CommandModalPayload, CostCommandData, HelpCommandData, MarkSessionProcessing, ModelCommandData, QueuedDraft, SessionActivityMap, StatusCommandData,QueuedSendOptions,ChatAttachment,ChatMessage,PendingPermissionRequest,PermissionMode,SessionEstablishedContext,Project,ProjectSession,LLMProvider,SlashCommand } from '@/shared/types';
 import { CLEAR_COMMAND_NAME } from '@/modules/chat/utils/clearCommand';
 import { grantClaudeToolPermission } from '@/modules/chat/utils/chatPermissions';
 import {
@@ -1237,6 +1237,60 @@ export function useChatComposerState({
     [sendMessage, setPendingPermissionRequests],
   );
 
+  /**
+   * Writes one Antigravity allow rule, then sends the refused prompt again.
+   *
+   * The re-run is a NEW turn appended to the same conversation, not a rewind:
+   * `agy` cannot edit or drop a turn (ADR 0014), and leaving the refused turn
+   * in place is what makes the refused-then-allowed pair readable. The grant
+   * goes into the user's own project record, so it also holds for the
+   * Antigravity IDE from here on.
+   */
+  const handleAllowAndRerunAntigravity = useCallback(
+    async ({ rule, prompt, projectPath }: {
+      rule: string;
+      prompt: string;
+      projectPath: string;
+    }): Promise<AntigravityGrantOutcome> => {
+      if (provider !== 'antigravity') {
+        return { success: false };
+      }
+
+      const resolvedProjectPath = projectPath
+        || selectedProject?.fullPath
+        || selectedProject?.path
+        || '';
+      if (!resolvedProjectPath) {
+        return { success: false, error: 'No project path to grant the permission for.' };
+      }
+
+      try {
+        const response = await api.providers.grantPermission('antigravity', {
+          projectPath: resolvedProjectPath,
+          rule,
+        });
+        if (!response.ok) {
+          const body = await response.json().catch(() => null);
+          return {
+            success: false,
+            error: body?.error?.message || `Failed to grant the permission (${response.status}).`,
+          };
+        }
+      } catch (error) {
+        return {
+          success: false,
+          error: error instanceof Error ? error.message : 'Failed to grant the permission.',
+        };
+      }
+
+      // Sent as a queued submission so the prompt is re-run verbatim, without
+      // depending on whatever is currently in the composer.
+      await handleSubmitRef.current?.(createFakeSubmitEvent(), { content: prompt, attachments: [] });
+      return { success: true };
+    },
+    [provider, selectedProject],
+  );
+
   const [isInputFocused, setIsInputFocused] = useState(false);
 
   const handleInputFocusChange = useCallback(
@@ -1306,6 +1360,7 @@ export function useChatComposerState({
     handleAbortSession,
     handlePermissionDecision,
     handleGrantToolPermission,
+    handleAllowAndRerunAntigravity,
     handleInputFocusChange,
     isInputFocused,
     commandModalPayload,

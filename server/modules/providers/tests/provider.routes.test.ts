@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { once } from 'node:events';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import type { AddressInfo } from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
@@ -298,5 +298,132 @@ test('the clear route retires the open conversation and answers with the empty o
     assert.notEqual(payload.data.sessionId, 'clear-source');
     assert.equal(sessionsDb.getSessionById('clear-source')?.isArchived, 1);
     assert.equal(sessionsDb.getSessionById(payload.data.sessionId)?.isArchived, 0);
+  });
+});
+/**
+ * The Antigravity grant route writes into `~/.gemini/config/projects/`, a
+ * directory the Antigravity IDE also owns, so every case here runs against a
+ * throwaway home rather than the one the developer is signed into.
+ */
+async function withAntigravityHome(
+  run: (baseUrl: string, projectPath: string, readGrants: () => Promise<string[]>) => Promise<void>,
+): Promise<void> {
+  await withProviderServer(async (baseUrl, workspacePath) => {
+    const homeDir = path.join(path.dirname(workspacePath), 'home');
+    const recordsDir = path.join(homeDir, '.gemini', 'config', 'projects');
+    await mkdir(recordsDir, { recursive: true });
+
+    const originalHomeDir = os.homedir;
+    (os as any).homedir = () => homeDir;
+    try {
+      await run(baseUrl, workspacePath, async () => {
+        const files = await readdir(recordsDir);
+        const grants: string[] = [];
+        for (const file of files) {
+          const record = JSON.parse(await readFile(path.join(recordsDir, file), 'utf8')) as {
+            permissionGrants?: { permissionGrants?: { allow?: string[] } };
+          };
+          grants.push(...(record.permissionGrants?.permissionGrants?.allow ?? []));
+        }
+        return grants;
+      });
+    } finally {
+      (os as any).homedir = originalHomeDir;
+    }
+  });
+}
+
+const postGrant = (baseUrl: string, provider: string, body: unknown) => fetch(
+  `${baseUrl}/api/providers/${provider}/permissions/grants`,
+  {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(body),
+  },
+);
+
+test('granting an Antigravity action reports the project it landed in', async () => {
+  await withAntigravityHome(async (baseUrl, projectPath, readGrants) => {
+    const response = await postGrant(baseUrl, 'antigravity', {
+      projectPath,
+      rule: 'command(npm run build)',
+    });
+    const payload = await response.json() as {
+      data: { provider: string; projectId: string; rule: string; alreadyAllowed: boolean };
+    };
+
+    assert.equal(response.status, 200);
+    assert.equal(payload.data.provider, 'antigravity');
+    assert.equal(payload.data.rule, 'command(npm run build)');
+    assert.equal(payload.data.alreadyAllowed, false);
+    assert.ok(payload.data.projectId, 'the route must name the record the grant applies in');
+    assert.deepEqual(await readGrants(), ['command(npm run build)']);
+  });
+});
+
+test('granting the same action again says so instead of duplicating it', async () => {
+  await withAntigravityHome(async (baseUrl, projectPath, readGrants) => {
+    await postGrant(baseUrl, 'antigravity', { projectPath, rule: 'command(npm run build)' });
+    const response = await postGrant(baseUrl, 'antigravity', {
+      projectPath,
+      rule: 'command(npm run build)',
+    });
+    const payload = await response.json() as { data: { alreadyAllowed: boolean } };
+
+    assert.equal(response.status, 200);
+    assert.equal(payload.data.alreadyAllowed, true);
+    assert.deepEqual(await readGrants(), ['command(npm run build)']);
+  });
+});
+
+test('a bare command is refused before anything is written', async () => {
+  await withAntigravityHome(async (baseUrl, projectPath, readGrants) => {
+    const response = await postGrant(baseUrl, 'antigravity', { projectPath, rule: 'npm run build' });
+    const payload = await response.json() as { error: { code: string } };
+
+    assert.equal(response.status, 400);
+    assert.equal(payload.error.code, 'ANTIGRAVITY_INVALID_GRANT_RULE');
+    assert.deepEqual(await readGrants(), []);
+  });
+});
+
+test('a wildcard or partial rule is refused — agy matches the whole action', async () => {
+  await withAntigravityHome(async (baseUrl, projectPath, readGrants) => {
+    for (const rule of ['Bash(npm:*)', 'command()', 'commandx(npm)', 'command(npm) --force']) {
+      const response = await postGrant(baseUrl, 'antigravity', { projectPath, rule });
+      const payload = await response.json() as { error: { code: string } };
+
+      assert.equal(response.status, 400, `rule ${rule} must be refused`);
+      assert.equal(payload.error.code, 'ANTIGRAVITY_INVALID_GRANT_RULE');
+    }
+
+    assert.deepEqual(await readGrants(), []);
+  });
+});
+
+test('a grant with no project says which field is missing', async () => {
+  await withAntigravityHome(async (baseUrl) => {
+    const missingPath = await postGrant(baseUrl, 'antigravity', { rule: 'command(npm run build)' });
+    assert.equal(missingPath.status, 400);
+    assert.equal((await missingPath.json() as { error: { code: string } }).error.code, 'PROJECT_PATH_REQUIRED');
+
+    const missingRule = await postGrant(baseUrl, 'antigravity', { projectPath: 'D:/code/demo' });
+    assert.equal(missingRule.status, 400);
+    assert.equal((await missingRule.json() as { error: { code: string } }).error.code, 'PERMISSION_RULE_REQUIRED');
+  });
+});
+
+test('no other provider pre-grants permissions', async () => {
+  await withAntigravityHome(async (baseUrl, projectPath) => {
+    for (const provider of ['claude', 'codex', 'cursor', 'opencode']) {
+      const response = await postGrant(baseUrl, provider, {
+        projectPath,
+        rule: 'command(npm run build)',
+      });
+      const payload = await response.json() as { error: { code: string } };
+
+      assert.equal(response.status, 400, `${provider} must refuse the grant route`);
+      assert.equal(payload.error.code, 'PROVIDER_PERMISSION_GRANTS_UNSUPPORTED');
+    }
   });
 });

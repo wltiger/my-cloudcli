@@ -37,6 +37,13 @@ const providerCards = [
     iconContainerClassName: 'bg-zinc-100 dark:bg-zinc-800',
     loginButtonClassName: 'bg-zinc-800 hover:bg-zinc-900 dark:bg-zinc-700 dark:hover:bg-zinc-600',
   },
+  {
+    provider: 'antigravity' as const,
+    title: 'Antigravity',
+    connectedClassName: 'bg-cyan-50 dark:bg-cyan-900/20 border-cyan-200 dark:border-cyan-800',
+    iconContainerClassName: 'bg-cyan-100 dark:bg-cyan-900/30',
+    loginButtonClassName: 'bg-cyan-600 hover:bg-cyan-700',
+  },
 ];
 
 /** Rendered by Onboarding as its second step, listing every CLI provider the user can log into. */

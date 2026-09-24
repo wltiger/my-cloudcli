@@ -23,7 +23,8 @@
     "claude": "Claude",
     "cursor": "Cursor",
     "codex": "Codex",
-    "opencode": "OpenCode"
+    "opencode": "OpenCode",
+    "antigravity": "Antigravity"
   },
   "compact": {
     "manual": "Compacted",
@@ -89,6 +90,14 @@
   },
   "json": {
     "response": "JSON Response"
+  },
+  "antigravityPermissions": {
+    "title": "Allow these actions for this project and run the prompt again",
+    "allowAndRerun": "Allow and re-run",
+    "allowing": "Allowing…",
+    "allowed": "Allowed · re-running",
+    "ruleUnknown": "Antigravity did not report the whole action, so it has to be allowed in the Antigravity IDE.",
+    "grantFailed": "The permission could not be granted."
   },
   "permissions": {
     "grant": "Grant permission for {{tool}}",
@@ -191,6 +200,7 @@
       "cursor": "Ready to use Cursor with {{model}}. Start typing your message below.",
       "codex": "Ready to use Codex with {{model}}. Start typing your message below.",
       "opencode": "Ready to use OpenCode with {{model}}. Start typing your message below.",
+      "antigravity": "Ready to use Antigravity with {{model}}. Start typing your message below.",
       "default": "Select a provider above to begin"
     },
     "pressToSearch": "Press <kbd>{{shortcut}}</kbd> to search sessions, files, and commits",

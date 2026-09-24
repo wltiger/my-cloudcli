@@ -212,3 +212,56 @@ test('migrations add permission_mode to an existing sessions table without losin
     assert.equal(row?.model, 'some-model');
   });
 });
+
+test('the external-running marker survives an upgrade and a repeated migration run', async () => {
+  await withIsolatedDatabase(() => {
+    const db = getConnection();
+
+    // An install that predates the marker: drop the column so runMigrations is
+    // compiled against a real pre-upgrade table instead of short-circuiting on
+    // a column that is already there.
+    db.exec('ALTER TABLE sessions DROP COLUMN external_running_at');
+    sessionsDb.createSession('upgraded-session', 'antigravity', '/workspace/upgrade-project', 'Before');
+
+    runMigrations(db);
+
+    const columnCount = () => (db
+      .prepare('PRAGMA table_info(sessions)')
+      .all() as Array<{ name: string }>)
+      .filter((column) => column.name === 'external_running_at')
+      .length;
+
+    assert.equal(columnCount(), 1);
+    // Pre-existing rows read as idle, which is the right answer for every row
+    // written before the marker existed.
+    assert.equal(sessionsDb.getSessionById('upgraded-session')?.external_running_at, null);
+
+    sessionsDb.setSessionExternalRunningAt('upgraded-session', '2026-09-21T10:00:00.000Z');
+
+    // A second run must be a no-op: no duplicate column, and nothing reset.
+    runMigrations(db);
+
+    assert.equal(columnCount(), 1);
+    assert.equal(
+      sessionsDb.getSessionById('upgraded-session')?.external_running_at,
+      '2026-09-21T10:00:00.000Z',
+    );
+  });
+});
+
+test('the external-running marker only reports a transition, not every write', async () => {
+  await withIsolatedDatabase(() => {
+    sessionsDb.createSession('marker-session', 'antigravity', '/workspace/marker-project', 'Live');
+
+    assert.equal(sessionsDb.setSessionExternalRunningAt('marker-session', '2026-09-21T10:00:00.000Z'), true);
+    // Still running, just a newer instant — the session did not change state,
+    // so a caller announcing transitions has nothing to announce.
+    assert.equal(sessionsDb.setSessionExternalRunningAt('marker-session', '2026-09-21T10:00:05.000Z'), false);
+    assert.equal(sessionsDb.setSessionExternalRunningAt('marker-session', '2026-09-21T10:00:05.000Z'), false);
+    assert.equal(sessionsDb.setSessionExternalRunningAt('marker-session', null), true);
+    assert.equal(sessionsDb.setSessionExternalRunningAt('marker-session', null), false);
+
+    // A session that is not in the table cannot transition.
+    assert.equal(sessionsDb.setSessionExternalRunningAt('no-such-session', '2026-09-21T10:00:00.000Z'), false);
+  });
+});

@@ -23,7 +23,8 @@
     "claude": "Claude",
     "cursor": "Cursor",
     "codex": "Codex",
-    "opencode": "OpenCode"
+    "opencode": "OpenCode",
+    "antigravity": "Antigravity"
   },
   "tools": {
     "settings": "도구 설정",
@@ -63,6 +64,14 @@
   },
   "json": {
     "response": "JSON 응답"
+  },
+  "antigravityPermissions": {
+    "title": "이 프로젝트에서 다음 작업을 허용하고 프롬프트를 다시 실행합니다",
+    "allowAndRerun": "허용하고 다시 실행",
+    "allowing": "허용하는 중…",
+    "allowed": "허용됨 · 다시 실행 중",
+    "ruleUnknown": "Antigravity가 전체 작업을 보고하지 않았으므로 Antigravity IDE에서 허용해야 합니다.",
+    "grantFailed": "권한을 부여하지 못했습니다."
   },
   "permissions": {
     "grant": "{{tool}}에 대한 권한 부여",
@@ -151,6 +160,7 @@
       "cursor": "{{model}} 모델로 Cursor를 사용할 준비가 되었습니다. 아래에 메시지를 입력하세요.",
       "codex": "{{model}} 모델로 Codex를 사용할 준비가 되었습니다. 아래에 메시지를 입력하세요.",
       "opencode": "{{model}} 모델로 OpenCode를 사용할 준비가 되었습니다. 아래에 메시지를 입력하세요.",
+      "antigravity": "{{model}} 모델로 Antigravity를 사용할 준비가 되었습니다. 아래에 메시지를 입력하세요.",
       "default": "시작하려면 위에서 제공자를 선택하세요"
     },
     "pressToSearch": "<kbd>{{shortcut}}</kbd>를 눌러 세션, 파일 및 커밋을 검색하세요"

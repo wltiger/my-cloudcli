@@ -2,7 +2,8 @@ import { memo, useMemo, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import { GitBranchIcon, PencilIcon } from 'lucide-react';
 
-import type { ChatMessage, ClaudePermissionSuggestion, PermissionGrantResult, LLMProvider,DiffLine,Project } from '@/shared/types';
+import type { AntigravityGrantOutcome, AntigravityRefusalNotice, ChatMessage, ClaudePermissionSuggestion, PermissionGrantResult, LLMProvider,DiffLine,Project } from '@/shared/types';
+import AntigravityPermissionNotice from '@/modules/chat/transcript/AntigravityPermissionNotice';
 import { formatUsageLimitText, stripProposedPlanEnvelope } from '@/modules/chat/utils/chatFormatting';
 import { ToolRenderer, ToolErrorDisplay, SubagentPanel, shouldHideToolResult } from '@/modules/chat/tools';
 import { LLMProviderLogo } from '@/shared/ui';
@@ -26,6 +27,15 @@ type MessageComponentProps = {
   onFileOpen?: (filePath: string, diffInfo?: unknown) => void;
   onShowSettings?: () => void;
   onGrantToolPermission?: (suggestion: ClaudePermissionSuggestion) => PermissionGrantResult | null | undefined;
+  /**
+   * Allows one refused Antigravity action and re-runs the prompt it refused.
+   * Absent for every other provider, and while a turn is in flight.
+   */
+  onAllowAndRerunAntigravity?: (input: {
+    rule: string;
+    prompt: string;
+    projectPath: string;
+  }) => Promise<AntigravityGrantOutcome>;
   showRawParameters?: boolean;
   showThinking?: boolean;
   selectedProject?: Project | null;
@@ -49,7 +59,7 @@ const COPY_HIDDEN_TOOL_NAMES = new Set(['Bash', 'Edit', 'Write', 'ApplyPatch']);
  * Rendered by chat's ChatMessagesPane and ToolGroupContainer to draw one
  * transcript entry — user turn, assistant turn, or a tool call and its result.
  */
-const MessageComponent = memo(({ message, prevMessage, createDiff, onFileOpen, showRawParameters, showThinking, selectedProject, provider, onEditMessage, onForkFromMessage }: MessageComponentProps) => {
+const MessageComponent = memo(({ message, prevMessage, createDiff, onFileOpen, onAllowAndRerunAntigravity, showRawParameters, showThinking, selectedProject, provider, onEditMessage, onForkFromMessage }: MessageComponentProps) => {
   const { t } = useTranslation('chat');
   const spacingClasses = useChatSpacing();
   const widthClasses = useChatWidthClasses();
@@ -93,6 +103,12 @@ const MessageComponent = memo(({ message, prevMessage, createDiff, onFileOpen, s
   // Neither is present on anything a fork cannot start from: live-streamed
   // turns, and history older than the last compaction.
   const canForkFromMessage = Boolean(message.transcriptAnchorId || message.anchor);
+
+  // Only Antigravity error rows carry one, and only when the turn was refused;
+  // an export renders the refusal as text without an actionable button.
+  const antigravityRefusal = isExporting
+    ? null
+    : (message.antigravityRefusal as AntigravityRefusalNotice | undefined) ?? null;
 
   const formattedTime = useMemo(() => new Date(message.timestamp).toLocaleTimeString(), [message.timestamp]);
   const shouldHideThinkingMessage = Boolean(message.isThinking && !showThinking);
@@ -227,7 +243,9 @@ const MessageComponent = memo(({ message, prevMessage, createDiff, onFileOpen, s
                         : provider === 'codex'
                           ? t('messageTypes.codex')
                           : provider === 'opencode'
-                              ? t('messageTypes.opencode', { defaultValue: 'OpenCode' })
+                            ? t('messageTypes.opencode', { defaultValue: 'OpenCode' })
+                            : provider === 'antigravity'
+                              ? t('messageTypes.antigravity', { defaultValue: 'Antigravity' })
                               : t('messageTypes.claude'))}
               </div>
             </div>
@@ -384,6 +402,15 @@ const MessageComponent = memo(({ message, prevMessage, createDiff, onFileOpen, s
                 plain reply or on the plan card it turned that reply into. */}
             {Array.isArray(message.memoryCitations) && message.memoryCitations.length > 0 && (
               <MemoryCitations citations={message.memoryCitations} />
+            )}
+
+            {/* Antigravity's post-turn refusal: the error row says what was
+                refused, this says what would allow it. */}
+            {antigravityRefusal && (
+              <AntigravityPermissionNotice
+                notice={antigravityRefusal}
+                onAllowAndRerun={onAllowAndRerunAntigravity}
+              />
             )}
 
             {(shouldShowAssistantCopyControl || !isGrouped) && (

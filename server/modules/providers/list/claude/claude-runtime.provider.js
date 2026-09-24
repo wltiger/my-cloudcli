@@ -280,6 +280,16 @@ function mapCliOptionsToSDK(options = {}) {
 
   let allowedTools = [...(settings.allowedTools || [])];
 
+  // Task-tracking tools left the default tool surface on newer models (SDK 0.3.233);
+  // the UI's checklist renders from TodoWrite, so name them explicitly. A tool the
+  // user disallowed stays disallowed.
+  const disallowedTools = new Set(settings.disallowedTools || []);
+  for (const tool of ['TodoRead', 'TodoWrite', 'TaskCreate', 'TaskGet', 'TaskUpdate', 'TaskList']) {
+    if (!allowedTools.includes(tool) && !disallowedTools.has(tool)) {
+      allowedTools.push(tool);
+    }
+  }
+
   if (permissionMode === 'plan') {
     const planModeTools = ['Read', 'Task', 'exit_plan_mode', 'TodoRead', 'TodoWrite', 'WebFetch', 'WebSearch'];
     for (const tool of planModeTools) {
@@ -1186,9 +1196,17 @@ async function queryClaudeSDK(command, options = {}, ws, context) {
         // an SDK build that reports no snapshot) fall back to the pre-existing
         // rule that work from an earlier turn has yet to report back, and
         // answering the user in between must not cut it short.
-        const holdForBackgroundWork = backgroundWork.hasOutstandingWork()
+        // Read before the reset: the reason the hold stands on is what the
+        // decision log reports, and the reset clears this turn's observed start.
+        const holdReason = backgroundWork.outstandingReason();
+        const holdForBackgroundWork = holdReason !== null
           || (!backgroundWork.hasSnapshot() && answersFollowUpPrompt && heldForBackgroundWork);
         backgroundWork.resetFallbackSignal();
+        if (holdForBackgroundWork) {
+          console.log(
+            `[Claude SDK] Holding the process for outstanding background work (${holdReason ?? 'carried hold'}): session ${sessionKey() ?? capturedSessionId ?? 'unknown'}`,
+          );
+        }
         if (!turnCompleteSent && !abortPending) {
           turnCompleteSent = true;
           ws.send(createCompleteMessage({ provider: 'claude', sessionId: capturedSessionId || sessionId || null, exitCode: 0 }));

@@ -22,6 +22,14 @@ type SessionRow = {
   permission_mode: string | null;
   /** The app session this one was branched from; NULL unless it is a fork. */
   forked_from_session_id: string | null;
+  /**
+   * When the provider's own index last reported this conversation as still
+   * working; NULL whenever it reported it idle. Written only by a provider
+   * whose conversations can be started outside CloudCLI (today: antigravity),
+   * because every other provider's "running" comes from the chat run registry,
+   * which only knows the runs this app started.
+   */
+  external_running_at: string | null;
   isArchived: number;
   created_at: string;
   updated_at: string;
@@ -33,7 +41,7 @@ type RecentSessionsPage = {
 };
 
 const SESSION_ROW_COLUMNS =
-  'session_id, provider, provider_session_id, project_path, jsonl_path, custom_name, model, effort, permission_mode, forked_from_session_id, isArchived, created_at, updated_at';
+  'session_id, provider, provider_session_id, project_path, jsonl_path, custom_name, model, effort, permission_mode, forked_from_session_id, external_running_at, isArchived, created_at, updated_at';
 
 const SQLITE_UTC_TIMESTAMP_REGEX = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/;
 
@@ -462,6 +470,60 @@ export const sessionsDb = {
        SET permission_mode = ?
        WHERE session_id = ?`
     ).run(permissionMode, sessionId);
+  },
+
+  /**
+   * Records whether the provider's own index still reports this conversation
+   * as working, and reports whether that answer changed.
+   *
+   * The caller is a synchronizer, which re-states the answer for every
+   * conversation it scans; returning the transition is what lets it announce
+   * only the sessions that actually flipped instead of every row it touched.
+   */
+  setSessionExternalRunningAt(sessionId: string, runningAt: string | null): boolean {
+    const db = getConnection();
+    const previous = db
+      .prepare('SELECT external_running_at FROM sessions WHERE session_id = ?')
+      .get(sessionId) as { external_running_at: string | null } | undefined;
+    if (!previous) {
+      return false;
+    }
+
+    const wasRunning = Boolean(previous.external_running_at);
+    const isRunning = Boolean(runningAt);
+    if (previous.external_running_at === runningAt) {
+      return false;
+    }
+
+    db.prepare(
+      `UPDATE sessions
+       SET external_running_at = ?
+       WHERE session_id = ?`
+    ).run(runningAt, sessionId);
+
+    return wasRunning !== isRunning;
+  },
+
+  /**
+   * Every session a provider currently reports as running outside CloudCLI.
+   *
+   * Archived rows are excluded for the same reason they are excluded from the
+   * sidebar: an archived conversation has no row to light up.
+   */
+  getExternallyRunningSessions(): Array<{
+    session_id: string;
+    provider: string;
+    external_running_at: string;
+  }> {
+    const db = getConnection();
+    return db
+      .prepare(
+        `SELECT session_id, provider, external_running_at
+         FROM sessions
+         WHERE external_running_at IS NOT NULL
+           AND (isArchived = 0 OR isArchived IS NULL)`
+      )
+      .all() as Array<{ session_id: string; provider: string; external_running_at: string }>;
   },
 
   updateSessionCustomName(sessionId: string, customName: string): void {

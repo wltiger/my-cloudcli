@@ -191,3 +191,55 @@ test('history pages are sliced from the cached full transcript and see appended 
     await rm(transcriptDirectory, { recursive: true, force: true });
   }
 });
+
+test('a conversation a provider reports as running outside CloudCLI joins the running list', { concurrency: false }, async () => {
+  await withIsolatedDatabase(() => {
+    sessionsDb.createAppSession('external-session', 'antigravity', '/tmp/external-run-project');
+    sessionsDb.setSessionExternalRunningAt('external-session', new Date().toISOString());
+
+    const running = sessionsService.listRunningSessions();
+
+    assert.equal(running.length, 1);
+    assert.equal(running[0]?.sessionId, 'external-session');
+    assert.equal(running[0]?.provider, 'antigravity');
+    // Nothing of ours is holding the process, so there is nothing to stop.
+    assert.equal(running[0]?.canInterrupt, false);
+  });
+});
+
+test('a conversation that goes idle leaves the running list', { concurrency: false }, async () => {
+  await withIsolatedDatabase(() => {
+    sessionsDb.createAppSession('external-session', 'antigravity', '/tmp/external-idle-project');
+    sessionsDb.setSessionExternalRunningAt('external-session', new Date().toISOString());
+    assert.equal(sessionsService.listRunningSessions().length, 1);
+
+    sessionsDb.setSessionExternalRunningAt('external-session', null);
+
+    assert.deepEqual(sessionsService.listRunningSessions(), []);
+  });
+});
+
+test('a marker nothing has refreshed for hours is treated as a dead CLI, not a live run', { concurrency: false }, async () => {
+  await withIsolatedDatabase(() => {
+    sessionsDb.createAppSession('abandoned-session', 'antigravity', '/tmp/external-stale-project');
+    // `agy` killed mid-turn: its own "still working" flag stays set and no
+    // further write will ever clear it.
+    sessionsDb.setSessionExternalRunningAt(
+      'abandoned-session',
+      new Date(Date.now() - 60 * 60 * 1_000).toISOString(),
+    );
+
+    assert.deepEqual(sessionsService.listRunningSessions(), []);
+  });
+});
+
+test('archiving a session takes it out of the running list', { concurrency: false }, async () => {
+  await withIsolatedDatabase(() => {
+    sessionsDb.createAppSession('archived-session', 'antigravity', '/tmp/external-archive-project');
+    sessionsDb.setSessionExternalRunningAt('archived-session', new Date().toISOString());
+
+    sessionsDb.updateSessionIsArchived('archived-session', true);
+
+    assert.deepEqual(sessionsService.listRunningSessions(), []);
+  });
+});

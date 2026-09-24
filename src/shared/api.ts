@@ -415,6 +415,12 @@ export const api = {
       ),
     saveGlobalMcpServer: (payload: unknown) => post('/api/providers/mcp/servers/global', payload),
 
+    // Antigravity only: headless `agy` cannot prompt, so a refused action is
+    // allowed after the fact by writing the rule into the project record
+    // covering `projectPath` (resolved server-side on every call).
+    grantPermission: (provider: string, payload: { projectPath: string; rule: string }) =>
+      post(`/api/providers/${encodeURIComponent(provider)}/permissions/grants`, payload),
+
     skills: (provider: string, { workspacePath }: { workspacePath?: string } = {}) =>
       get(`/api/providers/${encodeURIComponent(provider)}/skills${query({ workspacePath })}`),
     saveSkills: (provider: string, payload: unknown) =>

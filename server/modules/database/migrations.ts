@@ -432,6 +432,22 @@ const addForkedFromSessionIdColumn = (db: Database): void => {
 };
 
 /**
+ * Adds the `external_running_at` marker for conversations a provider can run
+ * outside CloudCLI.
+ *
+ * Pre-existing rows keep a NULL, which reads as "idle" — the correct answer
+ * for every row written before the marker existed, and the one the next
+ * synchronizer pass overwrites anyway for the provider that owns it.
+ *
+ * Idempotent through `addColumnToTableIfNotExists`: a second run sees the
+ * column in `PRAGMA table_info` and does nothing.
+ */
+const addSessionExternalRunningAtColumn = (db: Database): void => {
+  const columnNames = getTableInfo(db, 'sessions').map((column) => column.name);
+  addColumnToTableIfNotExists(db, 'sessions', columnNames, 'external_running_at', 'DATETIME');
+};
+
+/**
  * Adds the `model` column that records which model each session runs with.
  *
  * Left NULL for pre-existing rows on purpose: the model resolver falls back to
@@ -512,6 +528,74 @@ const addProviderModelCustomEndpointColumns = (db: Database): void => {
   addColumnToTableIfNotExists(db, 'provider_models', columnNames, 'api_key', 'TEXT');
   addColumnToTableIfNotExists(db, 'provider_models', columnNames, 'effort_levels', 'TEXT');
   addColumnToTableIfNotExists(db, 'provider_models', columnNames, 'context_window', 'INTEGER');
+};
+
+/**
+ * Widens the provider_models `CHECK` to accept `antigravity`.
+ *
+ * A `CREATE TABLE IF NOT EXISTS` cannot alter a table that already exists, so
+ * a pre-existing database keeps the old constraint until this rebuilds the
+ * table with the widened list. Rebuild order matters: the new table is created
+ * from the full canonical column set (the custom-endpoint columns above are
+ * guaranteed present by the time this runs), and the provider-order index is
+ * recreated by the `CREATE INDEX IF NOT EXISTS` that follows in `runMigrations`.
+ *
+ * Merge rule (recorded in fork-customizations.md): if upstream ever widens the
+ * same `CHECK`, the list is always the union of both sides and this fork's
+ * rebuild migration sorts after upstream's.
+ */
+const widenProviderModelsProviderCheck = (db: Database): void => {
+  if (!tableExists(db, 'provider_models')) {
+    return;
+  }
+
+  const tableSql = db
+    .prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'provider_models'")
+    .get() as { sql: string } | undefined;
+  if (!tableSql || tableSql.sql.includes("'antigravity'")) {
+    return;
+  }
+
+  console.log('Running migration: Widening provider_models CHECK to accept antigravity');
+
+  db.exec('PRAGMA foreign_keys = OFF');
+  try {
+    db.exec('BEGIN TRANSACTION');
+    db.exec(`
+      CREATE TABLE provider_models__new (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        provider TEXT NOT NULL CHECK (provider IN ('claude', 'cursor', 'codex', 'opencode', 'antigravity')),
+        model_id TEXT NOT NULL,
+        model_name TEXT NOT NULL,
+        sort_order INTEGER NOT NULL DEFAULT 0,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        base_url TEXT,
+        api_key TEXT,
+        effort_levels TEXT,
+        context_window INTEGER,
+        UNIQUE(provider, model_id)
+      )
+    `);
+    db.exec(`
+      INSERT INTO provider_models__new (
+        id, provider, model_id, model_name, sort_order, created_at, updated_at,
+        base_url, api_key, effort_levels, context_window
+      )
+      SELECT
+        id, provider, model_id, model_name, sort_order, created_at, updated_at,
+        base_url, api_key, effort_levels, context_window
+      FROM provider_models
+    `);
+    db.exec('DROP TABLE provider_models');
+    db.exec('ALTER TABLE provider_models__new RENAME TO provider_models');
+    db.exec('COMMIT');
+  } catch (migrationError) {
+    db.exec('ROLLBACK');
+    throw migrationError;
+  } finally {
+    db.exec('PRAGMA foreign_keys = ON');
+  }
 };
 
 const ensureProjectsForSessionPaths = (db: Database): void => {
@@ -660,6 +744,7 @@ export const runMigrations = (db: Database) => {
     db.exec('CREATE INDEX IF NOT EXISTS idx_notification_channel_endpoints_enabled ON notification_channel_endpoints(enabled)');
     db.exec(PROVIDER_MODELS_TABLE_SCHEMA_SQL);
     addProviderModelCustomEndpointColumns(db);
+    widenProviderModelsProviderCheck(db);
     db.exec(`
       CREATE INDEX IF NOT EXISTS idx_provider_models_provider_order
       ON provider_models(provider, sort_order, id)
@@ -683,6 +768,7 @@ export const runMigrations = (db: Database) => {
     addSessionEffortColumn(db);
     addSessionPermissionModeColumn(db);
     addForkedFromSessionIdColumn(db);
+    addSessionExternalRunningAtColumn(db);
     ensureProjectsForSessionPaths(db);
     mergeCaseInsensitiveDuplicateProjectPaths(db);
     db.exec(SCHEDULED_MESSAGES_TABLE_SCHEMA_SQL);
