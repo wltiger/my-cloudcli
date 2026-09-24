@@ -291,10 +291,11 @@ Observed enumerations [V] — `source` ∈ {`USER_EXPLICIT`, `MODEL`, `SYSTEM`};
 >   argument's JSON literal is cut short (`…\n<truncated 7653 bytes>`), so it no longer decodes; the full array
 >   is in `transcript_full.jsonl` at the same `step_index`.
 > - **A live `tool` step carries the step index of the record that *ran* the call — the `GENERIC` result
->   record — not the `PLANNER_RESPONSE` that made it.** Inferred from the verbatim 1.2.8 refusal capture
->   (a fresh conversation's first tool update is `step_index: 2`, where the transcript has `USER_INPUT` 0,
->   `PLANNER_RESPONSE` 1, result 2); not yet confirmed against a same-turn stdout/transcript pair. Tool-card
->   ids are keyed on that step on both paths.
+>   record — not the `PLANNER_RESPONSE` that made it.** Confirmed against a same-turn stdout/transcript
+>   pair: a fresh conversation's three tool calls ran as live tool steps 2/4/6, matching the transcript's
+>   `GENERIC` result records 2/4/6, while the planners that made the calls sit at 1/3/5. Each call also
+>   gets its own step pair — the live `ACTIVE` and `DONE` updates share the result step — so no call index
+>   is needed. Tool-card ids are keyed on that step on both paths.
 
 > ⚠️ **This vocabulary is NOT in any published `.proto`** — verified by grep across all 25 SDK proto files.
 > It is internal Cascade (`exa.cortex_pb`) naming. The SDK's `localharness.proto` helps the **runtime**
