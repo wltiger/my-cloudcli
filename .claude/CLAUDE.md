@@ -146,6 +146,10 @@ Vite dev server proxies `/api`, `/ws`, `/shell`, `/plugin-ws` to the Express bac
 
 GitHub issues on your fork (`wltiger/my-cloudcli`), not upstream (`siteboon/claudecodeui`). See `docs/agents/issue-tracker.md`.
 
+### Backlog
+
+Bugs and requests are collected in `docs/agents/backlog.md` via `/to-backlog`. When the user says 开工, read `~/.claude/skills/to-backlog/SKILL.md` and follow its Start work section.
+
 ### Syncing with upstream
 
 Whenever asked to sync/merge/pull in the latest official source (`upstream/main`), or to check whether an upstream change affects one of this fork's own customizations, follow `docs/upstream-sync.md` (the step-by-step procedure) and `docs/fork-customizations.md` (the inventory of what diverges from upstream and why, with per-item merge-conflict guidance) — do not improvise the merge from scratch. Chinese translations: `docs/upstream-sync.zh-CN.md`, `docs/fork-customizations.zh-CN.md`.
