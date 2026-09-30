@@ -63,6 +63,14 @@ export function getProviderWatchPaths(): ProviderWatchPath[] {
       rootPath: path.join(homeDir, '.gemini', 'antigravity-cli', 'brain'),
       createIfMissing: false,
     },
+    {
+      // A rename writes here and nowhere under `brain/`, and the index's
+      // `last_modified_time` does not move with it. One flat directory of tiny
+      // files, so a second polling watcher costs next to nothing.
+      provider: 'antigravity',
+      rootPath: path.join(homeDir, '.gemini', 'antigravity-cli', 'annotations'),
+      createIfMissing: false,
+    },
   ];
 }
 
@@ -131,7 +139,11 @@ export function isWatcherTargetFile(provider: LLMProvider, filePath: string): bo
     // trigger — the other two are rewritten in lockstep with it and would each
     // repeat the same work. This is also the second line of defence for the
     // chunks, which the ignore pattern already keeps out.
-    return path.basename(filePath) === 'transcript.jsonl';
+    //
+    // The one other trigger is a conversation's title file under
+    // `annotations/`; the synchronizer rejects any other `.pbtxt` by path.
+    return path.basename(filePath) === 'transcript.jsonl'
+      || (filePath.endsWith('.pbtxt') && path.basename(path.dirname(filePath)) === 'annotations');
   }
 
   return filePath.endsWith('.jsonl');

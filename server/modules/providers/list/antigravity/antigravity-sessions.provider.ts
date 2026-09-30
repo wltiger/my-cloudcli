@@ -117,6 +117,146 @@ export const readConversationIdFromTranscriptPath = (filePath: string): string |
   return expected && path.resolve(expected) === path.resolve(filePath) ? conversationId : null;
 };
 
+/**
+ * Where `agy` keeps a conversation's title: `annotations/<conversation-id>.pbtxt`,
+ * one `title:"…"` line that `/rename` writes straight away. The index db only
+ * catches up the next time `agy` starts, so this file is the title's source.
+ */
+const getAntigravityAnnotationsDir = (): string => path.join(getAntigravityAppDataDir(), 'annotations');
+
+const ANNOTATION_EXTENSION = '.pbtxt';
+const ANNOTATION_TITLE_LINE = /^title:[ \t]*"((?:[^"\\\r\n]|\\.)*)"[ \t]*$/m;
+
+/** The annotation file for one conversation, or null when the id is not a single path segment. */
+const getAntigravityAnnotationPath = (conversationId: string): string | null => {
+  const trimmed = conversationId.trim();
+  if (!trimmed || trimmed !== path.basename(trimmed) || trimmed.includes('..')) {
+    return null;
+  }
+
+  return path.join(getAntigravityAnnotationsDir(), `${trimmed}${ANNOTATION_EXTENSION}`);
+};
+
+/**
+ * The conversation id an annotation path belongs to, or null when the path is
+ * not one of `agy`'s annotation files. A writer's `<id>.pbtxt.<pid>.tmp` does
+ * not end in `.pbtxt`, so it is never mistaken for one.
+ */
+export const readConversationIdFromAnnotationPath = (filePath: string): string | null => {
+  if (!filePath.endsWith(ANNOTATION_EXTENSION)) {
+    return null;
+  }
+
+  const conversationId = path.basename(filePath, ANNOTATION_EXTENSION);
+  const expected = getAntigravityAnnotationPath(conversationId);
+  return expected && path.resolve(expected) === path.resolve(filePath) ? conversationId : null;
+};
+
+/**
+ * The title `agy` holds for a conversation, or null when there is no annotation
+ * file or it carries no usable title — a missing, empty or half-written file
+ * is "no title", never an empty name.
+ */
+export const readAntigravityAnnotationTitle = (conversationId: string): string | null => {
+  const annotationPath = getAntigravityAnnotationPath(conversationId);
+  if (!annotationPath) {
+    return null;
+  }
+
+  let raw: string;
+  try {
+    raw = fsSync.readFileSync(annotationPath, 'utf8');
+  } catch {
+    return null;
+  }
+
+  const escaped = ANNOTATION_TITLE_LINE.exec(raw)?.[1];
+  if (escaped === undefined) {
+    return null;
+  }
+
+  const title = escaped.replace(/\\(.)/g, (_match, char: string) => {
+    if (char === 'n') {
+      return '\n';
+    }
+    return char === 'r' ? '\r' : char;
+  });
+  return readOptionalString(title) ?? null;
+};
+
+/**
+ * Sets a conversation's title where `agy` reads it, keeping any other line the
+ * file carries. Written through a temp file and renamed so `agy` and the
+ * watcher never see half a title.
+ */
+export const writeAntigravityAnnotationTitle = (conversationId: string, title: string): void => {
+  const annotationPath = getAntigravityAnnotationPath(conversationId);
+  if (!annotationPath) {
+    return;
+  }
+
+  const escaped = title.replace(/[\\"]/g, '\\$&').replace(/\r/g, '\\r').replace(/\n/g, '\\n');
+  const titleLine = `title:"${escaped}"`;
+
+  let existing = '';
+  try {
+    existing = fsSync.readFileSync(annotationPath, 'utf8');
+  } catch {
+    // No annotation yet: the file is created below.
+  }
+
+  // Any `title:` line is replaced, even a malformed one: a second `title` field
+  // makes the file unparseable for `agy`.
+  const next = /^title:/m.test(existing)
+    ? existing.replace(/^title:.*$/m, () => titleLine)
+    : `${titleLine}${existing ? `\n${existing}` : ''}`;
+
+  fsSync.mkdirSync(path.dirname(annotationPath), { recursive: true });
+  const tempPath = `${annotationPath}.${process.pid}.tmp`;
+  try {
+    fsSync.writeFileSync(tempPath, next, 'utf8');
+    fsSync.renameSync(tempPath, annotationPath);
+  } catch (error) {
+    fsSync.rmSync(tempPath, { force: true });
+    throw error;
+  }
+};
+
+/**
+ * Ids of the conversations whose annotation file changed at or after `sinceMillis`.
+ *
+ * A rename never moves the index's `last_modified_time`, so an incremental scan
+ * keyed on it would skip a title written while CloudCLI was not running.
+ */
+export const listAnnotatedConversationIdsSince = (sinceMillis: number): Set<string> => {
+  const ids = new Set<string>();
+  const dir = getAntigravityAnnotationsDir();
+
+  let names: string[];
+  try {
+    names = fsSync.readdirSync(dir);
+  } catch {
+    return ids;
+  }
+
+  for (const name of names) {
+    const conversationId = readConversationIdFromAnnotationPath(path.join(dir, name));
+    if (!conversationId) {
+      continue;
+    }
+
+    try {
+      if (fsSync.statSync(path.join(dir, name)).mtimeMs >= sinceMillis) {
+        ids.add(conversationId);
+      }
+    } catch {
+      // Removed between the listing and the stat.
+    }
+  }
+
+  return ids;
+};
+
 /** Fields `truncated_fields` may name that this reader restores from the untruncated transcript. */
 const RESTORABLE_TRUNCATED_FIELDS = new Set(['content', 'thinking', 'tool_calls']);
 
@@ -1266,6 +1406,11 @@ const normalizeAntigravityRecords = (
 };
 
 export class AntigravitySessionsProvider implements IProviderSessions {
+  /** Puts a CloudCLI rename where `agy` reads its own titles. */
+  writeSessionTitle(providerSessionId: string, title: string): void {
+    writeAntigravityAnnotationTitle(providerSessionId, title);
+  }
+
   /**
    * Normalizes one `transcript.jsonl` record into frontend messages.
    *

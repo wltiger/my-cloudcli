@@ -48,19 +48,22 @@ const isIgnored = (filePath: string): boolean => {
   ));
 };
 
-test('antigravity watches only the conversation tree, and only when it already exists', () => {
+test('antigravity watches the conversation tree and the title files, and only when they already exist', () => {
   const restoreHomeDir = patchHomeDir('/tmp/fake-home');
   try {
     const paths = getProviderWatchPaths();
-    const antigravity = paths.find((entry) => entry.provider === 'antigravity');
+    const antigravity = paths.filter((entry) => entry.provider === 'antigravity');
 
-    assert.equal(
-      antigravity?.rootPath,
-      path.join('/tmp/fake-home', '.gemini', 'antigravity-cli', 'brain'),
+    assert.deepEqual(
+      antigravity.map((entry) => entry.rootPath),
+      [
+        path.join('/tmp/fake-home', '.gemini', 'antigravity-cli', 'brain'),
+        path.join('/tmp/fake-home', '.gemini', 'antigravity-cli', 'annotations'),
+      ],
     );
     // A machine with no `agy` must pay nothing: no directory created, so
     // `initializeSessionsWatcher` skips the root instead of attaching to it.
-    assert.equal(antigravity?.createIfMissing, false);
+    assert.deepEqual(antigravity.map((entry) => entry.createIfMissing), [false, false]);
 
     // The four providers that were here first keep creating their roots.
     for (const provider of ['claude', 'cursor', 'codex', 'opencode'] as const) {
@@ -82,6 +85,12 @@ test('only the top-level transcript is an antigravity synchronization trigger', 
   assert.equal(isWatcherTargetFile('antigravity', `${logsDir}/transcript_full.jsonl`), false);
   assert.equal(isWatcherTargetFile('antigravity', `${logsDir}/chunks/transcript/00000000.jsonl`), false);
   assert.equal(isWatcherTargetFile('antigravity', `${logsDir}/chunks/transcript_full/00000001.jsonl`), false);
+
+  // The title file is a trigger; a writer's temp file and any other file are not.
+  const annotationsDir = '/home/u/.gemini/antigravity-cli/annotations';
+  assert.equal(isWatcherTargetFile('antigravity', `${annotationsDir}/conv-a.pbtxt`), true);
+  assert.equal(isWatcherTargetFile('antigravity', `${annotationsDir}/conv-a.pbtxt.4242.tmp`), false);
+  assert.equal(isWatcherTargetFile('antigravity', '/home/u/elsewhere/conv-a.pbtxt'), false);
 
   // The other providers keep their own rules.
   assert.equal(isWatcherTargetFile('claude', '/home/u/.claude/projects/p/abc.jsonl'), true);
@@ -137,6 +146,18 @@ test('a transcript event indexes the conversation while a chunk event does nothi
     await fs.writeFile(transcriptPath, '{}\n');
     await onUpdate('change', transcriptPath, 'antigravity');
     assert.equal(sessionsDb.getSessionByProviderSessionId('conv-live')?.provider, 'antigravity');
+
+    // A title written to the annotation file renames the session, although the
+    // index row is untouched — and a writer's temp file does nothing.
+    const annotationPath = path.join(appDataDir, 'annotations', 'conv-live.pbtxt');
+    await fs.mkdir(path.dirname(annotationPath), { recursive: true });
+    await fs.writeFile(`${annotationPath}.4242.tmp`, 'title:"from tmp"');
+    await onUpdate('add', `${annotationPath}.4242.tmp`, 'antigravity');
+    assert.equal(sessionsDb.getSessionByProviderSessionId('conv-live')?.custom_name, 'watch me');
+
+    await fs.writeFile(annotationPath, 'title:"[Review/Agy] 标题"');
+    await onUpdate('change', annotationPath, 'antigravity');
+    assert.equal(sessionsDb.getSessionByProviderSessionId('conv-live')?.custom_name, '[Review/Agy] 标题');
   } finally {
     restoreHomeDir();
     await closeSessionsWatcher();

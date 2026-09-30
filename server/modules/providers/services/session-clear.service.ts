@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 
 import { sessionsDb } from '@/modules/database/index.js';
 import { providerCapabilitiesService } from '@/modules/providers/services/provider-capabilities.service.js';
+import { writeSessionTitleToProvider } from '@/modules/providers/services/session-title-writeback.service.js';
 import type { LLMProvider } from '@/shared/types.js';
 import { AppError, UNTITLED_SESSION_NAME } from '@/shared/utils.js';
 
@@ -73,6 +74,7 @@ export const sessionClearService = {
     const projectPath = session.project_path ?? '';
     const retiredSessionName = buildClearedSessionName(session.custom_name ?? '');
     sessionsDb.updateSessionCustomName(sessionId, retiredSessionName);
+    writeSessionTitleToProvider(session, retiredSessionName);
     sessionsDb.updateSessionIsArchived(sessionId, true);
 
     // Deliberately unnamed: this is the app-session shape the session gateway

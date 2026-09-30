@@ -227,6 +227,16 @@ export interface IProviderSessions {
    * gateway branches on.
    */
   rewindSession?(sessionId: string, keepThroughId: string | null): Promise<void>;
+
+  /**
+   * Writes a CloudCLI-side rename into the provider's own title store, so the
+   * CLI shows the same name.
+   *
+   * Synchronous and best-effort by contract: the caller has already renamed the
+   * session and treats a throw as a warning. Implemented only by providers whose
+   * CLI keeps titles somewhere CloudCLI may write.
+   */
+  writeSessionTitle?(providerSessionId: string, title: string): void;
 }
 
 // ---------------------------

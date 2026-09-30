@@ -30,7 +30,10 @@ import {
 import {
   ANTIGRAVITY_CLI_APP_DATA_DIR,
   getAntigravityAppDataDir,
+  listAnnotatedConversationIdsSince,
   openAntigravitySummariesDatabase,
+  readAntigravityAnnotationTitle,
+  readConversationIdFromAnnotationPath,
   readConversationIdFromTranscriptPath,
 } from './antigravity-sessions.provider.js';
 
@@ -216,11 +219,12 @@ export class AntigravitySessionSynchronizer implements IProviderSessionSynchroni
   /**
    * Indexes the one conversation a watcher event points at.
    *
-   * Accepts either artifact `agy` rewrites as a conversation advances: its own
-   * transcript, and the shared index.
+   * Accepts any artifact `agy` rewrites as a conversation advances: its own
+   * transcript, its annotation file (the title), and the shared index.
    */
   async synchronizeFile(filePath: string): Promise<string | null> {
-    const conversationId = readConversationIdFromTranscriptPath(filePath);
+    const conversationId = readConversationIdFromTranscriptPath(filePath)
+      ?? readConversationIdFromAnnotationPath(filePath);
     if (conversationId) {
       return this.synchronizeRows(undefined, { conversationId }).firstSessionId;
     }
@@ -243,6 +247,11 @@ export class AntigravitySessionSynchronizer implements IProviderSessionSynchroni
 
     try {
       const sinceMillis = since?.getTime() ?? null;
+      // A rename moves the annotation file but not `last_modified_time`, so a
+      // title written while CloudCLI was down is admitted by the file's mtime.
+      const annotatedSince = sinceMillis === null
+        ? new Set<string>()
+        : listAnnotatedConversationIdsSince(sinceMillis);
       // `last_modified_time` is a SQLite datetime string (`2026-09-21
       // 03:49:45.368802+00:00`), so the incremental cursor is applied after
       // parsing rather than as a SQL comparison against an ISO timestamp.
@@ -255,7 +264,10 @@ export class AntigravitySessionSynchronizer implements IProviderSessionSynchroni
           if (options.conversationId) {
             return row.conversation_id === options.conversationId;
           }
-          return sinceMillis === null || !Number.isFinite(modifiedAt) || modifiedAt >= sinceMillis;
+          return sinceMillis === null
+            || !Number.isFinite(modifiedAt)
+            || modifiedAt >= sinceMillis
+            || annotatedSince.has(row.conversation_id as string);
         })
         .sort((left, right) => (right.modifiedAt || 0) - (left.modifiedAt || 0))
         .slice(0, options.limit ?? undefined);
@@ -352,8 +364,14 @@ export class AntigravitySessionSynchronizer implements IProviderSessionSynchroni
     const existingSession = this.findSessionForConversation(conversationId);
     const existingName = existingSession?.custom_name;
 
+    // `agy`'s annotation file is the title's source — `/rename` and CloudCLI's
+    // own rename both land there — so it wins over any name already stored.
+    const annotationTitle = readAntigravityAnnotationTitle(conversationId);
+
     let nextName: string | undefined;
-    if (existingName && existingName !== FALLBACK_TITLE) {
+    if (annotationTitle) {
+      nextName = annotationTitle;
+    } else if (existingName && existingName !== FALLBACK_TITLE) {
       nextName = existingName;
     } else {
       // `title` is empty for most headless runs — 1.2.5+ skips the
@@ -378,6 +396,17 @@ export class AntigravitySessionSynchronizer implements IProviderSessionSynchroni
       modifiedAt,
       null,
     );
+
+    // The upsert keeps the stored name of a row CloudCLI itself created, so the
+    // annotation title is applied explicitly. Compared normalized on both sides:
+    // the rename route allows longer names than `normalizeSessionName` keeps,
+    // and a raw comparison would rewrite the same name on every scan.
+    if (appSessionId && annotationTitle && existingName) {
+      const annotationName = normalizeSessionName(annotationTitle, FALLBACK_TITLE);
+      if (normalizeSessionName(existingName, FALLBACK_TITLE) !== annotationName) {
+        sessionsDb.updateSessionCustomName(appSessionId, annotationName);
+      }
+    }
 
     if (appSessionId) {
       // A conversation `agy` is working on right now is the one case CloudCLI

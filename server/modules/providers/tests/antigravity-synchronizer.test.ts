@@ -18,6 +18,9 @@ import Database from 'better-sqlite3';
 
 import { closeConnection, initializeDatabase, projectsDb, sessionsDb } from '@/modules/database/index.js';
 import { AntigravitySessionSynchronizer } from '@/modules/providers/list/antigravity/antigravity-session-synchronizer.provider.js';
+import { writeAntigravityAnnotationTitle } from '@/modules/providers/list/antigravity/antigravity-sessions.provider.js';
+import { sessionClearService } from '@/modules/providers/services/session-clear.service.js';
+import { sessionsService } from '@/modules/providers/services/sessions.service.js';
 
 const patchHomeDir = (nextHomeDir: string) => {
   const original = os.homedir;
@@ -343,6 +346,200 @@ test('a name the user chose survives a rescan', { concurrency: false }, async ()
     await synchronizer.synchronize();
 
     assert.equal(sessionsDb.getSessionByProviderSessionId('conv-a')?.custom_name, 'My renamed session');
+  });
+});
+
+/** `agy`'s title file for one conversation, under the throwaway home. */
+const annotationPathFor = (homeDir: string, conversationId: string) => (
+  path.join(homeDir, '.gemini', 'antigravity-cli', 'annotations', `${conversationId}.pbtxt`)
+);
+
+const writeAnnotation = async (homeDir: string, conversationId: string, content: string) => {
+  const file = annotationPathFor(homeDir, conversationId);
+  await fs.mkdir(path.dirname(file), { recursive: true });
+  await fs.writeFile(file, content, 'utf8');
+};
+
+test('the annotation title replaces the name the first scan stored', { concurrency: false }, async () => {
+  await withIndex({
+    rows: [{ conversation_id: 'conv-a', title: 'Auto Title', workspace_uris: JSON.stringify([WORKSPACE_URI]) }],
+  }, async ({ synchronizer, homeDir }) => {
+    await synchronizer.synchronize();
+    assert.equal(sessionsDb.getSessionByProviderSessionId('conv-a')?.custom_name, 'Auto Title');
+
+    // What `dispatch-agent` does once a headless run ends: only the file changes.
+    await writeAnnotation(homeDir, 'conv-a', 'title:"[Review/Agy] Spec Review"');
+    await synchronizer.synchronize();
+
+    assert.equal(sessionsDb.getSessionByProviderSessionId('conv-a')?.custom_name, '[Review/Agy] Spec Review');
+  });
+});
+
+test('the annotation title reaches a session CloudCLI created itself', { concurrency: false }, async () => {
+  await withIndex({
+    rows: [{ conversation_id: 'conv-a', title: 'Auto Title', workspace_uris: JSON.stringify([WORKSPACE_URI]) }],
+  }, async ({ synchronizer, homeDir }) => {
+    sessionsDb.createAppSession('app-session', 'antigravity', WORKSPACE_PATH, 'first words typed');
+    await synchronizer.synchronize();
+    const row = sessionsDb.getSessionByProviderSessionId('conv-a')!;
+    assert.equal(row.session_id, 'app-session');
+    // The upsert alone keeps this name: the row's id is not the provider's.
+    assert.equal(row.custom_name, 'first words typed');
+
+    await writeAnnotation(homeDir, 'conv-a', 'title:"Named in agy"');
+    await synchronizer.synchronize();
+
+    assert.equal(sessionsDb.getSessionById('app-session')?.custom_name, 'Named in agy');
+  });
+});
+
+test('a title written while the scan is incremental is still picked up', { concurrency: false }, async () => {
+  await withIndex({
+    rows: [{
+      conversation_id: 'conv-a',
+      title: 'Auto Title',
+      last_modified_time: '2026-09-01 10:00:00.000000+00:00',
+      workspace_uris: JSON.stringify([WORKSPACE_URI]),
+    }],
+  }, async ({ synchronizer, homeDir }) => {
+    await synchronizer.synchronize();
+    await writeAnnotation(homeDir, 'conv-a', 'title:"Renamed offline"');
+
+    // The index row has not moved since September 1st; only the file's mtime has.
+    assert.equal(await synchronizer.synchronize(new Date(Date.now() - 60_000)), 1);
+
+    assert.equal(sessionsDb.getSessionByProviderSessionId('conv-a')?.custom_name, 'Renamed offline');
+  });
+});
+
+test('an empty or unreadable annotation leaves the name alone', { concurrency: false }, async () => {
+  await withIndex({
+    rows: [{ conversation_id: 'conv-a', title: 'Auto Title', workspace_uris: JSON.stringify([WORKSPACE_URI]) }],
+  }, async ({ synchronizer, homeDir }) => {
+    await synchronizer.synchronize();
+
+    for (const content of ['', 'title:""', 'title:"half a tit', 'other:"x"']) {
+      await writeAnnotation(homeDir, 'conv-a', content);
+      await synchronizer.synchronize();
+      assert.equal(sessionsDb.getSessionByProviderSessionId('conv-a')?.custom_name, 'Auto Title', content);
+    }
+  });
+});
+
+test('an escaped annotation title is read back as written', { concurrency: false }, async () => {
+  await withIndex({
+    rows: [{ conversation_id: 'conv-a', workspace_uris: JSON.stringify([WORKSPACE_URI]) }],
+  }, async ({ synchronizer, homeDir }) => {
+    await writeAnnotation(homeDir, 'conv-a', 'title:"say \\"hi\\" \\\\ 你好"');
+    await synchronizer.synchronize();
+
+    assert.equal(sessionsDb.getSessionByProviderSessionId('conv-a')?.custom_name, 'say "hi" \\ 你好');
+  });
+});
+
+test('an annotation write indexes exactly the conversation it belongs to, and no foreign path counts', { concurrency: false }, async () => {
+  await withIndex({
+    rows: [
+      { conversation_id: 'conv-a', workspace_uris: JSON.stringify([WORKSPACE_URI]) },
+      { conversation_id: 'conv-b', workspace_uris: JSON.stringify([WORKSPACE_URI]) },
+    ],
+  }, async ({ synchronizer, homeDir }) => {
+    await writeAnnotation(homeDir, 'conv-b', 'title:"Only B"');
+
+    const sessionId = await synchronizer.synchronizeFile(annotationPathFor(homeDir, 'conv-b'));
+
+    assert.equal(sessionId, sessionsDb.getSessionByProviderSessionId('conv-b')?.session_id);
+    assert.equal(sessionsDb.getSessionByProviderSessionId('conv-a'), null);
+    assert.equal(await synchronizer.synchronizeFile(path.join(homeDir, 'elsewhere', 'conv-a.pbtxt')), null);
+    assert.equal(await synchronizer.synchronizeFile(`${annotationPathFor(homeDir, 'conv-a')}.4242.tmp`), null);
+  });
+});
+
+test('renaming a session writes the name to agy, and it survives the next scan', { concurrency: false }, async () => {
+  await withIndex({
+    rows: [{ conversation_id: 'conv-a', title: 'Auto Title', workspace_uris: JSON.stringify([WORKSPACE_URI]) }],
+  }, async ({ synchronizer, homeDir }) => {
+    await synchronizer.synchronize();
+    const sessionId = sessionsDb.getSessionByProviderSessionId('conv-a')!.session_id;
+
+    sessionsService.renameSessionById(sessionId, 'Renamed "in" CloudCLI\nline two');
+
+    assert.equal(
+      await fs.readFile(annotationPathFor(homeDir, 'conv-a'), 'utf8'),
+      'title:"Renamed \\"in\\" CloudCLI\\nline two"',
+    );
+    assert.deepEqual(
+      (await fs.readdir(path.dirname(annotationPathFor(homeDir, 'conv-a')))).filter((name) => name.endsWith('.tmp')),
+      [],
+    );
+
+    await synchronizer.synchronize();
+    assert.equal(
+      sessionsDb.getSessionByProviderSessionId('conv-a')?.custom_name,
+      'Renamed "in" CloudCLI line two',
+    );
+  });
+});
+
+test('writing a title keeps the other lines of the annotation file', { concurrency: false }, async () => {
+  await withIndex({ rows: [] }, async ({ homeDir }) => {
+    await writeAnnotation(homeDir, 'conv-a', 'title:"old"\nextra:"kept"');
+
+    writeAntigravityAnnotationTitle('conv-a', 'new');
+
+    assert.equal(await fs.readFile(annotationPathFor(homeDir, 'conv-a'), 'utf8'), 'title:"new"\nextra:"kept"');
+  });
+});
+
+test('writing over a malformed title line replaces it instead of adding a second one', { concurrency: false }, async () => {
+  await withIndex({ rows: [] }, async ({ homeDir }) => {
+    await writeAnnotation(homeDir, 'conv-a', 'title:"half a tit');
+
+    writeAntigravityAnnotationTitle('conv-a', 'whole');
+
+    assert.equal(await fs.readFile(annotationPathFor(homeDir, 'conv-a'), 'utf8'), 'title:"whole"');
+  });
+});
+
+test('a failed write leaves no temp file behind', { concurrency: false }, async () => {
+  await withIndex({ rows: [] }, async ({ homeDir }) => {
+    // A directory where the file belongs makes the final rename fail.
+    await fs.mkdir(annotationPathFor(homeDir, 'conv-a'), { recursive: true });
+
+    assert.throws(() => writeAntigravityAnnotationTitle('conv-a', 'x'));
+
+    const names = await fs.readdir(path.dirname(annotationPathFor(homeDir, 'conv-a')));
+    assert.deepEqual(names.filter((name) => name.endsWith('.tmp')), []);
+  });
+});
+
+test('a conversation id that is not a single path segment is never written', { concurrency: false }, async () => {
+  await withIndex({ rows: [] }, async ({ homeDir }) => {
+    writeAntigravityAnnotationTitle('../../escaped', 'nope');
+
+    await assert.rejects(fs.access(path.join(homeDir, '.gemini', 'escaped.pbtxt')));
+    await assert.rejects(fs.access(path.join(homeDir, 'escaped.pbtxt')));
+  });
+});
+
+test('clearing a session names it in agy too, and the archive holds through the next scan', { concurrency: false }, async () => {
+  await withIndex({
+    rows: [{ conversation_id: 'conv-a', title: 'Auto Title', workspace_uris: JSON.stringify([WORKSPACE_URI]) }],
+  }, async ({ synchronizer, homeDir }) => {
+    await synchronizer.synchronize();
+    const sessionId = sessionsDb.getSessionByProviderSessionId('conv-a')!.session_id;
+
+    sessionClearService.clearSession(sessionId);
+
+    assert.equal(
+      await fs.readFile(annotationPathFor(homeDir, 'conv-a'), 'utf8'),
+      'title:"[Cleared] Auto Title"',
+    );
+
+    await synchronizer.synchronize(new Date(Date.now() - 60_000));
+    const row = sessionsDb.getSessionById(sessionId)!;
+    assert.equal(row.custom_name, '[Cleared] Auto Title');
+    assert.equal(Boolean(row.isArchived), true);
   });
 });
 

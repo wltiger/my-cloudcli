@@ -6,6 +6,7 @@ import { projectsDb, sessionsDb } from '@/modules/database/index.js';
 import { broadcastSessionUpserted, chatRunRegistry } from '@/modules/websocket/index.js';
 import { providerRegistry } from '@/modules/providers/provider.registry.js';
 import { sessionHistoryCache } from '@/modules/providers/services/session-history-cache.service.js';
+import { writeSessionTitleToProvider } from '@/modules/providers/services/session-title-writeback.service.js';
 import type {
   FetchHistoryOptions,
   FetchHistoryResult,
@@ -706,6 +707,7 @@ export const sessionsService = {
     }
 
     sessionsDb.updateSessionCustomName(sessionId, summary);
+    writeSessionTitleToProvider(session, summary);
     return { sessionId, summary };
   },
 };
