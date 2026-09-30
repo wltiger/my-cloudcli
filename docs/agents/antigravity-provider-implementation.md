@@ -364,6 +364,25 @@ solves the identical "the CLI's storage isn't ours to touch" problem.
   `conversation_summaries.db` as well would buy nothing, because synchronizing a transcript re-reads that
   conversation's index row anyway. Note that **chokidar 4 matches a string `ignored` entry by equality, not
   as a glob** — the chunk ignore has to be a RegExp to do anything at all.
+- **Titles come from `annotations/<id>.pbtxt`, not the index** (verified 2026-09-30). One line, `title:"…"`, raw
+  UTF-8, with quote and backslash characters escaped. `/rename` in the TUI writes both the file and the db
+  `title`; a headless writer (the `dispatch-agent` skill's `agy-title`) writes only the file, and the db catches
+  up the next time `agy` starts. A rename moves neither `last_modified_time` nor `transcript.jsonl`, so it
+  fires neither the incremental `since` filter nor the `brain/` watcher — hence the second watch root
+  (`annotations/`) and the pbtxt-mtime admission in `synchronize(since)`. When a pbtxt has a title it always
+  wins over the stored name; a CloudCLI rename or Clear is written back through `writeSessionTitle`
+  (fork-customizations #36).
+- **Archive and delete never touch `agy`'s files** (verified by reading `sessions.service.ts`
+  `deleteOrArchiveSessionById`, 2026-09-30). Archive only sets `isArchived` on the CloudCLI row: restorable,
+  and it keeps name/model/effort/permission mode. Permanent delete (`force`, which defaults `deletedFromDisk`
+  to true) removes the row and unlinks `jsonl_path` — which is `null` for antigravity, so nothing is removed
+  from disk and the conversation stays in `agy`'s own list (Claude, by contrast, does lose its `.jsonl`).
+  There is **no tombstone**: a force-deleted conversation stays gone from the sidebar only because the
+  incremental scan skips conversations that have not moved since `scan_state.last_scanned_at`. It comes back,
+  as a new un-archived row named from `agy`'s title, on any of: a full rescan (cursor reset or empty db), new
+  transcript activity, or a pbtxt write (e.g. `agy-title` on it). Archive is the sturdier way to hide one,
+  since the upsert only un-archives on a newer `last_modified_time`. The delete confirmation text ("cannot be
+  undone") is written for Claude and overstates it for `agy`.
 
 ---
 
