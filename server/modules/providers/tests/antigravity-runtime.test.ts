@@ -454,7 +454,8 @@ test('a live system message is held until its step completes, then shown as a no
 
   const { sent } = foldEvents([active, done]);
   assert.deepEqual(sent.map((message) => message.kind), ['task_notification']);
-  assert.equal(sent[0].status, 'completed');
+  // A restart reports no outcome, so it is not shown as a success.
+  assert.equal(sent[0].status, 'info');
   assert.match(String(sent[0].content), /^\[Notice\] All your subagents/);
   assert.equal(sent[0].id, 'antigravity-app-1-6-system');
 });
@@ -487,13 +488,18 @@ test('no stream_end is sent when no stream is open', () => {
   assert.deepEqual(sent.map((message) => message.kind), ['task_notification', 'task_notification']);
 });
 
-test('a line surfaced verbatim also counts as an open stream', () => {
+test('a non-JSON line stays out of the transcript, and an envelope line is routed like a record', () => {
   const { sent } = foldEvents([
     'agy printed something that is not an event',
+    REAL_SYSTEM_MESSAGES.restartNotice,
     ...systemMessageSteps(6, REAL_SYSTEM_MESSAGES.restartNotice),
   ]);
 
-  assert.deepEqual(sent.map((message) => message.kind), ['stream_delta', 'stream_end', 'task_notification']);
+  // The plain line is CLI output the stream format does not cover — the console
+  // is where it reaches. The envelope line is a system message the pre-1.2.13
+  // stream printed as text, and it renders as the notice it is.
+  assert.deepEqual(sent.map((message) => message.kind), ['task_notification', 'task_notification']);
+  assert.equal(sent[0].id, 'antigravity-app-1-live-1-system');
 });
 
 test('a live compaction is a divider on completion, and its prompt text is never shown', () => {
@@ -560,14 +566,6 @@ test('a real turn folded live names every backend-owned row by the id history gi
   const conversationId = '07ad229e-e089-45b1-bfc7-0eb71b80a2a2';
   const appSessionId = 'app-session-5f1c';
 
-  const sent: SentMessage[] = [];
-  const context = createFoldContext(sent, { appSessionId });
-  let state = createAntigravityTurnState(conversationId);
-  for (const line of (await fs.readFile(path.join(fixtureDir, 'stdout.ndjson'), 'utf8')).split('\n')) {
-    state = foldAntigravityEventLine(state, line, context);
-  }
-  flushAntigravityPendingMessages(state, context);
-
   const homeDir = await fs.mkdtemp(path.join(os.tmpdir(), 'antigravity-cross-path-'));
   const originalHomedir = os.homedir;
   (os as any).homedir = () => homeDir;
@@ -575,6 +573,16 @@ test('a real turn folded live names every backend-owned row by the id history gi
     const logDir = path.join(homeDir, '.gemini', 'antigravity-cli', 'brain', conversationId, '.system_generated', 'logs');
     await fs.mkdir(logDir, { recursive: true });
     await fs.copyFile(path.join(fixtureDir, 'transcript.jsonl'), path.join(logDir, 'transcript.jsonl'));
+
+    // Folded with the transcript already in place, as it is live: a finished
+    // tool step reads its own record back.
+    const sent: SentMessage[] = [];
+    const context = createFoldContext(sent, { appSessionId });
+    let state = createAntigravityTurnState(conversationId);
+    for (const line of (await fs.readFile(path.join(fixtureDir, 'stdout.ndjson'), 'utf8')).split('\n')) {
+      state = foldAntigravityEventLine(state, line, context);
+    }
+    flushAntigravityPendingMessages(state, context);
 
     const { messages: persisted } = await new AntigravitySessionsProvider().fetchHistory(appSessionId, {
       providerSessionId: conversationId,
@@ -603,27 +611,34 @@ test('a real turn folded live names every backend-owned row by the id history gi
       persistedRows.map((message) => message.kind),
       ['task_notification', 'tool_use', 'compact_boundary', 'tool_use', 'tool_use', 'tool_use', 'tool_use'],
     );
+    // And each live card ends on the result its persisted twin carries, so a
+    // reload changes nothing on screen.
+    const liveResults = new Map(
+      liveRows.filter((message) => message.kind === 'tool_use').map((message) => [message.toolId, message.toolResult]),
+    );
+    const persistedTools = persistedRows.filter((message) => message.kind === 'tool_use');
+    assert.deepEqual(
+      persistedTools.map((message) => liveResults.get(message.toolId)),
+      persistedTools.map((message) => message.toolResult),
+    );
   } finally {
     (os as any).homedir = originalHomedir;
     await fs.rm(homeDir, { recursive: true, force: true });
   }
 });
 
-test('a truncated final line is streamed verbatim rather than dropped', () => {
+test('a truncated final line stays out of the transcript', () => {
   const truncated = '{"event":"step_update","step_update":{"text_delta":"half a th';
   const { sent } = foldEvents([
     { event: 'init', init: { conversation_id: 'conv-3' } },
     truncated,
   ]);
 
-  // A process killed mid-write leaves one unterminated line. Showing it beats
-  // swallowing it: a change in the CLI's output shape still reaches the user.
-  assert.equal(sent.length, 1);
-  assert.equal(sent[0].kind, 'stream_delta');
-  assert.equal(sent[0].content, truncated);
-  assert.equal(sent[0].sessionId, 'conv-3');
-  // Not marked as assistant prose — all that is known is that it went unparsed.
-  assert.equal(sent[0].role, undefined);
+  // A process killed mid-write leaves one unterminated line. It is not an
+  // envelope and nothing is known about it, so the transcript keeps it out —
+  // the console is where a shape change still reaches, and the transcript file
+  // remains the source of truth for what `agy` actually wrote.
+  assert.deepEqual(sent, []);
 });
 
 test('blank lines and JSON that is not an event are skipped in silence', () => {
@@ -861,4 +876,209 @@ test('the command line refuses a permission mode the CLI cannot honour', () => {
     () => buildAntigravityArgs({ ...baseArgsInput, permissionMode: 'plan' }),
     (error: unknown) => error instanceof AppError && error.statusCode === 400,
   );
+});
+
+// ---------------------------------------------------------------------------
+// Live/history agreement — the rows a live turn emits must be the rows history
+// later reads, or a reload reshuffles the transcript
+// ---------------------------------------------------------------------------
+
+test('a prose segment closing ends the stream, so text and tools interleave as separate rows', () => {
+  const { sent } = foldEvents([
+    stepUpdate({ step_type: 'agent_response', step_index: 5, state: 'DONE', text_delta: 'Starting.' }),
+    stepUpdate({ step_type: 'tool', step_index: 6, state: 'DONE', tool_name: 'run_command' }),
+    stepUpdate({ step_type: 'agent_response', step_index: 7, state: 'DONE', text_delta: 'Done.' }),
+  ]);
+
+  // Without a stream_end at the end of each prose step, every prose segment of
+  // a turn folds into one streaming row — which is stamped with a fresh client
+  // timestamp on each update and therefore matches no persisted row on merge.
+  assert.deepEqual(sent.map((message) => message.kind), [
+    'stream_delta', 'stream_end', 'tool_use', 'stream_delta', 'stream_end',
+  ]);
+});
+
+test('a prose segment still streaming does not close early', () => {
+  const { sent } = foldEvents([
+    stepUpdate({ step_type: 'agent_response', step_index: 5, state: 'ACTIVE', text_delta: 'Half' }),
+    stepUpdate({ step_type: 'agent_response', step_index: 5, state: 'DONE', text_delta: ' a sentence.' }),
+  ]);
+
+  assert.deepEqual(sent.map((message) => message.kind), ['stream_delta', 'stream_delta', 'stream_end']);
+});
+
+test('a marker-only system message is read back from the transcript', async () => {
+  // On 1.2.13 the step carries no text; the envelope exists only in the file.
+  const homeDir = await fs.mkdtemp(path.join(os.tmpdir(), 'antigravity-runtime-live-'));
+  const originalHomedir = os.homedir;
+  (os as any).homedir = () => homeDir;
+  try {
+    const logDir = path.join(
+      homeDir, '.gemini', 'antigravity-cli', 'brain', 'conv-live', '.system_generated', 'logs',
+    );
+    await fs.mkdir(logDir, { recursive: true });
+    await fs.writeFile(
+      path.join(logDir, 'transcript.jsonl'),
+      `${JSON.stringify({
+        step_index: 42,
+        status: 'DONE',
+        created_at: '2026-09-29T01:13:42Z',
+        source: 'SYSTEM',
+        type: 'SYSTEM_MESSAGE',
+        content: REAL_SYSTEM_MESSAGES.restartNotice,
+      })}\n`,
+      'utf8',
+    );
+
+    // The marker: DONE, no text at any point.
+    const { sent } = foldEvents([
+      { event: 'init', init: { conversation_id: 'conv-live' } },
+      stepUpdate({ step_type: 'system_message', step_index: 42, state: 'DONE' }),
+    ]);
+
+    assert.deepEqual(sent.map((message) => message.kind), ['task_notification']);
+    assert.match(String(sent[0]?.content), /\[Notice\] All your subagents/);
+    // The same id the persisted row gets, so the two prune against each other.
+    assert.equal(sent[0]?.id, 'antigravity-app-1-42-system');
+  } finally {
+    (os as any).homedir = originalHomedir;
+    await fs.rm(homeDir, { recursive: true, force: true });
+  }
+});
+
+test('a captured conversation id is never re-pointed by a later step', () => {
+  const { state } = foldEvents([
+    { event: 'init', init: { conversation_id: 'conv-first' } },
+    stepUpdate({ step_type: 'tool', step_index: 1, conversation_id: 'conv-second' }),
+  ]);
+
+  // Adopting a second id re-points the app session and can delete a session row
+  // the watcher already created for that conversation.
+  assert.equal(state.capturedSessionId, 'conv-first');
+});
+
+test('a live tool card carries the canonical name and the argument shape history reads', () => {
+  const { sent } = foldEvents([
+    stepUpdate({
+      step_type: 'tool',
+      step_index: 3,
+      state: 'DONE',
+      tool_name: 'run_command',
+      tool_info: { parameters: { CommandLine: '"npm run build"' } },
+    }),
+    stepUpdate({
+      step_type: 'tool',
+      step_index: 4,
+      state: 'DONE',
+      tool_name: 'view_file',
+      tool_info: { parameters: { AbsolutePath: '"a/b.md"' } },
+    }),
+  ]);
+
+  assert.deepEqual(sent.map((message) => message.toolName), ['Bash', 'Read']);
+  assert.deepEqual(sent[0]?.toolInput, { command: 'npm run build' });
+  assert.deepEqual(sent[1]?.toolInput, { file_path: 'a/b.md' });
+});
+
+test('a live tool result is stripped of the scaffolding agy wraps it in', () => {
+  const { sent } = foldEvents([
+    stepUpdate({
+      step_type: 'tool',
+      step_index: 3,
+      state: 'DONE',
+      tool_name: 'view_file',
+      tool_info: {
+        parameters: { AbsolutePath: '"a.md"' },
+        output: 'Created At: t\nCompleted At: t\nFile Path: `a.md`\n1: line one',
+      },
+    }),
+  ]);
+
+  assert.equal(sent[0]?.toolResult?.content, '1: line one');
+});
+
+test('a finished tool step carries the media and the failure its transcript record reports', async () => {
+  // The stream names the call and its parameters and nothing else: the record
+  // is the one place the screenshot and the ERROR status exist.
+  const homeDir = await fs.mkdtemp(path.join(os.tmpdir(), 'antigravity-runtime-tool-'));
+  const originalHomedir = os.homedir;
+  (os as any).homedir = () => homeDir;
+  try {
+    const conversationDir = path.join(homeDir, '.gemini', 'antigravity-cli', 'brain', 'conv-tools');
+    const logDir = path.join(conversationDir, '.system_generated', 'logs');
+    await fs.mkdir(logDir, { recursive: true });
+    const resultRecord = (stepIndex: number, fields: Record<string, unknown>) => ({
+      step_index: stepIndex,
+      source: 'MODEL',
+      type: 'GENERIC',
+      created_at: '2026-09-29T01:13:42Z',
+      ...fields,
+    });
+    const records = [
+      resultRecord(11, {
+        status: 'DONE',
+        content: 'Created At: t\nCompleted At: t\nTook a screenshot.',
+        media: [{
+          mime_type: 'image/png',
+          uri: path.join(conversationDir, '.tempmediaStorage', 'media_11.png').replace(/\\/g, '/'),
+        }],
+      }),
+      resultRecord(12, { status: 'ERROR', error: 'browser crashed', content: '' }),
+    ];
+    await fs.writeFile(
+      path.join(logDir, 'transcript.jsonl'),
+      `${records.map((entry) => JSON.stringify(entry)).join('\n')}\n`,
+      'utf8',
+    );
+
+    const toolStep = (stepIndex: number, state: string, toolName: string) => stepUpdate({
+      step_type: 'tool',
+      step_index: stepIndex,
+      state,
+      tool_name: toolName,
+      tool_info: { name: toolName, parameters: {} },
+    });
+    const { sent } = foldEvents([
+      { event: 'init', init: { conversation_id: 'conv-tools' } },
+      toolStep(11, 'ACTIVE', 'browser_screenshot'),
+      toolStep(11, 'DONE', 'browser_screenshot'),
+      toolStep(12, 'DONE', 'browser_click'),
+      // Its record is not written yet: done all the same, with nothing to say.
+      toolStep(13, 'DONE', 'browser_click'),
+    ]);
+
+    const [running, screenshot, failedClick, unrecordedClick] = sent;
+    assert.equal(running?.toolResult, undefined, 'a running step has no result yet');
+    assert.deepEqual(screenshot?.toolResult, {
+      content: 'Took a screenshot.',
+      isError: false,
+      media: [{
+        url: '/api/providers/antigravity/media/conv-tools/media_11.png',
+        name: 'media_11.png',
+        mimeType: 'image/png',
+      }],
+    });
+    assert.deepEqual(failedClick?.toolResult, { content: 'browser crashed', isError: true });
+    assert.deepEqual(unrecordedClick?.toolResult, { content: '' });
+  } finally {
+    (os as any).homedir = originalHomedir;
+    await fs.rm(homeDir, { recursive: true, force: true });
+  }
+});
+
+test('a finished step that printed nothing still gets a result, so its card stops running', () => {
+  // `schedule` completes with no output at all. No conversation has been
+  // announced, so there is no transcript to read back either.
+  const schedule = (state: string) => stepUpdate({
+    step_type: 'tool',
+    step_index: 4,
+    state,
+    tool_name: 'schedule',
+    tool_info: { name: 'schedule', parameters: { DurationSeconds: '"60"', Prompt: '"check the build"' } },
+  });
+  const { sent } = foldEvents([schedule('ACTIVE'), schedule('DONE')]);
+
+  assert.deepEqual(sent.map((message) => message.toolName), ['AgySchedule', 'AgySchedule']);
+  assert.equal(sent[0]?.toolResult, undefined);
+  assert.deepEqual(sent[1]?.toolResult, { content: '' });
 });

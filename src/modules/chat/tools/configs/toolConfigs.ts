@@ -3,6 +3,8 @@
  * Defines display behavior for all tool types 
  */
 
+import { ANTIGRAVITY_TOOL_CONFIGS } from '@/modules/chat/tools/configs/antigravityToolConfigs';
+
 export type ToolDisplayConfig = {
   input: {
     type: 'one-line' | 'collapsible' | 'plan' | 'hidden';
@@ -91,6 +93,14 @@ const UNIFIED_TOOL_LABELS: Record<string, string> = {
   TodoWrite: 'Checklist',
   TodoRead: 'Checklist',
   AskUserQuestion: 'Question',
+  // Antigravity's own tools (antigravityToolConfigs.ts): the headers match the
+  // labels their rows already show.
+  AgyTask: 'Task',
+  AgySchedule: 'Schedule',
+  AgySubagents: 'Subagents',
+  AgyMessage: 'Message',
+  AgyImage: 'Image',
+  AgyArtifactDoc: 'Document',
 };
 
 export function formatToolDisplayName(toolName: string): string {
@@ -107,6 +117,8 @@ export function formatToolDisplayName(toolName: string): string {
 }
 
 export const TOOL_CONFIGS: Record<string, ToolDisplayConfig> = {
+  ...ANTIGRAVITY_TOOL_CONFIGS,
+
   // ============================================================================
   // COMMAND TOOLS
   // ============================================================================

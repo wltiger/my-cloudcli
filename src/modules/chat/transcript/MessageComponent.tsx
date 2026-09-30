@@ -12,6 +12,8 @@ import { useChatSpacing } from '@/shared/hooks/useChatSpacing';
 import { useChatWidthClasses } from '@/shared/hooks/useChatTypography';
 import ChatMessageImages from '@/modules/chat/transcript/ChatMessageImages';
 import ChatMessageFiles from '@/modules/chat/transcript/ChatMessageFiles';
+import TaskNotificationRow from '@/modules/chat/transcript/TaskNotificationRow';
+import ToolResultMedia from '@/modules/chat/transcript/ToolResultMedia';
 import { Markdown } from '@/modules/chat/transcript/Markdown';
 import StreamingMarkdown from '@/modules/chat/transcript/StreamingMarkdown';
 import MessageCopyControl from '@/modules/chat/transcript/MessageCopyControl';
@@ -190,12 +192,7 @@ const MessageComponent = memo(({ message, prevMessage, createDiff, onFileOpen, o
         </div>
       ) : message.isTaskNotification ? (
         /* Compact task notification on the left */
-        <div className="w-full">
-          <div className="flex items-center gap-2 py-0.5">
-            <span className={`inline-block h-1.5 w-1.5 flex-shrink-0 rounded-full ${message.taskStatus === 'completed' ? 'bg-green-400 dark:bg-green-500' : 'bg-amber-400 dark:bg-amber-500'}`} />
-            <span className="text-xs text-gray-500 dark:text-gray-400">{message.content}</span>
-          </div>
-        </div>
+        <TaskNotificationRow message={message} />
       ) : message.isCompactBoundary ? (
         /* Compact chrome marker where compaction happened */
         <div className="w-full">
@@ -290,6 +287,9 @@ const MessageComponent = memo(({ message, prevMessage, createDiff, onFileOpen, o
                     toolStatus={message.toolStatus}
                   />
                 )}
+
+                {/* On the row, not in the result section: that section can be hidden by config. */}
+                <ToolResultMedia toolResult={message.toolResult} />
 
                 {/* Tool Result Section — Bash renders its output inside the command row above. */}
                 {message.toolResult && message.toolName !== 'Bash' && !shouldHideToolResult(message.toolName || 'UnknownTool', message.toolResult) && (

@@ -84,8 +84,8 @@ function ChatInterface({
   } = useSessionProtectionActions();
 
   const sessionStore = useSessionStore();
-  const streamTimerRef = useRef<number | null>(null);
-  const accumulatedStreamRef = useRef('');
+  const streamTimerRef = useRef(new Map<string, number>());
+  const accumulatedStreamRef = useRef(new Map<string, string>());
   // When each session's `chat.subscribe` was last sent; idle acks older than
   // a later local request are discarded as stale.
   const statusCheckSentAtRef = useRef(new Map<string, number>());
@@ -94,12 +94,12 @@ function ChatInterface({
   // server replays only the events this client actually missed.
   const lastSeqRef = useRef(new Map<string, number>());
 
+  // Buffered text is left alone: it is kept per session, so it cannot leak into
+  // the next one, and a session switched away from mid-stream still needs it —
+  // its next flush would otherwise overwrite its row with only the newer text.
   const resetStreamingState = useCallback(() => {
-    if (streamTimerRef.current) {
-      clearTimeout(streamTimerRef.current);
-      streamTimerRef.current = null;
-    }
-    accumulatedStreamRef.current = '';
+    streamTimerRef.current.forEach((timer) => clearTimeout(timer));
+    streamTimerRef.current.clear();
   }, []);
 
   const {

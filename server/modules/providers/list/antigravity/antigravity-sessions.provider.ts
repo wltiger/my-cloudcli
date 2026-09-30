@@ -27,15 +27,23 @@ import Database from 'better-sqlite3';
 
 import { parseFilesInputTag, parseImagesInputTag } from '@/shared/image-attachments.js';
 import type { IProviderSessions } from '@/shared/interfaces.js';
-import type { AnyRecord, FetchHistoryOptions, FetchHistoryResult, NormalizedMessage } from '@/shared/types.js';
+import type { AnyRecord, FetchHistoryOptions, FetchHistoryResult, NormalizedMessage, SubagentActivity } from '@/shared/types.js';
 import {
   createNormalizedMessage,
   normalizeProviderTimestamp,
   readObjectRecord,
   readOptionalString,
   sliceTailPage,
-  unwrapJsonStringLiteral,
 } from '@/shared/utils.js';
+import {
+  AGY_ARTIFACT_DOC_TOOL,
+  mapAntigravityTool,
+  parseAgyQuestionAnswers,
+  readAgySubagentConversationIds,
+  readAgySubagentSpecs,
+  readAgyTaskName,
+} from '@/modules/providers/list/antigravity/antigravity-tool-mapping.js';
+import { cleanAntigravityToolOutput } from '@/modules/providers/list/antigravity/antigravity-tool-output.js';
 
 const PROVIDER = 'antigravity';
 
@@ -128,8 +136,53 @@ const SYSTEM_MESSAGE_BODY_ATTRIBUTE = 'content=';
 const SYSTEM_MESSAGE_SENDER_PATTERN = /(?:^|\s)sender=(\S+)/;
 /** A sender shaped like this is another conversation — a sub-agent reporting back. */
 const CONVERSATION_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-/** Length of the one-line summary a system notice renders as. */
+/** Length of the one-line preview a system notice renders collapsed. */
 const NOTICE_SUMMARY_MAX_LENGTH = 200;
+/** A background task that finished: the code decides the card's dot. */
+const TASK_EXIT_CODE_PATTERN = /\bexited with code (\d+)/;
+/** A task stopped before it finished — not a success, and not a failed exit code. */
+const TASK_CANCELLED_PATTERN = /\bwas canceled\b/i;
+/** `…/task-72` senders name the task the notice is about. */
+const TASK_SENDER_PATTERN = /task-\d+$/;
+
+/**
+ * The outcomes a background notice can report, plus `info` for one that
+ * reports none.
+ *
+ * Only one carries an exit code. A cancelled task and a timer expiry report
+ * neither, and a notice that has no code must never be shown as though it had
+ * one — `task-343 · exit code undefined` is worse than no preview at all.
+ */
+type AgyNoticeOutcome = {
+  status: 'completed' | 'failed' | 'cancelled' | 'info';
+  /** The collapsed one-line preview, or null when the body itself should show. */
+  preview: string | null;
+};
+
+const readNoticeOutcome = (body: string, taskName: string | null): AgyNoticeOutcome => {
+  const exitCodeMatch = TASK_EXIT_CODE_PATTERN.exec(body);
+  if (exitCodeMatch) {
+    const exitCode = Number(exitCodeMatch[1]);
+    return {
+      status: exitCode === 0 ? 'completed' : 'failed',
+      preview: taskName ? `${taskName} · exit code ${exitCode}` : `exit code ${exitCode}`,
+    };
+  }
+
+  if (TASK_CANCELLED_PATTERN.test(body)) {
+    return {
+      status: 'cancelled',
+      preview: taskName ? `${taskName} · cancelled` : 'cancelled',
+    };
+  }
+
+  // A timer expiry or a plain notice: the body is the message, so no preview is
+  // derived from it — the renderer falls back to a flattened line. Nor does it
+  // report a success: `completed` paints the green dot, and a server restart
+  // stopping every task is not one. `info` has no dot of its own, so the row
+  // keeps the amber it uses for anything that is not an outcome.
+  return { status: 'info', preview: null };
+};
 
 /**
  * The id every message of one step carries, on the history and the live path
@@ -180,6 +233,10 @@ export const buildAntigravityCompactBoundary = (
  * unquoted and unterminated, so it is necessarily last, and the body runs from
  * the first `content=` to the closing tag — the body may say `content=` itself.
  * A missing closing tag (a live buffer cut short) lets the body run to the end.
+ *
+ * An envelope with no `[Message]` header — the form a Stop-hook notice takes —
+ * is all body and no sender: the text between the real tags. That form needs
+ * its closing tag, because nothing else marks where the body ends.
  */
 const parseSystemMessageEnvelope = (content: string): { sender: string | null; body: string } | null => {
   const closeIndex = content.lastIndexOf(SYSTEM_MESSAGE_CLOSE_TAG);
@@ -192,7 +249,7 @@ const parseSystemMessageEnvelope = (content: string): { sender: string | null; b
   const inner = content.slice(openIndex + SYSTEM_MESSAGE_OPEN_TAG.length, end).trimStart();
   const bodyIndex = inner.indexOf(SYSTEM_MESSAGE_BODY_ATTRIBUTE);
   if (!inner.startsWith(SYSTEM_MESSAGE_HEADER) || bodyIndex === -1) {
-    return null;
+    return closeIndex === -1 ? null : { sender: null, body: inner.trim() };
   }
 
   const attributes = inner.slice(SYSTEM_MESSAGE_HEADER.length, bodyIndex);
@@ -210,6 +267,12 @@ const parseSystemMessageEnvelope = (content: string): { sender: string | null; b
  * task and timer senders, and any envelope this reader does not recognise —
  * is a compact notice: the envelope wording is `agy`'s internal naming, not a
  * contract, so a mismatch degrades to the raw text rather than losing it.
+ *
+ * A finished background task carries its exit code in the body and the code is
+ * the card's state: a command that ended 1 must not paint the same dot as one
+ * that ended 0. Cancelled and code-less notices get their own outcomes rather
+ * than being forced into that shape. The body is kept whole — the one line is
+ * a preview, and the output is what the notice exists to show.
  * Shared with the live fold so a reload renders the same row.
  */
 export const normalizeAntigravitySystemMessage = ({
@@ -241,19 +304,39 @@ export const normalizeAntigravitySystemMessage = ({
     });
   }
 
-  const line = body.replace(/\s+/g, ' ').trim();
+  const sender = envelope?.sender ?? '';
+  const taskName = TASK_SENDER_PATTERN.test(sender) ? readAgyTaskName(sender) : null;
+  const outcome = readNoticeOutcome(body, taskName);
+  // No preview means the body is the message (a timer, a plain notice): show a
+  // flattened line rather than inventing an outcome it does not report.
+  const flattened = body.replace(/\s+/g, ' ').trim();
+  const summarySource = outcome.preview ?? flattened;
+  const summary = summarySource.length > NOTICE_SUMMARY_MAX_LENGTH
+    ? `${summarySource.slice(0, NOTICE_SUMMARY_MAX_LENGTH - 1)}…`
+    : summarySource;
+
   return createNormalizedMessage({
     id,
     sessionId,
     timestamp,
     provider: PROVIDER,
     kind: 'task_notification',
-    // The only status the renderer paints neutral; there is no "info" state.
-    status: 'completed',
-    summary: line.length > NOTICE_SUMMARY_MAX_LENGTH ? `${line.slice(0, NOTICE_SUMMARY_MAX_LENGTH - 1)}…` : line,
+    status: outcome.status,
+    summary,
     content: body,
+    ...(taskName ? { taskName } : {}),
   });
 };
+
+/**
+ * Whether a raw stream line is a system-message envelope printed as plain
+ * text — the pre-1.2.13 stream behavior the live fold still has to absorb.
+ * Both markers are required so an output line that merely quotes the tag is
+ * not mistaken for one.
+ */
+export const isAntigravitySystemMessageLine = (line: string): boolean => (
+  line.includes(SYSTEM_MESSAGE_OPEN_TAG) && line.includes(SYSTEM_MESSAGE_HEADER)
+);
 
 /** `<USER_REQUEST>` is the only part of a user record that the user actually typed. */
 const USER_REQUEST_PATTERN = /<USER_REQUEST>([\s\S]*?)<\/USER_REQUEST>/;
@@ -263,6 +346,26 @@ const USER_METADATA_PATTERN = /<(?:ADDITIONAL_METADATA|USER_SETTINGS_CHANGE)>[\s
 const readStepIndex = (record: AnyRecord, fallback: number): number => {
   const parsed = Number(record.step_index);
   return Number.isFinite(parsed) ? parsed : fallback;
+};
+
+/**
+ * A record's timestamp, or a deterministic stand-in.
+ *
+ * The shared helper falls back to wall-clock time, so the same persisted row
+ * reads back with two different timestamps. Harmless while ids match, but it is
+ * the last link in the chain that duplicates rows: a tool card's id drifts when
+ * out-of-order results shift its pairing, the drift sends row matching to its
+ * comparison fallback, and a changing timestamp then guarantees the two never
+ * compare equal. A missing timestamp therefore falls back to the previous
+ * record's, and to empty when there is none — never to the clock.
+ */
+const readRecordTimestamp = (record: AnyRecord, previous: string | null): string | undefined => {
+  const value = record.created_at;
+  if ((typeof value === 'string' && value.trim()) || (typeof value === 'number' && Number.isFinite(value) && value > 0)) {
+    return normalizeProviderTimestamp(value);
+  }
+
+  return previous ?? '';
 };
 
 const readTruncatedFields = (record: AnyRecord): string[] => (
@@ -411,35 +514,335 @@ const readRecordError = (record: AnyRecord): string | null => {
 };
 
 /**
- * Reads one tool call's arguments.
+ * Reads one tool call's arguments, as stored.
  *
- * `agy` persists every argument as its own JSON literal, so a command arrives
- * as `"\"npm run build\""`. Decoding it is what keeps the tool card from
- * showing every path and command wrapped in stray quotes.
+ * Decoding is the mapping module's job, not this reader's: it decodes
+ * selectively, because a content argument that happens to be valid JSON must
+ * stay a string. Handing it the stored values is what keeps that decision in
+ * one place for both provider paths.
  */
-const readToolInput = (call: AnyRecord): AnyRecord => {
-  const args = readObjectRecord(call.args);
-  if (!args) {
-    return {};
-  }
-
-  return Object.fromEntries(
-    Object.entries(args).map(([key, value]) => [
-      key,
-      typeof value === 'string' ? unwrapJsonStringLiteral(value) : value,
-    ]),
-  );
-};
+const readToolInput = (call: AnyRecord): AnyRecord => readObjectRecord(call.args) ?? {};
 
 /**
  * Turns one tool-result record into the payload that rides on its tool card.
+ *
+ * The scaffolding `agy` wraps results in (timestamps, view-file notes, the
+ * background instruction block) is stripped here so the card shows the output.
  */
 const buildToolResult = (record: AnyRecord): { content: string; isError: boolean } => {
   const error = readRecordError(record);
   return {
-    content: error ?? readOptionalString(record.content) ?? '',
+    content: cleanAntigravityToolOutput(error ?? readOptionalString(record.content) ?? ''),
     isError: error !== null,
   };
+};
+
+/**
+ * What a whole-conversation pass knows that one record alone cannot: the
+ * subagents spawned here and what each reported back, the timestamp of the
+ * record before this one, and the conversation id media urls are built from.
+ */
+type AntigravityRecordContext = {
+  /** Conversation ids spawned in this conversation, so their reports fold in. */
+  spawnedIds: Set<string>;
+  /** What each spawned agent reported; the latest report wins. */
+  reports: Map<string, string>;
+  /** The previous record's timestamp, so a missing one never becomes the clock. */
+  previousTimestamp: string | null;
+  /** The conversation media urls are addressed by. Empty for a single record. */
+  conversationId: string;
+};
+
+/** How much of one agent's run the panel ships; longer runs say so via `activityCount`. */
+const SUBAGENT_ACTIVITY_CAP = 100;
+
+/** Where `agy` stores the images its tools produce, inside a conversation's directory. */
+const ANTIGRAVITY_MEDIA_DIR = '.tempmediaStorage';
+
+/**
+ * The image types the media route serves, by extension. SVG is excluded:
+ * serving another application's SVG inline is an XSS surface.
+ */
+const ANTIGRAVITY_MEDIA_MIME_TYPES: Record<string, string> = {
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.gif': 'image/gif',
+  '.webp': 'image/webp',
+};
+
+type AntigravityMediaItem = { url: string; name: string; mimeType: string };
+
+/** Everything one conversation keeps: its logs, its media, the files its model saved. */
+const getAntigravityConversationDir = (conversationId: string): string => (
+  path.join(getAntigravityAppDataDir(), 'brain', conversationId)
+);
+
+/**
+ * A local path from the way `agy` wrote it: a bare path with either separator,
+ * or a `file:` URL. A Windows file URL keeps a slash in front of its drive
+ * letter (`file:///C:/…` → `/C:/…`), which resolves onto the current drive
+ * rather than that one, so it is dropped. Null for an escape that does not
+ * decode.
+ */
+const readLocalPath = (value: string): string | null => {
+  if (!/^file:/i.test(value)) {
+    return value;
+  }
+
+  try {
+    return decodeURIComponent(value.replace(/^file:\/\/(?:localhost)?/i, '')).replace(/^\/([A-Za-z]:)/, '$1');
+  } catch {
+    return null;
+  }
+};
+
+/**
+ * Where an image sits inside one conversation's directory, as path segments,
+ * or null when the path leads anywhere else or is not an image the media route
+ * serves. This is what keeps a path in the transcript from becoming a read of
+ * an arbitrary file: only the conversation's own directory is addressable.
+ *
+ * Separators are unified first, so a path written with backslashes resolves the
+ * same on every platform; on Windows the comparison ignores case, as the
+ * filesystem does.
+ */
+const readConversationImagePath = (conversationId: string, localPath: string): string[] | null => {
+  const relative = path.relative(
+    getAntigravityConversationDir(conversationId),
+    path.resolve(localPath.replace(/\\/g, '/')),
+  );
+  if (!relative || relative.startsWith('..') || path.isAbsolute(relative)) {
+    return null;
+  }
+
+  return ANTIGRAVITY_MEDIA_MIME_TYPES[path.extname(relative).toLowerCase()] ? relative.split(path.sep) : null;
+};
+
+/**
+ * The media route's url for one image in a conversation's directory.
+ *
+ * A `.tempmediaStorage` image is addressed by its name alone — the form every
+ * tool-result url has always had, and the one the route resolves into that
+ * directory first — so no url a thumbnail already uses changes, and none
+ * carries a dot-segment a proxy might refuse. Any other image is addressed by
+ * its path from the conversation's directory. Parentheses are escaped so the
+ * url can stand in a markdown image unbalanced.
+ */
+const buildAntigravityMediaUrl = (conversationId: string, segments: string[]): string => {
+  const addressed = segments.length === 2 && segments[0] === ANTIGRAVITY_MEDIA_DIR ? segments.slice(1) : segments;
+  const encode = (segment: string): string => encodeURIComponent(segment)
+    .replace(/[()]/g, (character) => `%${character.charCodeAt(0).toString(16).toUpperCase()}`);
+  return `/api/providers/antigravity/media/${encode(conversationId)}/${addressed.map(encode).join('/')}`;
+};
+
+/**
+ * The image files a tool result recorded, as identifiers the frontend can fetch.
+ *
+ * `agy` stores tool-result images under the conversation's `.tempmediaStorage`
+ * directory and names them by absolute path — or `file:` URL — in the record.
+ * Only an image inside the conversation's own directory is offered: a
+ * thumbnail that would 404 on click is worse than no thumbnail. The route
+ * re-validates on delivery.
+ */
+const readAntigravityMedia = (
+  conversationId: string,
+  record: AnyRecord | null,
+): AntigravityMediaItem[] | null => {
+  if (!record || !Array.isArray(record.media) || !conversationId) {
+    return null;
+  }
+
+  const media: AntigravityMediaItem[] = [];
+  for (const entry of record.media) {
+    const item = readObjectRecord(entry);
+    const mimeType = readOptionalString(item?.mime_type);
+    if (!mimeType || !mimeType.startsWith('image/')) {
+      continue;
+    }
+
+    const localPath = readLocalPath(readOptionalString(item?.uri) ?? '');
+    const segments = localPath ? readConversationImagePath(conversationId, localPath) : null;
+    if (!segments) {
+      continue;
+    }
+
+    media.push({
+      url: buildAntigravityMediaUrl(conversationId, segments),
+      name: segments[segments.length - 1],
+      mimeType,
+    });
+  }
+  return media.length > 0 ? media : null;
+};
+
+/**
+ * A markdown image: `![alt](` and the destination, in angle brackets or bare —
+ * a bare one may hold balanced parentheses, as in `shot(1).png`. The lookahead
+ * requires the closing parenthesis without consuming it, so a title after the
+ * destination is left exactly as written.
+ */
+const MARKDOWN_IMAGE_PATTERN = /(!\[[^\]\n]*\]\(\s*)(<[^>\n]*>|(?:[^\s()]|\([^\s()]*\))+)(?=[^)\n]*\))/g;
+
+/** An absolute path, either separator, or a `file:` URL — never a relative one. */
+const ABSOLUTE_LOCAL_PATH_PATTERN = /^(?:file:|[A-Za-z]:[\\/]|[\\/])/i;
+
+/**
+ * Points markdown images at this conversation's own files through the media
+ * route.
+ *
+ * `agy` writes a screenshot into its prose by absolute local path (`C:/…`,
+ * `C:\…` or `file:///C:/…`). A browser can open none of them, and the markdown
+ * renderer blanks every one, since its url filter keeps only web schemes and
+ * relative urls. An image inside the conversation's directory becomes a media
+ * route url, which the renderer keeps and fetches with the auth header. Every
+ * other path is left as written: a relative one names a file relative to a
+ * document this reader cannot see, and one outside the conversation must not
+ * become a way to read it.
+ */
+export const rewriteAntigravityImageLinks = (text: string, conversationId: string): string => {
+  if (!conversationId || !text.includes('![')) {
+    return text;
+  }
+
+  return text.replace(MARKDOWN_IMAGE_PATTERN, (match, head: string, destination: string) => {
+    const unwrapped = destination.startsWith('<') ? destination.slice(1, -1) : destination;
+    if (!ABSOLUTE_LOCAL_PATH_PATTERN.test(unwrapped)) {
+      return match;
+    }
+
+    const localPath = readLocalPath(unwrapped);
+    const segments = localPath ? readConversationImagePath(conversationId, localPath) : null;
+    return segments ? `${head}${buildAntigravityMediaUrl(conversationId, segments)}` : match;
+  });
+};
+
+/**
+ * The timeline the SubagentPanel draws for one spawned agent, read from the
+ * agent's own transcript.
+ *
+ * The subagent's transcript uses the same record vocabulary as the parent's, so
+ * it is read through the same functions and its tool calls through the same
+ * mapping — a subagent's shell command renders exactly as one the top-level
+ * agent ran. The step-0 record is the task prompt itself, which the panel shows
+ * from the call's input, so it is skipped rather than doubled.
+ *
+ * Returns null when the agent's transcript is not readable: the container still
+ * renders, with the report as its result, and no timeline.
+ */
+const readAntigravitySubagentTimeline = (
+  subConversationId: string,
+): { activity: SubagentActivity[]; count: number } | null => {
+  const records = readAntigravityConversationRecords(subConversationId);
+  if (records.length === 0) {
+    return null;
+  }
+
+  const activity: SubagentActivity[] = [];
+  let total = 0;
+  const push = (entry: SubagentActivity): void => {
+    total += 1;
+    if (activity.length < SUBAGENT_ACTIVITY_CAP) {
+      activity.push(entry);
+    }
+  };
+
+  let index = 0;
+  while (index < records.length) {
+    const record = records[index];
+    const timestamp = readRecordTimestamp(record, null);
+    const calls = readToolCalls(record);
+
+    if (calls.length > 0) {
+      // Results pair positionally, as in the parent transcript: the N records
+      // right after an N-call record are that record's outputs.
+      let consumed = 0;
+      while (consumed < calls.length && isToolResultRecord(records[index + 1 + consumed])) {
+        consumed += 1;
+      }
+
+      calls.forEach((call, callIndex) => {
+        const paired = callIndex < consumed ? records[index + 1 + callIndex] : null;
+        const resultInfo = paired ? buildToolResult(paired) : null;
+        const mapped = mapAntigravityTool(
+          readOptionalString(call.name) ?? 'Tool',
+          readToolInput(call),
+          resultInfo?.content ?? null,
+        );
+        push({
+          kind: 'tool',
+          timestamp,
+          toolName: mapped.toolName,
+          toolInput: mapped.input,
+          toolResult: resultInfo,
+        });
+      });
+      index += 1 + consumed;
+      continue;
+    }
+
+    if (isUserRecord(record)) {
+      index += 1;
+      continue;
+    }
+
+    const thinking = readOptionalString(record.thinking);
+    if (thinking?.trim()) {
+      push({ kind: 'thinking', timestamp, content: thinking });
+    }
+    const content = readOptionalString(record.content);
+    if (content?.trim()) {
+      push({ kind: 'text', timestamp, content: cleanAntigravityToolOutput(content) });
+    }
+    index += 1;
+  }
+
+  return activity.length > 0 ? { activity, count: total } : null;
+};
+
+/**
+ * Pre-scans a conversation for subagent spawns and their reports.
+ *
+ * A spawn is an `invoke_subagent` call whose result names the new conversation
+ * ids — the only source present for every spawn. A report is a `SYSTEM_MESSAGE`
+ * whose sender is one of those ids. The `CHECKPOINT` record's `# Subagents`
+ * block also lists them, but it exists only after a compaction and only names
+ * the agents alive at that moment, so it is not the primary source.
+ *
+ * Positional in the same way the tool pairing is, so a shape drift degrades to
+ * a report rendering as an assistant message — the previous behavior — rather
+ * than to losing it.
+ */
+const collectAntigravitySubagentContext = (records: AnyRecord[]): {
+  spawnedIds: Set<string>;
+  reports: Map<string, string>;
+} => {
+  const spawnedIds = new Set<string>();
+  const reports = new Map<string, string>();
+
+  for (let index = 0; index < records.length; index += 1) {
+    const record = records[index];
+    const hasSpawn = readToolCalls(record).some(
+      (call) => readOptionalString(call.name) === 'invoke_subagent',
+    );
+    if (hasSpawn) {
+      const next = records[index + 1];
+      if (next && isToolResultRecord(next)) {
+        for (const id of readAgySubagentConversationIds(readOptionalString(next.content) ?? null)) {
+          spawnedIds.add(id);
+        }
+      }
+    }
+
+    if (readOptionalString(record.type) === SYSTEM_MESSAGE_TYPE) {
+      const envelope = parseSystemMessageEnvelope(readOptionalString(record.content) ?? '');
+      if (envelope?.sender && CONVERSATION_ID_PATTERN.test(envelope.sender)) {
+        reports.set(envelope.sender, envelope.body);
+      }
+    }
+  }
+
+  return { spawnedIds, reports };
 };
 
 /**
@@ -454,14 +857,130 @@ const buildToolResult = (record: AnyRecord): { content: string; isError: boolean
  * `SYSTEM_MESSAGE` and `CHECKPOINT` are routed by type, because what they carry
  * is `agy`'s own scaffolding rather than anything the agent said.
  */
+/** One step's record, when it is the kind the live path is waiting for. */
+const readRecordAtStep = (
+  conversationId: string | null,
+  stepIndex: string,
+  matches: (record: AnyRecord) => boolean,
+): AnyRecord | null => {
+  if (!conversationId) {
+    return null;
+  }
+
+  return readAntigravityConversationRecords(conversationId).find((record) => (
+    matches(record) && String(readStepIndex(record, -1)) === String(stepIndex)
+  )) ?? null;
+};
+
+/**
+ * The raw content of one step's `SYSTEM_MESSAGE` record, for the live path.
+ *
+ * On `agy` 1.2.13 the stream's `system_message` step is a marker — it carries
+ * no text at all. The envelope exists solely in the transcript, so a live run
+ * that sees the marker re-reads the record by step index and normalizes it
+ * exactly as the history path does. Null when the record is not there yet.
+ */
+export const readAntigravitySystemMessageAtStep = (
+  conversationId: string | null,
+  stepIndex: string,
+): string | null => {
+  const record = readRecordAtStep(
+    conversationId,
+    stepIndex,
+    (candidate) => readOptionalString(candidate.type) === SYSTEM_MESSAGE_TYPE,
+  );
+  return record ? readOptionalString(record.content) ?? null : null;
+};
+
+/**
+ * The result one tool step recorded, for the live path.
+ *
+ * The stream reports a finished tool step by its call's name and parameters,
+ * with no media and no failure flag. The step's `GENERIC` record — the step the
+ * live `tool` update names is the one that ran the call — carries both, and the
+ * output, so a live card re-reads it once the step completes and shows what a
+ * reload would. Null when the record is not there yet.
+ */
+export const readAntigravityToolResultAtStep = (
+  conversationId: string | null,
+  stepIndex: string,
+): { content: string; isError: boolean; media?: AntigravityMediaItem[] } | null => {
+  const record = readRecordAtStep(conversationId, stepIndex, isToolResultRecord);
+  if (!record || !conversationId) {
+    return null;
+  }
+
+  const media = readAntigravityMedia(conversationId, record);
+  return { ...buildToolResult(record), ...(media ? { media } : {}) };
+};
+
+/**
+ * Resolves one media request to a file on disk, or null when it must 404.
+ *
+ * Both parts come from a URL. The conversation id must be a single path
+ * segment, and the file is a path inside that conversation's directory, in
+ * `/`-separated segments none of which may be empty, `.`, contain `..`, or
+ * carry a backslash or a colon — a backslash makes a two-segment traversal look
+ * like one name under POSIX rules, and a colon is a drive prefix or an NTFS
+ * stream. The file must also resolve, symlinks followed, back into the
+ * conversation's directory: a request is either for a file `agy` keeps for
+ * this conversation or it is not.
+ *
+ * A single segment is the form tool-result media have always been addressed by
+ * — a file in `.tempmediaStorage` — so that directory is tried first and the
+ * conversation's own directory second, where the model saves screenshots it
+ * links from its prose.
+ */
+export const resolveAntigravityMediaFile = (
+  conversationId: string,
+  filePath: string,
+): { filePath: string; mimeType: string } | null => {
+  const segments = filePath.split('/');
+  if (
+    !conversationId
+    || conversationId !== path.basename(conversationId)
+    || conversationId.includes('..')
+    || segments.some((segment) => !segment || segment === '.' || segment.includes('..') || /[\\:]/.test(segment))
+  ) {
+    return null;
+  }
+
+  const mimeType = ANTIGRAVITY_MEDIA_MIME_TYPES[path.extname(filePath).toLowerCase()];
+  if (!mimeType) {
+    return null;
+  }
+
+  const conversationDir = getAntigravityConversationDir(conversationId);
+  const candidates = segments.length === 1
+    ? [path.join(conversationDir, ANTIGRAVITY_MEDIA_DIR, segments[0]), path.join(conversationDir, segments[0])]
+    : [path.join(conversationDir, ...segments)];
+  for (const candidate of candidates) {
+    try {
+      // Containment on the real path: a symlink inside the conversation must
+      // not lead a request out of it.
+      const realPath = fsSync.realpathSync(candidate);
+      if (
+        realPath.startsWith(fsSync.realpathSync(conversationDir) + path.sep)
+        && fsSync.statSync(realPath).isFile()
+      ) {
+        return { filePath: realPath, mimeType };
+      }
+    } catch {
+      // Not there; the next candidate may be.
+    }
+  }
+  return null;
+};
+
 const normalizeAntigravityRecord = (
   record: AnyRecord,
   sessionId: string,
   fallbackIndex: number,
   toolResults: AnyRecord[] = [],
+  context: AntigravityRecordContext,
 ): NormalizedMessage[] => {
   const stepIndex = readStepIndex(record, fallbackIndex);
-  const timestamp = normalizeProviderTimestamp(record.created_at);
+  const timestamp = readRecordTimestamp(record, context.previousTimestamp);
   // Stable across reloads: the same conversation always yields the same ids, so
   // a re-read after `agy` rewrote the file updates rows instead of doubling them.
   const baseId = `antigravity-${sessionId || 'session'}-${stepIndex}`;
@@ -493,6 +1012,14 @@ const normalizeAntigravityRecord = (
 
   const recordType = readOptionalString(record.type);
   if (recordType === SYSTEM_MESSAGE_TYPE) {
+    // A subagent this conversation spawned reporting back is folded into the
+    // container that spawned it; rendering the same body as prose again would
+    // double it. A report from a conversation spawned elsewhere still renders.
+    const envelope = parseSystemMessageEnvelope(readOptionalString(record.content) ?? '');
+    if (envelope?.sender && context.spawnedIds.has(envelope.sender)) {
+      return [];
+    }
+
     const systemMessage = normalizeAntigravitySystemMessage({
       content: readOptionalString(record.content) ?? '',
       id: buildAntigravityMessageId(sessionId, stepIndex, 'system'),
@@ -545,7 +1072,7 @@ const normalizeAntigravityRecord = (
       provider: PROVIDER,
       kind: 'text',
       role: 'assistant',
-      content,
+      content: rewriteAntigravityImageLinks(content, context.conversationId),
     }));
   }
 
@@ -559,19 +1086,102 @@ const normalizeAntigravityRecord = (
       ? readStepIndex(result, stepIndex + 1 + callIndex)
       : stepIndex + 1 + callIndex;
     const toolId = buildAntigravityMessageId(sessionId, executionStep, 'tool');
+    const callName = readOptionalString(call.name) ?? 'Tool';
+    const resultInfo = result ? buildToolResult(result) : null;
+
+    // A spawn renders as one SubagentPanel container per agent it started, not
+    // as a plain tool card: the agent's own transcript is its timeline and its
+    // report — a system message the parent received later — is the result.
+    if (callName === 'invoke_subagent') {
+      const specs = readAgySubagentSpecs(readToolInput(call));
+      const subIds = readAgySubagentConversationIds(
+        result ? (readOptionalString(result.content) ?? null) : null,
+      );
+      specs.forEach((spec, index) => {
+        const subId = subIds[index];
+        const report = subId ? context.reports.get(subId) : undefined;
+        // Several agents in one call need distinct ids; the first keeps the
+        // call's own so the live card prunes against it.
+        const containerId = specs.length > 1 ? `${toolId}-sub-${index}` : toolId;
+        const containerMessage = createNormalizedMessage({
+          id: containerId,
+          sessionId,
+          timestamp,
+          provider: PROVIDER,
+          kind: 'tool_use',
+          toolName: 'Task',
+          toolInput: {
+            subagent_type: spec.typeName || spec.role,
+            description: spec.role,
+            prompt: spec.prompt,
+          },
+          toolId: containerId,
+        });
+
+        if (report !== undefined) {
+          containerMessage.toolResult = { content: report };
+        } else if (resultInfo) {
+          containerMessage.toolResult = {
+            content: resultInfo.content,
+            isError: resultInfo.isError,
+          };
+        }
+
+        containerMessage.subagent = {
+          id: subId ?? containerId,
+          name: spec.role,
+          type: spec.typeName || undefined,
+          description: spec.role,
+          status: report !== undefined ? 'completed' : 'running',
+          ...(spec.model && spec.model !== 'inherit' ? { model: spec.model } : {}),
+        };
+
+        if (subId) {
+          const timeline = readAntigravitySubagentTimeline(subId);
+          if (timeline) {
+            containerMessage.subagentTools = timeline.activity;
+            if (containerMessage.subagent) {
+              containerMessage.subagent.activityCount = timeline.count;
+            }
+          }
+        }
+
+        messages.push(containerMessage);
+      });
+      return;
+    }
+
+    const mapped = mapAntigravityTool(callName, readToolInput(call), resultInfo?.content ?? null);
+    // The document card renders its body as markdown, so its screenshots need
+    // the same addressing as prose.
+    if (mapped.toolName === AGY_ARTIFACT_DOC_TOOL && typeof mapped.input.content === 'string') {
+      mapped.input.content = rewriteAntigravityImageLinks(mapped.input.content, context.conversationId);
+    }
     const toolMessage = createNormalizedMessage({
       id: toolId,
       sessionId,
       timestamp,
       provider: PROVIDER,
       kind: 'tool_use',
-      toolName: readOptionalString(call.name) ?? 'Tool',
-      toolInput: readToolInput(call),
+      toolName: mapped.toolName,
+      toolInput: mapped.input,
       toolId,
     });
 
-    if (result) {
-      toolMessage.toolResult = buildToolResult(result);
+    if (resultInfo) {
+      const media = readAntigravityMedia(context.conversationId, result);
+      toolMessage.toolResult = { ...resultInfo, ...(media ? { media } : {}) };
+      // The answers ride on the result as `A1: …` lines; folding them into the
+      // input is what makes the card read as answered rather than unanswered.
+      if (mapped.toolName === 'AskUserQuestion' && Array.isArray(mapped.input.questions)) {
+        const answers = parseAgyQuestionAnswers(
+          mapped.input.questions.filter((question): question is AnyRecord => Boolean(readObjectRecord(question))),
+          resultInfo.content,
+        );
+        if (Object.keys(answers).length > 0) {
+          toolMessage.toolInput = { ...mapped.input, answers };
+        }
+      }
     }
 
     messages.push(toolMessage);
@@ -594,11 +1204,17 @@ const normalizeAntigravityRecord = (
  * shown twice. A deliberate re-send after a reply still is. The rule reads the
  * previous prompt, so it relies on the records arriving in step order.
  */
-const normalizeAntigravityRecords = (records: AnyRecord[], sessionId: string): NormalizedMessage[] => {
+const normalizeAntigravityRecords = (
+  records: AnyRecord[],
+  sessionId: string,
+  conversationId: string,
+): NormalizedMessage[] => {
+  const subagents = collectAntigravitySubagentContext(records);
   const consumed = new Set<number>();
   const messages: NormalizedMessage[] = [];
   let lastPrompt: string | null = null;
   let repliedSinceLastPrompt = false;
+  let previousTimestamp: string | null = null;
 
   for (let index = 0; index < records.length; index += 1) {
     if (consumed.has(index)) {
@@ -624,7 +1240,17 @@ const normalizeAntigravityRecords = (records: AnyRecord[], sessionId: string): N
       consumed.add(next);
     }
 
-    const normalized = normalizeAntigravityRecord(record, sessionId, index, toolResults);
+    const context: AntigravityRecordContext = {
+      ...subagents,
+      previousTimestamp,
+      conversationId,
+    };
+    const normalized = normalizeAntigravityRecord(record, sessionId, index, toolResults, context);
+    const timestamp = readRecordTimestamp(record, previousTimestamp);
+    if (timestamp) {
+      previousTimestamp = timestamp;
+    }
+
     for (const message of normalized) {
       if (message.kind === 'text' && message.role === 'user') {
         lastPrompt = unwrapUserRequest(readOptionalString(record.content) ?? '');
@@ -654,7 +1280,14 @@ export class AntigravitySessionsProvider implements IProviderSessions {
       return [];
     }
 
-    return normalizeAntigravityRecord(record, sessionId ?? '', 0);
+    // A single record has no conversation to cross-reference: no subagent
+    // context, and media urls cannot be built without the conversation id.
+    return normalizeAntigravityRecord(record, sessionId ?? '', 0, [], {
+      spawnedIds: new Set<string>(),
+      reports: new Map<string, string>(),
+      previousTimestamp: null,
+      conversationId: '',
+    });
   }
 
   /**
@@ -672,7 +1305,7 @@ export class AntigravitySessionsProvider implements IProviderSessions {
 
     try {
       const records = readAntigravityConversationRecords(providerSessionId);
-      const normalized = normalizeAntigravityRecords(records, sessionId);
+      const normalized = normalizeAntigravityRecords(records, sessionId, providerSessionId);
 
       const normalizedOffset = Math.max(0, offset);
       // `limit: 0` is an empty page and `limit: null` is unbounded — they are

@@ -877,9 +877,20 @@ export function useSessionStore() {
       msg.sessionId === sessionId
         ? msg
         : { ...msg, sessionId };
-    let updated = [...slot.realtimeMessages, normalizedMessage];
-    if (updated.length > MAX_REALTIME_MESSAGES) {
-      updated = updated.slice(-MAX_REALTIME_MESSAGES);
+    // A row the store already holds is replaced where it stands. A tool step is
+    // sent when it starts and again when it finishes, under the same id, so
+    // appending both drew every call as two cards and filled the cap twice as
+    // fast.
+    const existingIndex = slot.realtimeMessages.findIndex((message) => message.id === normalizedMessage.id);
+    let updated: NormalizedMessage[];
+    if (existingIndex >= 0) {
+      updated = [...slot.realtimeMessages];
+      updated[existingIndex] = normalizedMessage;
+    } else {
+      updated = [...slot.realtimeMessages, normalizedMessage];
+      if (updated.length > MAX_REALTIME_MESSAGES) {
+        updated = updated.slice(-MAX_REALTIME_MESSAGES);
+      }
     }
     slot.realtimeMessages = updated;
     recomputeMergedIfNeeded(slot);

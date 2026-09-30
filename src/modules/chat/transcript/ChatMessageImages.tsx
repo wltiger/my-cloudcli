@@ -3,8 +3,11 @@ import { useTranslation } from 'react-i18next';
 import { createPortal } from 'react-dom';
 import { X } from 'lucide-react';
 
-import { api } from '@/shared/api';
+import { api, authenticatedFetch } from '@/shared/api';
 import type { ChatImage } from '@/shared/types';
+
+/** A chat image, or one the server addressed by url (Antigravity's per-conversation tool-result media). */
+export type ChatImageSource = ChatImage & { url?: string };
 
 type ChatMessageImagesProps = {
   images: ChatImage[];
@@ -16,9 +19,11 @@ type ChatMessageImagesProps = {
  * directly; path-based attachments are fetched as blobs (a bare <img src>
  * cannot carry the auth header) — first from the global assets route
  * (`~/.cloudcli/assets`), then from the project files route as a fallback for
- * sessions recorded before attachments moved to the global store.
+ * sessions recorded before attachments moved to the global store. An image the
+ * server gave a url is fetched from that url alone, the same way: its route
+ * checks the auth header too, and rejects a token passed in the query string.
  */
-function useChatImageSrc(image: ChatImage, projectId?: string | null): { src: string | null; failed: boolean } {
+function useChatImageSrc(image: ChatImageSource, projectId?: string | null): { src: string | null; failed: boolean } {
   const [src, setSrc] = useState<string | null>(image.data || null);
   const [failed, setFailed] = useState(false);
 
@@ -30,22 +35,25 @@ function useChatImageSrc(image: ChatImage, projectId?: string | null): { src: st
     }
 
     const imagePath = image.path;
-    if (!imagePath) {
+    const imageUrl = image.url;
+    if (!imagePath && !imageUrl) {
       setSrc(null);
       setFailed(true);
       return;
     }
 
-    const filename = imagePath.split(/[\\/]/).pop() || '';
+    const filename = imagePath?.split(/[\\/]/).pop() || '';
     let objectUrl: string | null = null;
     const controller = new AbortController();
 
-    const candidateRequests: Array<() => Promise<Response>> = [
-      () => api.assets.image(filename, { signal: controller.signal }),
-      ...(projectId
-        ? [() => api.readFileBlob(projectId, imagePath, { signal: controller.signal })]
-        : []),
-    ];
+    const candidateRequests: Array<() => Promise<Response>> = imageUrl
+      ? [() => authenticatedFetch(imageUrl, { signal: controller.signal })]
+      : [
+        () => api.assets.image(filename, { signal: controller.signal }),
+        ...(projectId && imagePath
+          ? [() => api.readFileBlob(projectId, imagePath, { signal: controller.signal })]
+          : []),
+      ];
 
     const load = async () => {
       setFailed(false);
@@ -77,7 +85,7 @@ function useChatImageSrc(image: ChatImage, projectId?: string | null): { src: st
         URL.revokeObjectURL(objectUrl);
       }
     };
-  }, [image.data, image.path, projectId]);
+  }, [image.data, image.path, image.url, projectId]);
 
   return { src, failed };
 }
@@ -129,7 +137,7 @@ export function ImageLightbox({ src, alt, onClose }: { src: string; alt: string;
   );
 }
 
-function ChatMessageImage({ image, projectId }: { image: ChatImage; projectId?: string | null }) {
+export function ChatMessageImage({ image, projectId }: { image: ChatImageSource; projectId?: string | null }) {
   const { t } = useTranslation();
   const { src, failed } = useChatImageSrc(image, projectId);
   const [expanded, setExpanded] = useState(false);

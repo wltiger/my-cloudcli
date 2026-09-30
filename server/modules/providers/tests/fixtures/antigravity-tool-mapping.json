@@ -1,0 +1,282 @@
+{
+  "_comment": "Shared fixture for the Antigravity tool mapping. Each case is one agy tool call: the arguments exactly as transcript.jsonl stores them (every value a JSON literal string), the result text that call produced, and the canonical shape the frontend registry must be able to read. The backend asserts the mapper's output equals `expected`; the frontend asserts each registry getter returns a non-empty value for `expected.input`. Keep the two in sync — the point of the fixture is that a rename nobody reads counts as a failure.",
+  "cases": [
+    {
+      "agyName": "view_file",
+      "args": {
+        "AbsolutePath": "\"C:/Users/shaojiaxing/.gemini/config/skills/playwright-cli/SKILL.md\"",
+        "toolAction": "\"Viewing playwright skill\"",
+        "toolSummary": "\"View playwright-cli skill\""
+      },
+      "resultContent": "Created At: 2026-09-29T09:11:05+08:00\nCompleted At: 2026-09-29T09:11:05+08:00\nFile Path: `file:///C:/Users/shaojiaxing/.gemini/config/skills/playwright-cli/SKILL.md`\nTotal Lines: 433\n1: ---",
+      "expected": {
+        "toolName": "Read",
+        "input": {
+          "file_path": "C:/Users/shaojiaxing/.gemini/config/skills/playwright-cli/SKILL.md"
+        }
+      },
+      "mustRender": ["file_path"]
+    },
+    {
+      "_note": "Backslash-separated path: the diff-card titles split on '/' so both separators must normalize to one.",
+      "agyName": "view_file",
+      "args": {
+        "AbsolutePath": "\"C:\\\\Users\\\\shaojiaxing\\\\docs\\\\a.md\"",
+        "toolAction": "\"Viewing\""
+      },
+      "resultContent": null,
+      "expected": {
+        "toolName": "Read",
+        "input": { "file_path": "C:/Users/shaojiaxing/docs/a.md" }
+      },
+      "mustRender": ["file_path"]
+    },
+    {
+      "agyName": "run_command",
+      "args": {
+        "CommandLine": "\"npm run build\"",
+        "Cwd": "\"/tmp\"",
+        "IsDaemon": "\"false\"",
+        "WaitMsBeforeAsync": "\"5000\"",
+        "toolAction": "\"Building\"",
+        "toolSummary": "\"Build the project\""
+      },
+      "resultContent": "build ok",
+      "expected": {
+        "toolName": "Bash",
+        "input": { "command": "npm run build", "description": "Build the project" }
+      },
+      "mustRender": ["command"]
+    },
+    {
+      "_note": "Not declared as a daemon but timed out into the background — the majority case. The badge rides in description because Bash reads only command and description and hides its result on success.",
+      "agyName": "run_command",
+      "args": {
+        "CommandLine": "\"dotnet run --project src/Signage.Api\"",
+        "IsDaemon": "\"false\"",
+        "toolAction": "\"Starting dev server\"",
+        "toolSummary": "\"Start Signage.Api server\""
+      },
+      "resultContent": "Created At: 2026-09-29T09:13:29+08:00\nTool is running as a background task with task id: ee37e759-6299-4424-921f-8dbbcc49e2ff/task-72\nTask Description: dotnet run\nYOU MUST TAKE ONE OF THE FOLLOWING TWO ACTIONS:",
+      "expected": {
+        "toolName": "Bash",
+        "input": {
+          "command": "dotnet run --project src/Signage.Api",
+          "description": "[background · task-72] Start Signage.Api server"
+        }
+      },
+      "mustRender": ["command"]
+    },
+    {
+      "_note": "Declared daemon. 'false' must not be truthy — IsDaemon is the string \"false\" in every real record.",
+      "agyName": "run_command",
+      "args": { "CommandLine": "\"dotnet run\"", "IsDaemon": "\"true\"", "toolSummary": "\"Start server\"" },
+      "resultContent": null,
+      "expected": {
+        "toolName": "Bash",
+        "input": { "command": "dotnet run", "description": "[background] Start server" }
+      },
+      "mustRender": ["command"]
+    },
+    {
+      "agyName": "replace_file_content",
+      "args": {
+        "AllowMultiple": "\"false\"",
+        "Description": "\"Use installed Chrome channel\"",
+        "EndLine": "\"15\"",
+        "Instruction": "\"Use chrome channel\"",
+        "ReplacementContent": "\"const b = await chromium.launch({ channel: 'chrome' });\"",
+        "StartLine": "\"10\"",
+        "TargetContent": "\"const b = await chromium.launch();\"",
+        "TargetFile": "\"d:/code/qdzn/gb-poc-signage/.scratch/mobile_audit.js\"",
+        "toolAction": "\"Updating browser launch config\"",
+        "toolSummary": "\"Update browser launch to channel chrome\""
+      },
+      "resultContent": "Updated.",
+      "expected": {
+        "toolName": "Edit",
+        "input": {
+          "file_path": "d:/code/qdzn/gb-poc-signage/.scratch/mobile_audit.js",
+          "old_string": "const b = await chromium.launch();",
+          "new_string": "const b = await chromium.launch({ channel: 'chrome' });"
+        }
+      },
+      "mustRender": ["file_path", "old_string", "new_string"]
+    },
+    {
+      "_note": "The file body is valid JSON. Targeted decoding must leave it a string, or the diff renders empty or throws.",
+      "agyName": "write_to_file",
+      "args": {
+        "CodeContent": "{\n  \"name\": \"x\",\n  \"version\": \"1.0.0\"\n}",
+        "Description": "\"Write package.json\"",
+        "Overwrite": "\"true\"",
+        "TargetFile": "\"d:/code/app/package.json\"",
+        "toolAction": "\"Writing package.json\"",
+        "toolSummary": "\"Write package.json\""
+      },
+      "resultContent": "Created file package.json",
+      "expected": {
+        "toolName": "Write",
+        "input": {
+          "file_path": "d:/code/app/package.json",
+          "content": "{\n  \"name\": \"x\",\n  \"version\": \"1.0.0\"\n}"
+        }
+      },
+      "mustRender": ["file_path", "content"]
+    },
+    {
+      "_note": "ArtifactMetadata is stored as an escaped JSON literal string; UserFacing drives the document card.",
+      "agyName": "write_to_file",
+      "args": {
+        "ArtifactMetadata": "{\"RequestFeedback\":true,\"Summary\":\"移动端优化实测效果图走查报告\",\"UserFacing\":true}",
+        "CodeContent": "# 走查报告\n\n## 1. 首页",
+        "Description": "\"Mobile UI Preview artifact\"",
+        "Overwrite": "\"true\"",
+        "TargetFile": "\"C:/Users/shaojiaxing/.gemini/antigravity-cli/brain/ee37e759/report.md\"",
+        "toolAction": "\"Creating mobile UI preview artifact\"",
+        "toolSummary": "\"Create mobile UI preview artifact\""
+      },
+      "resultContent": "Created.",
+      "expected": {
+        "toolName": "AgyArtifactDoc",
+        "input": {
+          "file_path": "C:/Users/shaojiaxing/.gemini/antigravity-cli/brain/ee37e759/report.md",
+          "content": "# 走查报告\n\n## 1. 首页",
+          "artifactTitle": "移动端优化实测效果图走查报告"
+        }
+      },
+      "mustRender": ["content"]
+    },
+    {
+      "agyName": "manage_task",
+      "args": {
+        "Action": "\"status\"",
+        "TaskId": "\"ee37e759-6299-4424-921f-8dbbcc49e2ff/task-72\"",
+        "toolAction": "\"Checking task-72 status\"",
+        "toolSummary": "\"Check task-72 status\""
+      },
+      "resultContent": "Status: RUNNING",
+      "expected": {
+        "toolName": "AgyTask",
+        "input": { "taskName": "task-72", "action": "status" }
+      },
+      "mustRender": ["taskName", "action"]
+    },
+    {
+      "_note": "The list action carries no TaskId. A naive split on it throws and loses the whole conversation's history.",
+      "agyName": "manage_task",
+      "args": { "Action": "\"list\"", "toolAction": "\"Listing tasks\"", "toolSummary": "\"List tasks\"" },
+      "resultContent": "You have 3 tasks",
+      "expected": { "toolName": "AgyTask", "input": { "taskName": "all tasks", "action": "list" } },
+      "mustRender": ["taskName", "action"]
+    },
+    {
+      "agyName": "schedule",
+      "args": {
+        "DurationSeconds": "\"8\"",
+        "Prompt": "\"Check test run completion\"",
+        "TimerCondition": "\"ee37e759/task-273\"",
+        "toolAction": "\"Waiting for tests\"",
+        "toolSummary": "\"Wait for dotnet test to finish\""
+      },
+      "resultContent": null,
+      "expected": {
+        "toolName": "AgySchedule",
+        "input": { "label": "8s", "prompt": "Check test run completion" }
+      },
+      "mustRender": ["label", "prompt"]
+    },
+    {
+      "agyName": "manage_subagents",
+      "args": { "Action": "\"list\"", "toolAction": "\"Checking subagent status\"", "toolSummary": "\"Check subagent status\"" },
+      "resultContent": "You have 1 active subagent(s)",
+      "expected": { "toolName": "AgySubagents", "input": { "action": "list" } },
+      "mustRender": ["action"]
+    },
+    {
+      "agyName": "send_message",
+      "args": {
+        "Message": "\"# 评审报告\"",
+        "Recipient": "\"36fa4eb8-49ba-4422-89f1-649ec6668c44\"",
+        "toolAction": "\"Sending review report\"",
+        "toolSummary": "\"Send SPEC review report\""
+      },
+      "resultContent": "Message sent.",
+      "expected": { "toolName": "AgyMessage", "input": { "recipient": "36fa4eb8" } },
+      "mustRender": ["recipient"]
+    },
+    {
+      "_note": "Subagents is a JSON literal string; .map on the raw value throws.",
+      "agyName": "invoke_subagent",
+      "args": {
+        "Subagents": "[{\"Prompt\":\"look into x\",\"Role\":\"Researcher\",\"TypeName\":\"research\"}]",
+        "toolAction": "\"Searching codebase\"",
+        "toolSummary": "\"Investigate claude background work\""
+      },
+      "resultContent": "Created the following subagents:\n{\"conversationId\":  \"551498c1-e220-451b-9538-42d5a221dc0d\"}",
+      "expected": { "toolName": "Task", "input": {} },
+      "mustRender": []
+    },
+    {
+      "agyName": "ask_question",
+      "args": {
+        "questions": "[{\"is_multi_select\":false,\"options\":[\"(Recommended) 无头模式\",\"有头模式\"],\"question\":\"Playwright 走查时采用哪种浏览器模式？\"}]",
+        "toolAction": "\"Asking user preferences\"",
+        "toolSummary": "\"Ask browser mode\""
+      },
+      "resultContent": "Created At: 2026-09-29T09:15:03+08:00\nCompleted At: 2026-09-29T09:15:03+08:00\nA1: User Skipped",
+      "expected": {
+        "toolName": "AskUserQuestion",
+        "input": {
+          "questions": [
+            {
+              "question": "Playwright 走查时采用哪种浏览器模式？",
+              "multiSelect": false,
+              "options": [{ "label": "(Recommended) 无头模式" }, { "label": "有头模式" }]
+            }
+          ]
+        }
+      },
+      "mustRender": []
+    },
+    {
+      "agyName": "search_web",
+      "args": { "query": "\"\\\"SkiaSharp.Svg\\\" 3.119\"", "toolAction": "\"Searching\"", "toolSummary": "\"Web search\"" },
+      "resultContent": "The search returned …",
+      "expected": { "toolName": "WebSearch", "input": { "query": "\"SkiaSharp.Svg\" 3.119" } },
+      "mustRender": ["query"]
+    },
+    {
+      "agyName": "read_url_content",
+      "args": { "Url": "\"https://example.com\"", "toolAction": "\"Reading\"", "toolSummary": "\"Read page\"" },
+      "resultContent": "page content",
+      "expected": { "toolName": "WebFetch", "input": { "url": "https://example.com" } },
+      "mustRender": ["url"]
+    },
+    {
+      "agyName": "generate_image",
+      "args": { "AspectRatio": "\"16:9\"", "ImageName": "\"result-1col-grid\"", "Prompt": "\"a storefront\"", "toolAction": "\"Generating\"", "toolSummary": "\"Generate image\"" },
+      "resultContent": "Created.",
+      "expected": {
+        "toolName": "AgyImage",
+        "input": { "prompt": "a storefront", "name": "result-1col-grid", "aspectRatio": "16:9" }
+      },
+      "mustRender": ["prompt", "name"]
+    },
+    {
+      "agyName": "call_mcp_tool",
+      "args": { "ServerName": "\"ctx7\"", "ToolName": "\"search\"", "toolAction": "\"Searching\"", "toolSummary": "\"Search\"" },
+      "resultContent": "results",
+      "expected": { "toolName": "mcp__ctx7__search", "input": {} },
+      "mustRender": []
+    },
+    {
+      "_note": "A tool a later release adds: passes through with its real name and decoded arguments.",
+      "agyName": "mystery_new_tool",
+      "args": { "SomeFlag": "\"true\"", "Target": "\"x\"" },
+      "resultContent": null,
+      "expected": { "toolName": "mystery_new_tool", "input": {} },
+      "mustRender": []
+    }
+  ]
+}

@@ -14,7 +14,10 @@ import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 
-import { AntigravitySessionsProvider } from '@/modules/providers/list/antigravity/antigravity-sessions.provider.js';
+import {
+  AntigravitySessionsProvider,
+  rewriteAntigravityImageLinks,
+} from '@/modules/providers/list/antigravity/antigravity-sessions.provider.js';
 import type { NormalizedMessage } from '@/shared/types.js';
 
 const patchHomeDir = (nextHomeDir: string) => {
@@ -28,16 +31,17 @@ const patchHomeDir = (nextHomeDir: string) => {
 const CONVERSATION_ID = 'conv-0001';
 
 /**
- * Two `SYSTEM_MESSAGE` contents copied whole from a real `agy` session
- * (07ad229e…, steps 6 and 118): a server-restart notice and a sub-agent's
- * report. Kept with the boilerplate prefix on purpose — it names
+ * `SYSTEM_MESSAGE` contents copied whole from real `agy` sessions: a
+ * server-restart notice and a sub-agent's report (07ad229e…, steps 6 and 118),
+ * and a Stop-hook notice written with no `[Message]` header (ee37e759…, step
+ * 275). Kept with the boilerplate prefix on purpose — it names
  * `<SYSTEM_MESSAGE>` inline before the real tag, which is the trap a fixture
  * starting at the tag could never spring.
  */
 const REAL_SYSTEM_MESSAGES = JSON.parse(await fs.readFile(
   path.join(path.dirname(fileURLToPath(import.meta.url)), 'fixtures', 'antigravity-system-messages.json'),
   'utf8',
-)) as { restartNotice: string; subagentResult: string };
+)) as { restartNotice: string; subagentResult: string; stopHookNotice: string };
 
 /** The boilerplate every real `SYSTEM_MESSAGE` opens with, up to and including the real tag. */
 const SYSTEM_MESSAGE_PREFIX = REAL_SYSTEM_MESSAGES.restartNotice.slice(
@@ -150,10 +154,11 @@ test('a tool call is paired with the result record that follows it', async () =>
 
     assert.deepEqual(kinds(messages), ['thinking', 'tool_use']);
     const tool = messages[1]!;
-    assert.equal(tool.toolName, 'run_command');
-    // Every argument is persisted as its own JSON literal; decoding it is what
-    // keeps the tool card from showing the command wrapped in stray quotes.
-    assert.deepEqual(tool.toolInput, { CommandLine: 'npm run build', Cwd: '/tmp' });
+    // Renamed onto the canonical tool and reshaped onto the keys the registry
+    // reads — the only end-to-end assertion of tool identity, so it asserts the
+    // new shape rather than being dropped.
+    assert.equal(tool.toolName, 'Bash');
+    assert.deepEqual(tool.toolInput, { command: 'npm run build' });
     assert.deepEqual(tool.toolResult, { content: 'build ok', isError: false });
     // The result record is consumed into the card, not rendered as a second
     // anonymous blob of tool output.
@@ -308,8 +313,9 @@ test('a real server-restart notice renders as a compact notice, envelope strippe
 
     assert.deepEqual(kinds(messages), ['task_notification']);
     const notice = messages[0]!;
-    // The only status the renderer paints as a neutral dot rather than amber.
-    assert.equal(notice.status, 'completed');
+    // It reports no outcome, so it is not painted as one: `completed` is the
+    // green dot, while `info` has no colour of its own and keeps the amber.
+    assert.equal(notice.status, 'info');
     assert.match(String(notice.content), /^\[Notice\] All your subagents and background tasks have been stopped due to server restart\./);
     assert.match(String(notice.content), /restart as needed\.$/);
     for (const scaffolding of ['not actually sent by the user', '<SYSTEM_MESSAGE>', '</SYSTEM_MESSAGE>', '[Message]', 'sender=']) {
@@ -361,6 +367,61 @@ test('a sender that is neither system nor a conversation id is a notice, not age
 
     assert.deepEqual(kinds(messages), ['task_notification']);
     assert.equal(messages[0]?.content, 'build finished');
+  });
+});
+
+test('an envelope with no [Message] header shows the text between its tags, not the envelope', async () => {
+  await withTranscript({
+    transcript: [systemRecord(275, REAL_SYSTEM_MESSAGES.stopHookNotice)],
+  }, async (provider) => {
+    const { messages } = await history(provider);
+
+    const body = 'Stop hook blocked termination: The user has automatically approved the artifact through their review policy. Proceed to execution.';
+    assert.deepEqual(kinds(messages), ['task_notification']);
+    assert.equal(messages[0]?.content, body);
+    assert.equal(messages[0]?.summary, body);
+  });
+});
+
+test('text that only mentions the tag, with no closing one, is still shown whole', async () => {
+  // Without a closing tag nothing marks where a header-less body ends, so the
+  // text stays as written — exactly as text with no tag at all does.
+  const mention = 'Heads up: a <SYSTEM_MESSAGE> block is how agy wraps its notices.';
+  await withTranscript({
+    transcript: [systemRecord(1, mention), systemRecord(2, 'Auto-compaction ran.')],
+  }, async (provider) => {
+    const { messages } = await history(provider);
+
+    assert.deepEqual(messages.map((message) => message.content), [mention, 'Auto-compaction ran.']);
+  });
+});
+
+test('a notice is painted with the outcome it reports, and one that reports none is not a success', async () => {
+  // Bodies as `agy` writes them (ee37e759…, steps 75, 82, 204 and 205).
+  const notice = (stepIndex: number, sender: string, body: string) => systemRecord(
+    stepIndex,
+    `${SYSTEM_MESSAGE_PREFIX}[Message] timestamp=2026-09-29T01:13:33Z sender=${sender} priority=MESSAGE_PRIORITY_HIGH content=${body}\n</SYSTEM_MESSAGE>`,
+  );
+  const task = (id: number) => `${CONVERSATION_ID}/task-${id}`;
+  await withTranscript({
+    transcript: [
+      notice(75, task(58), `Task id "${task(58)}" finished with result:\n\nThe command exited with code 0.\nOutput:\nok`),
+      notice(82, task(79), `Task id "${task(79)}" finished with result:\n\nThe command exited with code 1.\nStdout:\n\nStderr:\n`),
+      notice(204, task(72), `Task id "${task(72)}" was canceled with result:\nTool execution was canceled`),
+      notice(205, 'system', '[Notice] All your subagents and background tasks have been stopped due to server restart.'),
+    ],
+  }, async (provider) => {
+    const { messages } = await history(provider);
+
+    assert.deepEqual(
+      messages.map((message) => [message.status, message.summary]),
+      [
+        ['completed', 'task-58 · exit code 0'],
+        ['failed', 'task-79 · exit code 1'],
+        ['cancelled', 'task-72 · cancelled'],
+        ['info', '[Notice] All your subagents and background tasks have been stopped due to server restart.'],
+      ],
+    );
   });
 });
 
@@ -461,7 +522,7 @@ test('a tool call the transcript truncated is restored into a readable argument'
     const { messages } = await history(provider);
 
     assert.deepEqual(kinds(messages), ['tool_use']);
-    assert.deepEqual(messages[0]?.toolInput, { CodeContent: WRITTEN_FILE, TargetFile: 'spec.md' });
+    assert.deepEqual(messages[0]?.toolInput, { file_path: 'spec.md', content: WRITTEN_FILE });
     assert.equal(messages[0]?.toolResult?.content, 'Created file spec.md');
   });
 });
@@ -472,9 +533,10 @@ test('a truncated tool call with no full transcript still renders its card', asy
   }, async (provider) => {
     const { messages } = await history(provider);
 
-    // Best effort: the argument stays as elided — no worse than before.
+    // Best effort: the argument stays as elided — no worse than before. Content
+    // arguments are never decoded, so the elided literal is preserved verbatim.
     assert.deepEqual(kinds(messages), ['tool_use']);
-    assert.deepEqual(messages[0]?.toolInput, { CodeContent: ELIDED_CODE_CONTENT, TargetFile: 'spec.md' });
+    assert.deepEqual(messages[0]?.toolInput, { file_path: 'spec.md', content: ELIDED_CODE_CONTENT });
   });
 });
 
@@ -650,4 +712,190 @@ test('a raw value that is not a record normalizes to nothing', async () => {
     assert.deepEqual(provider.normalizeMessage('not a record', 'session-abc'), []);
     assert.deepEqual(provider.normalizeMessage(null, null), []);
   });
+});
+
+// ---------------------------------------------------------------------------
+// Images — local paths in the transcript become media route urls
+// ---------------------------------------------------------------------------
+
+const MEDIA_URL_PREFIX = `/api/providers/antigravity/media/${CONVERSATION_ID}`;
+
+/**
+ * The three ways `agy` writes a path into this conversation's directory: a
+ * drive path with forward slashes, the same with backslashes, and a file URL.
+ * Built from the temporary home, so each also runs on POSIX, where the first is
+ * `/tmp/…` and the URL `file:///tmp/…`.
+ */
+const conversationPathForms = (homeDir: string, relativePath: string) => {
+  const forward = `${path.join(homeDir, '.gemini', 'antigravity-cli', 'brain', CONVERSATION_ID).replace(/\\/g, '/')}/${relativePath}`;
+  return {
+    forward,
+    backslash: forward.replace(/\//g, '\\'),
+    fileUrl: `file://${forward.startsWith('/') ? '' : '/'}${forward}`,
+  };
+};
+
+/** Rewrites through a fresh temporary home, so the conversation directory is real. */
+const withConversationHome = (run: (homeDir: string) => Promise<void>) => (
+  withTranscript({ transcript: [] }, async (_provider, homeDir) => run(homeDir))
+);
+
+test('a screenshot linked by local path in any of the three forms points at the media route', async () => {
+  await withConversationHome(async (homeDir) => {
+    const forms = conversationPathForms(homeDir, '01-guide-buttons.png');
+
+    for (const [form, destination] of Object.entries(forms)) {
+      assert.equal(
+        rewriteAntigravityImageLinks(`第1步\n![第1步：首页](${destination})\n下一步`, CONVERSATION_ID),
+        `第1步\n![第1步：首页](${MEDIA_URL_PREFIX}/01-guide-buttons.png)\n下一步`,
+        `the ${form} form`,
+      );
+    }
+  });
+});
+
+test('an image deeper in the conversation keeps its path, escaped, and its title', async () => {
+  await withConversationHome(async (homeDir) => {
+    const deep = conversationPathForms(homeDir, 'scratch/shots/a b (1).png');
+    const encoded = conversationPathForms(homeDir, 'scratch/shots/a%20b%20(1).png');
+    const tempMedia = conversationPathForms(homeDir, '.tempmediaStorage/media_1790644695043.png');
+
+    assert.equal(
+      rewriteAntigravityImageLinks(`![shot](<${deep.forward}> "after")`, CONVERSATION_ID),
+      `![shot](${MEDIA_URL_PREFIX}/scratch/shots/a%20b%20%281%29.png "after")`,
+    );
+    // A file URL's escapes are decoded before the path is looked at.
+    assert.equal(
+      rewriteAntigravityImageLinks(`![shot](${encoded.fileUrl})`, CONVERSATION_ID),
+      `![shot](${MEDIA_URL_PREFIX}/scratch/shots/a%20b%20%281%29.png)`,
+    );
+    // A tool-result image keeps the one-segment form its thumbnail already uses.
+    assert.equal(
+      rewriteAntigravityImageLinks(`![m](${tempMedia.forward})`, CONVERSATION_ID),
+      `![m](${MEDIA_URL_PREFIX}/media_1790644695043.png)`,
+    );
+  });
+});
+
+test('a path outside the conversation, a relative one, or one that is not an image stays as written', async () => {
+  await withConversationHome(async (homeDir) => {
+    const inside = conversationPathForms(homeDir, 'shot.png');
+    const text = [
+      '![project](d:/code/qdzn/gb-poc-signage/docs/shot.png)',
+      `![sibling](${inside.forward.replace(`/${CONVERSATION_ID}/`, '/other-conversation/')})`,
+      `![climb](${conversationPathForms(homeDir, '../other-conversation/shot.png').forward})`,
+      `![home](${path.join(homeDir, 'shot.png').replace(/\\/g, '/')})`,
+      '![relative](./02-before.png)',
+      `![doc](${conversationPathForms(homeDir, 'mobile_ui_preview.md').forward})`,
+      `![vector](${conversationPathForms(homeDir, 'diagram.svg').forward})`,
+      `[a link, not an image](${inside.forward})`,
+      '![web](https://example.com/shot.png)',
+    ].join('\n');
+
+    assert.equal(rewriteAntigravityImageLinks(text, CONVERSATION_ID), text);
+  });
+});
+
+test('a rewritten link is left alone the second time', async () => {
+  await withConversationHome(async (homeDir) => {
+    const once = rewriteAntigravityImageLinks(
+      `![a](${conversationPathForms(homeDir, 'a.png').forward})`,
+      CONVERSATION_ID,
+    );
+    assert.equal(rewriteAntigravityImageLinks(once, CONVERSATION_ID), once);
+  });
+});
+
+test('history points prose and document screenshots at the media route', async () => {
+  // The paths name the temporary home, so it has to be known before the
+  // transcript is written: lay the conversation out by hand under it.
+  const homeDir = await fs.mkdtemp(path.join(os.tmpdir(), 'antigravity-sessions-'));
+  const restoreHomeDir = patchHomeDir(homeDir);
+  try {
+    const shot = conversationPathForms(homeDir, '01-guide-buttons.png');
+    const logDir = path.join(homeDir, '.gemini', 'antigravity-cli', 'brain', CONVERSATION_ID, '.system_generated', 'logs');
+    await fs.mkdir(logDir, { recursive: true });
+    const records = [
+      // Steps 263 and 427 of ee37e759…: a document written with drive paths,
+      // then prose that links the same screenshot by file URL.
+      modelRecord(263, {
+        tool_calls: [{
+          name: 'write_to_file',
+          args: {
+            ArtifactMetadata: '{"RequestFeedback":true,"Summary":"走查报告","UserFacing":true}',
+            CodeContent: JSON.stringify(`# 走查报告\n![第1步](${shot.forward})`),
+            TargetFile: JSON.stringify(conversationPathForms(homeDir, 'mobile_ui_preview.md').forward),
+          },
+        }],
+      }),
+      toolResultRecord(264, 'Created file.'),
+      assistantTextRecord(427, `以下是修改后的效果：\n![第1步](${shot.fileUrl})`),
+    ];
+    await fs.writeFile(path.join(logDir, 'transcript.jsonl'), `${records.map((entry) => JSON.stringify(entry)).join('\n')}\n`, 'utf8');
+
+    const { messages } = await history(new AntigravitySessionsProvider());
+
+    assert.deepEqual(kinds(messages), ['tool_use', 'text']);
+    assert.equal(messages[0]?.toolName, 'AgyArtifactDoc');
+    assert.equal(
+      (messages[0]?.toolInput as { content?: string } | undefined)?.content,
+      `# 走查报告\n![第1步](${MEDIA_URL_PREFIX}/01-guide-buttons.png)`,
+    );
+    assert.equal(messages[1]?.content, `以下是修改后的效果：\n![第1步](${MEDIA_URL_PREFIX}/01-guide-buttons.png)`);
+  } finally {
+    restoreHomeDir();
+    await fs.rm(homeDir, { recursive: true, force: true });
+  }
+});
+
+test('a tool result offers the images it recorded, whether named by path or by file URL', async () => {
+  const homeDir = await fs.mkdtemp(path.join(os.tmpdir(), 'antigravity-sessions-'));
+  const restoreHomeDir = patchHomeDir(homeDir);
+  try {
+    const media = (relativePath: string, form: 'forward' | 'fileUrl' | 'backslash') => ({
+      mime_type: 'image/png',
+      uri: conversationPathForms(homeDir, relativePath)[form],
+    });
+    const logDir = path.join(homeDir, '.gemini', 'antigravity-cli', 'brain', CONVERSATION_ID, '.system_generated', 'logs');
+    await fs.mkdir(logDir, { recursive: true });
+    const records = [
+      modelRecord(1, {
+        tool_calls: [
+          { name: 'browser_screenshot', args: {} },
+          { name: 'browser_screenshot', args: {} },
+          { name: 'browser_screenshot', args: {} },
+        ],
+      }),
+      // The shape of the 33 real records: a drive path into `.tempmediaStorage`.
+      toolResultRecord(2, 'Took a screenshot.', { media: [media('.tempmediaStorage/media_1.png', 'forward')] }),
+      toolResultRecord(3, 'Took a screenshot.', {
+        media: [
+          media('.tempmediaStorage/media_2.png', 'fileUrl'),
+          media('.tempmediaStorage/media_3.png', 'backslash'),
+        ],
+      }),
+      // Outside the conversation, or not an image the route serves: nothing a
+      // click could open.
+      toolResultRecord(4, 'Took a screenshot.', {
+        media: [
+          { mime_type: 'image/png', uri: path.join(homeDir, 'elsewhere', 'media_4.png') },
+          media('../other-conversation/.tempmediaStorage/media_5.png', 'forward'),
+          { mime_type: 'image/svg+xml', uri: conversationPathForms(homeDir, '.tempmediaStorage/media_6.svg').forward },
+          { mime_type: 'text/plain', uri: conversationPathForms(homeDir, '.tempmediaStorage/media_7.png').forward },
+        ],
+      }),
+    ];
+    await fs.writeFile(path.join(logDir, 'transcript.jsonl'), `${records.map((entry) => JSON.stringify(entry)).join('\n')}\n`, 'utf8');
+
+    const { messages } = await history(new AntigravitySessionsProvider());
+
+    const image = (name: string) => ({ url: `${MEDIA_URL_PREFIX}/${name}`, name, mimeType: 'image/png' });
+    assert.deepEqual(
+      messages.map((message) => (message.toolResult as { media?: unknown } | undefined)?.media),
+      [[image('media_1.png')], [image('media_2.png'), image('media_3.png')], undefined],
+    );
+  } finally {
+    restoreHomeDir();
+    await fs.rm(homeDir, { recursive: true, force: true });
+  }
 });

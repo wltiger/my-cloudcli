@@ -400,6 +400,18 @@ export function createProviderTokenUsageService(
         };
       }
 
+      if (session.provider === 'antigravity') {
+        return {
+          used: 0,
+          total: 0,
+          inputTokens: 0,
+          outputTokens: 0,
+          breakdown: { input: 0, output: 0 },
+          unsupported: true,
+          message: 'Token usage tracking not available for Antigravity sessions',
+        };
+      }
+
       if (session.provider === 'opencode') {
         const databasePath = dependencies.getOpenCodeDatabasePath();
         if (!dependencies.fileExists(databasePath)) {

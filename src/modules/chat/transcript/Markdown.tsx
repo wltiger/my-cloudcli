@@ -9,6 +9,7 @@ import { useTranslation } from 'react-i18next';
 
 import { MermaidDiagram } from '@/modules/code-editor';
 import { useChatProseClassName } from '@/shared/hooks/useChatTypography';
+import { MarkdownImage } from '@/modules/chat/transcript/MarkdownImage';
 import { normalizeInlineCodeFences } from '@/modules/chat/utils/chatFormatting';
 import { copyTextToClipboard } from '@/shared/utils';
 import { SyntaxHighlighter } from '@/shared/syntaxHighlighter';
@@ -213,6 +214,7 @@ const markdownComponents = {
     </blockquote>
   ),
   hr: () => <hr className="my-4 border-t border-border" />,
+  img: MarkdownImage,
   p: ({ children }: { children?: React.ReactNode }) => <div className="mb-2 last:mb-0">{children}</div>,
   ul: ({ children }: { children?: React.ReactNode }) => (
     <ul className="mb-2 list-outside list-disc space-y-1 pl-5 marker:text-current last:mb-0">{children}</ul>

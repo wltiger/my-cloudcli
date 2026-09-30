@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { once } from 'node:events';
-import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readdir, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import type { AddressInfo } from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
@@ -425,5 +425,179 @@ test('no other provider pre-grants permissions', async () => {
       assert.equal(response.status, 400, `${provider} must refuse the grant route`);
       assert.equal(payload.error.code, 'PROVIDER_PERMISSION_GRANTS_UNSUPPORTED');
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Antigravity media — one image a tool result recorded
+// ---------------------------------------------------------------------------
+
+/**
+ * Lays out one conversation's media directory under a temporary home and serves
+ * the real router over HTTP. The security boundary has to be tested here: an
+ * attacker crafts a request directly and never goes through the session reader.
+ */
+async function withAntigravityMediaServer(
+  run: (baseUrl: string) => Promise<void>,
+): Promise<void> {
+  const previousDatabasePath = process.env.DATABASE_PATH;
+  const tempDirectory = await mkdtemp(path.join(os.tmpdir(), 'agy-media-'));
+  const originalHomedir = os.homedir;
+
+  closeConnection();
+  process.env.DATABASE_PATH = path.join(tempDirectory, 'auth.db');
+  await writeFile(process.env.DATABASE_PATH, '');
+  await initializeDatabase();
+  (os as any).homedir = () => tempDirectory;
+
+  const conversationDir = path.join(tempDirectory, '.gemini', 'antigravity-cli', 'brain', 'conv-media');
+  const mediaDir = path.join(conversationDir, '.tempmediaStorage');
+  await mkdir(mediaDir, { recursive: true });
+  await writeFile(path.join(mediaDir, 'shot.png'), 'not-really-a-png');
+  await writeFile(path.join(mediaDir, 'notes.txt'), 'text');
+  await writeFile(path.join(mediaDir, 'evil.svg'), '<svg onload="alert(1)"/>');
+  // Screenshots the model saved itself, linked from its prose.
+  await writeFile(path.join(conversationDir, '01-guide.png'), 'root-png');
+  await mkdir(path.join(conversationDir, 'scratch', 'shots'), { recursive: true });
+  await writeFile(path.join(conversationDir, 'scratch', 'shots', 'deep.png'), 'deep-png');
+  await writeFile(path.join(conversationDir, 'scratch', 'notes.txt'), 'text');
+  await mkdir(path.join(tempDirectory, 'outside'), { recursive: true });
+  await writeFile(path.join(tempDirectory, 'outside', 'secret.png'), 'secret');
+  // A link inside the conversation that leads out of it. A junction needs no
+  // elevation on Windows; elsewhere the type is ignored and this is a symlink.
+  await symlink(path.join(tempDirectory, 'outside'), path.join(conversationDir, 'linked'), 'junction');
+
+  const app = express().use(express.json()).use('/api/providers', providerRouter);
+  app.use((error: unknown, _req: Request, res: Response, _next: NextFunction) => {
+    if (error instanceof AppError) {
+      res.status(error.statusCode).json({
+        success: false,
+        error: { code: error.code, message: error.message },
+      });
+      return;
+    }
+    res.status(500).json({ success: false, error: { code: 'INTERNAL_ERROR' } });
+  });
+  const server = app.listen(0, '127.0.0.1');
+  await once(server, 'listening');
+
+  try {
+    const address = server.address() as AddressInfo;
+    await run(`http://127.0.0.1:${address.port}`);
+  } finally {
+    await new Promise<void>((resolve, reject) => {
+      server.close((error) => error ? reject(error) : resolve());
+    });
+    (os as any).homedir = originalHomedir;
+    // Before the rm: the open connection holds the db file, and on Windows an
+    // open file cannot be unlinked.
+    closeConnection();
+    if (previousDatabasePath === undefined) {
+      delete process.env.DATABASE_PATH;
+    } else {
+      process.env.DATABASE_PATH = previousDatabasePath;
+    }
+    await rm(tempDirectory, { recursive: true, force: true });
+  }
+}
+
+test('an image stored for a conversation is served with its image content type', async () => {
+  await withAntigravityMediaServer(async (baseUrl) => {
+    const response = await fetch(`${baseUrl}/api/providers/antigravity/media/conv-media/shot.png`);
+    assert.equal(response.status, 200);
+    assert.equal(response.headers.get('content-type'), 'image/png');
+  });
+});
+
+test('a media request cannot climb out of the conversation directory', async () => {
+  await withAntigravityMediaServer(async (baseUrl) => {
+    // An attacker crafts these directly, so the reader's own filtering is not
+    // the boundary — this route is.
+    for (const fileName of [
+      '..%2F..%2F..%2Foutside%2Fsecret.png',
+      '..%5C..%5C..%5Coutside%5Csecret.png',
+      '..%2Fsecret.png',
+    ]) {
+      const response = await fetch(
+        `${baseUrl}/api/providers/antigravity/media/conv-media/${fileName}`,
+      );
+      assert.equal(response.status, 404, `traversal via ${fileName} must 404`);
+    }
+
+    // A conversation id that is not a single segment is rejected too.
+    const escaped = await fetch(
+      `${baseUrl}/api/providers/antigravity/media/..%2Foutside/shot.png`,
+    );
+    assert.equal(escaped.status, 404);
+  });
+});
+
+test('a non-image file in the media directory is not served', async () => {
+  await withAntigravityMediaServer(async (baseUrl) => {
+    const text = await fetch(`${baseUrl}/api/providers/antigravity/media/conv-media/notes.txt`);
+    assert.equal(text.status, 404);
+
+    // SVG is excluded: serving another application's SVG inline is an XSS
+    // surface, whatever the upload path allows elsewhere.
+    const svg = await fetch(`${baseUrl}/api/providers/antigravity/media/conv-media/evil.svg`);
+    assert.equal(svg.status, 404);
+  });
+});
+
+test('a missing image 404s, so the frontend can show a placeholder', async () => {
+  await withAntigravityMediaServer(async (baseUrl) => {
+    const response = await fetch(`${baseUrl}/api/providers/antigravity/media/conv-media/gone.png`);
+    assert.equal(response.status, 404);
+  });
+});
+
+test('an image anywhere in the conversation directory is served by its path there', async () => {
+  await withAntigravityMediaServer(async (baseUrl) => {
+    const media = (filePath: string) => fetch(`${baseUrl}/api/providers/antigravity/media/conv-media/${filePath}`);
+
+    const root = await media('01-guide.png');
+    assert.equal(root.status, 200);
+    assert.equal(await root.text(), 'root-png');
+
+    const deep = await media('scratch/shots/deep.png');
+    assert.equal(deep.status, 200);
+    assert.equal(deep.headers.get('content-type'), 'image/png');
+    assert.equal(await deep.text(), 'deep-png');
+
+    // The bare name every tool-result thumbnail already uses still means the
+    // `.tempmediaStorage` file, and the full path reaches the same one.
+    assert.equal(await (await media('shot.png')).text(), 'not-really-a-png');
+    assert.equal(await (await media('.tempmediaStorage/shot.png')).text(), 'not-really-a-png');
+
+    assert.equal((await media('scratch/notes.txt')).status, 404);
+  });
+});
+
+test('a deeper media path cannot climb out of the conversation directory either', async () => {
+  await withAntigravityMediaServer(async (baseUrl) => {
+    for (const filePath of [
+      'scratch/..%2F..%2F..%2F..%2F..%2Foutside%2Fsecret.png',
+      'scratch%2F..%2F..%2F..%2F..%2F..%2Foutside%2Fsecret.png',
+      'scratch/shots%5C..%5C..%5Cdeep.png',
+      'C:%2Fsecret.png',
+      'scratch/C:secret.png',
+      '%2Foutside%2Fsecret.png',
+      'scratch//shots/deep.png',
+      '',
+    ]) {
+      const response = await fetch(`${baseUrl}/api/providers/antigravity/media/conv-media/${filePath}`);
+      assert.equal(response.status, 404, `${filePath || 'an empty path'} must 404`);
+    }
+
+    // Every segment is clean here; only the real path shows where it leads.
+    const linked = await fetch(`${baseUrl}/api/providers/antigravity/media/conv-media/linked/secret.png`);
+    assert.equal(linked.status, 404, 'a link out of the conversation must 404');
+  });
+});
+
+test('another provider has no media route', async () => {
+  await withAntigravityMediaServer(async (baseUrl) => {
+    const response = await fetch(`${baseUrl}/api/providers/claude/media/conv-media/shot.png`);
+    assert.equal(response.status, 400);
   });
 });

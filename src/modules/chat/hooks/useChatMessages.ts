@@ -265,6 +265,10 @@ export function normalizedToChatMessages(messages: NormalizedMessage[]): ChatMes
               content: formatToolResultContent(tr.content),
               isError: Boolean(tr.isError),
               toolUseResult: (tr as any).toolUseResult,
+              // Images the result recorded; the tool row draws them as
+              // thumbnails. Added only when present so other results keep
+              // their shape.
+              ...((tr as any).media ? { media: (tr as any).media } : {}),
             }
           : null;
 
@@ -329,6 +333,10 @@ export function normalizedToChatMessages(messages: NormalizedMessage[]): ChatMes
           timestamp: msg.timestamp,
           isTaskNotification: true,
           taskStatus: msg.status || 'completed',
+          // The whole notice, which the summary only previews in one line. For
+          // a finished background command it is the output, so the row can
+          // expand to show it.
+          taskBody: msg.content,
           ...sharedMetadata,
         });
         break;

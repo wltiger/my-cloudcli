@@ -1,5 +1,6 @@
 import express, { type Request, type Response } from 'express';
 
+import { resolveAntigravityMediaFile } from '@/modules/providers/list/antigravity/antigravity-sessions.provider.js';
 import { grantAntigravityAction } from '@/modules/providers/list/antigravity/antigravity-permissions.js';
 import { providerAuthService } from '@/modules/providers/services/provider-auth.service.js';
 import { providerCapabilitiesService } from '@/modules/providers/services/provider-capabilities.service.js';
@@ -729,6 +730,53 @@ router.post(
     const { projectPath, rule } = parseAntigravityGrantPayload(req.body);
     const result = await grantAntigravityAction(projectPath, rule);
     res.json(createApiSuccessResponse({ provider, ...result }));
+  }),
+);
+
+// ----------------- Media routes -----------------
+/**
+ * Serves one image file from an `agy` conversation's directory, by conversation
+ * id and the file's path inside that directory — a bare name for the images
+ * tool results recorded, deeper for screenshots the model linked from its prose.
+ *
+ * Only Antigravity has this: its tools write images into a per-conversation
+ * directory that the transcript references by absolute path, and a browser
+ * rendering that transcript cannot open the path itself. Both parts are
+ * re-validated server-side (see `resolveAntigravityMediaFile`), so a request is
+ * either for a file `agy` keeps for that conversation or it 404s.
+ *
+ * The route stays behind the shared token middleware on purpose: a signed token
+ * in the query string is not an alternative, because that middleware reads
+ * `?token` and validates it as a JWT — a non-JWT is rejected outright, and a
+ * valid one would make every thumbnail URL a bearer credential for the whole
+ * API. The frontend fetches these as a blob with an explicit header instead,
+ * which is what the image components already do.
+ */
+router.get(
+  '/:provider/media/:conversationId/*',
+  asyncHandler(async (req: Request, res: Response) => {
+    const provider = parseProvider(req.params.provider);
+    if (provider !== 'antigravity') {
+      throw new AppError(`Provider "${provider}" does not serve media.`, {
+        code: 'PROVIDER_MEDIA_UNSUPPORTED',
+        statusCode: 400,
+      });
+    }
+
+    const conversationId = readPathParam(req.params.conversationId, 'conversationId');
+    // Express 4 names the wildcard `0`, already decoded.
+    const filePath = readPathParam((req.params as Record<string, string>)['0'], 'filePath');
+    const media = resolveAntigravityMediaFile(conversationId, filePath);
+    if (!media) {
+      throw new AppError('Media file not found.', {
+        code: 'ANTIGRAVITY_MEDIA_NOT_FOUND',
+        statusCode: 404,
+      });
+    }
+
+    res.setHeader('Content-Type', media.mimeType);
+    res.setHeader('Cache-Control', 'private, max-age=3600');
+    res.sendFile(media.filePath);
   }),
 );
 
