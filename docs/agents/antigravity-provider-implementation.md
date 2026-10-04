@@ -372,17 +372,46 @@ solves the identical "the CLI's storage isn't ours to touch" problem.
   (`annotations/`) and the pbtxt-mtime admission in `synchronize(since)`. When a pbtxt has a title it always
   wins over the stored name; a CloudCLI rename or Clear is written back through `writeSessionTitle`
   (fork-customizations #36).
-- **Archive and delete never touch `agy`'s files** (verified by reading `sessions.service.ts`
-  `deleteOrArchiveSessionById`, 2026-09-30). Archive only sets `isArchived` on the CloudCLI row: restorable,
-  and it keeps name/model/effort/permission mode. Permanent delete (`force`, which defaults `deletedFromDisk`
-  to true) removes the row and unlinks `jsonl_path` — which is `null` for antigravity, so nothing is removed
-  from disk and the conversation stays in `agy`'s own list (Claude, by contrast, does lose its `.jsonl`).
-  There is **no tombstone**: a force-deleted conversation stays gone from the sidebar only because the
-  incremental scan skips conversations that have not moved since `scan_state.last_scanned_at`. It comes back,
-  as a new un-archived row named from `agy`'s title, on any of: a full rescan (cursor reset or empty db), new
-  transcript activity, or a pbtxt write (e.g. `agy-title` on it). Archive is the sturdier way to hide one,
-  since the upsert only un-archives on a newer `last_modified_time`. The delete confirmation text ("cannot be
-  undone") is written for Claude and overstates it for `agy`.
+- **A conversation deleted in `agy` keeps its index row; `brain/<id>/` is the existence signal** (measured
+  2026-10-04). Deleting a conversation in `agy` removes `brain/<id>/` and `conversations/<id>.db` but leaves
+  the `conversation_summaries.db` row (still `CASCADE_RUN_STATUS_IDLE`, `killed = 0`) and, in 3 of 4 samples,
+  `presence/<id>.lock`. Four such leftovers were found in CloudCLI's list, plus one deleted conversation that
+  came back through a resume. The generic orphan prune cannot see these rows (their `jsonl_path` is `null`),
+  so the synchronizer has its own, with these rules:
+  - **Guard:** no `brain/` root at all → no prune and no pre-check. The guard is `brain/`, not the app data
+    directory, matching the watch root and the generic prune's "only when the containing directory still
+    exists".
+  - **Upsert pre-check:** `upsertSession` skips a conversation whose `brain/<id>` is missing (returns null,
+    not counted as processed). That keeps a deleted conversation from being indexed and pruned again on every
+    scan, keeps a waiting app row from being bound to it and then deleted with it, and covers
+    `synchronizeFile` too — in effect it is the tombstone this provider never had.
+  - **Prune** runs after the upsert in `synchronize()` only, outside `synchronizeRows` (which returns early
+    when the index is missing). It looks at every `antigravity` row, archived ones included, and matches each
+    by `provider_session_id`, or by its own `session_id` when that id is in the index — the whole index, not
+    the rows a `since` cursor kept, or a legacy row would never be judged. A pending app row matches neither
+    and is left alone, as is any row with a run in `chatRunRegistry` or a set `external_running_at`.
+  - **Timing (D4, measured 2026-10-05 on one `agy -p` run, 100 ms polling):** `brain/<id>/` appeared about
+    100 ms *before* the index row (8.27 s vs 8.38 s after spawn), and the transcript 0.3 s after that. So the
+    pre-check does not delay the row of a conversation CloudCLI starts.
+  - **Known limit:** the prune is not a safe place to recover from. If a row CloudCLI created itself (app
+    UUID as `session_id`) were wrongly pruned, the next upsert creates a new row with `session_id = <conv>`,
+    and the original app id is gone for good (the frontend gets a 404). Self-healing only holds for
+    conversations started in a terminal or the IDE; the pre-check and the running-row skip are what prevent
+    a wrong prune.
+- **Archive keeps `agy`'s files; permanent delete removes them** (2026-10-05). Archive only sets `isArchived`
+  on the CloudCLI row: restorable, and it keeps name/model/effort/permission mode. Permanent delete (`force`,
+  which defaults `deletedFromDisk` to true) also calls `IProviderSessions.deleteProviderArtifacts`, which
+  for `agy` removes `brain/<id>/`, `conversations/<id>.db` (plus `-wal`/`-shm`, defensively),
+  `annotations/<id>.pbtxt` and `presence/<id>.lock` — best-effort, each target on its own, a failure only a
+  warning. The id must be a single path segment, or nothing is removed. The index row stays (it is never
+  written), and the missing `brain/<id>` keeps it out of the list from then on, so a deleted conversation no
+  longer comes back on a full rescan, new activity or a pbtxt write. It is also gone from `agy`'s own list,
+  which matches the delete confirmation text.
+  - **Known limit:** deleting a whole project (`projects/services/project-delete.service.ts`, upstream) does
+    not call the hook yet, so its `agy` conversations keep their files and come back.
+  - **Known limit:** a running conversation deleted through the API directly (the UI disables Delete while
+    a session is processing) can be half-deleted on Windows (open files) and `agy` recreates `brain/<id>`,
+    so it comes back incomplete. Upstream does not guard any provider against this, and neither does this.
 
 ---
 

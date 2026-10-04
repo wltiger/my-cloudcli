@@ -18,7 +18,10 @@ import Database from 'better-sqlite3';
 
 import { closeConnection, initializeDatabase, projectsDb, sessionsDb } from '@/modules/database/index.js';
 import { AntigravitySessionSynchronizer } from '@/modules/providers/list/antigravity/antigravity-session-synchronizer.provider.js';
-import { writeAntigravityAnnotationTitle } from '@/modules/providers/list/antigravity/antigravity-sessions.provider.js';
+import {
+  AntigravitySessionsProvider,
+  writeAntigravityAnnotationTitle,
+} from '@/modules/providers/list/antigravity/antigravity-sessions.provider.js';
 import { sessionClearService } from '@/modules/providers/services/session-clear.service.js';
 import { sessionsService } from '@/modules/providers/services/sessions.service.js';
 
@@ -718,5 +721,210 @@ test('a transcript event is what flips the marker for the one conversation it na
     // `conv-b` was never scanned, so it has no row at all yet — a file event
     // must not become a full rescan.
     assert.equal(sessionsDb.getSessionByProviderSessionId('conv-b'), null);
+  });
+});
+
+/** `agy`'s own directory for one conversation, under the throwaway home. */
+const brainPathFor = (homeDir: string, conversationId: string) => (
+  path.join(homeDir, '.gemini', 'antigravity-cli', 'brain', conversationId)
+);
+
+const createBrain = async (homeDir: string, ...conversationIds: string[]) => {
+  await fs.mkdir(path.join(homeDir, '.gemini', 'antigravity-cli', 'brain'), { recursive: true });
+  for (const conversationId of conversationIds) {
+    await fs.mkdir(brainPathFor(homeDir, conversationId), { recursive: true });
+  }
+};
+
+const OTHER_WORKSPACE_PATH = 'D:/code/other';
+
+test('a conversation deleted in agy leaves the list, and one still on disk stays', { concurrency: false }, async () => {
+  // Deleting in `agy` removes `brain/<id>/` but leaves the shared index row.
+  await withIndex({
+    rows: [
+      { conversation_id: 'conv-kept', preview: 'kept', workspace_uris: JSON.stringify([WORKSPACE_URI]) },
+      { conversation_id: 'conv-gone', preview: 'gone', workspace_uris: JSON.stringify([WORKSPACE_URI]) },
+      { conversation_id: 'conv-archived', preview: 'archived', workspace_uris: JSON.stringify([WORKSPACE_URI]) },
+    ],
+  }, async ({ synchronizer, homeDir }) => {
+    await createBrain(homeDir, 'conv-kept', 'conv-gone', 'conv-archived');
+    assert.equal(await synchronizer.synchronize(), 3);
+    sessionsDb.updateSessionIsArchived(sessionsDb.getSessionByProviderSessionId('conv-archived')!.session_id, true);
+
+    await fs.rm(brainPathFor(homeDir, 'conv-gone'), { recursive: true });
+    await fs.rm(brainPathFor(homeDir, 'conv-archived'), { recursive: true });
+
+    // The deleted conversations are not upserted first, so they do not count.
+    assert.equal(await synchronizer.synchronize(), 1);
+    assert.ok(sessionsDb.getSessionByProviderSessionId('conv-kept'));
+    assert.equal(sessionsDb.getSessionByProviderSessionId('conv-gone'), null);
+    assert.equal(sessionsDb.getSessionByProviderSessionId('conv-archived'), null);
+  });
+});
+
+test('without a brain directory at all nothing is pruned', { concurrency: false }, async () => {
+  await withIndex({
+    rows: [{ conversation_id: 'conv-a', preview: 'x', workspace_uris: JSON.stringify([WORKSPACE_URI]) }],
+  }, async ({ synchronizer }) => {
+    assert.equal(await synchronizer.synchronize(), 1);
+    assert.equal(await synchronizer.synchronize(), 1);
+    assert.ok(sessionsDb.getSessionByProviderSessionId('conv-a'));
+  });
+});
+
+test('a pending app session the index does not know yet is not pruned', { concurrency: false }, async () => {
+  // Its own project, so no live conversation binds it during the scan.
+  await withIndex({
+    rows: [{ conversation_id: 'conv-a', preview: 'x', workspace_uris: JSON.stringify([WORKSPACE_URI]) }],
+  }, async ({ synchronizer, homeDir }) => {
+    await createBrain(homeDir, 'conv-a');
+    sessionsDb.createAppSession('app-pending', 'antigravity', OTHER_WORKSPACE_PATH, 'first words');
+
+    await synchronizer.synchronize();
+
+    const pending = sessionsDb.getSessionById('app-pending');
+    assert.ok(pending);
+    assert.equal(pending.provider_session_id, null);
+  });
+});
+
+test('a legacy row filed under its conversation id is judged against the whole index, even on a cursor scan', { concurrency: false }, async () => {
+  await withIndex({
+    rows: [
+      {
+        conversation_id: 'conv-old-gone',
+        last_modified_time: '2026-09-01 10:00:00.000000+00:00',
+        workspace_uris: JSON.stringify([WORKSPACE_URI]),
+      },
+      {
+        conversation_id: 'conv-old-kept',
+        last_modified_time: '2026-09-01 10:00:00.000000+00:00',
+        workspace_uris: JSON.stringify([WORKSPACE_URI]),
+      },
+    ],
+  }, async ({ synchronizer, homeDir }) => {
+    await createBrain(homeDir, 'conv-old-kept');
+    sessionsDb.createAppSession('conv-old-gone', 'antigravity', WORKSPACE_PATH, 'legacy');
+    sessionsDb.createAppSession('conv-old-kept', 'antigravity', WORKSPACE_PATH, 'legacy');
+
+    // Neither row moved since the cursor, so neither is in the filtered set.
+    assert.equal(await synchronizer.synchronize(new Date('2026-09-10T00:00:00Z')), 0);
+
+    assert.equal(sessionsDb.getSessionById('conv-old-gone'), null);
+    assert.ok(sessionsDb.getSessionById('conv-old-kept'));
+  });
+});
+
+test('a conversation marked as running is not pruned', { concurrency: false }, async () => {
+  await withIndex({
+    rows: [{
+      conversation_id: 'conv-live',
+      preview: 'working',
+      workspace_uris: JSON.stringify([WORKSPACE_URI]),
+      not_fully_idle: 1,
+    }],
+  }, async ({ synchronizer, homeDir }) => {
+    await createBrain(homeDir, 'conv-live');
+    await synchronizer.synchronize();
+    assert.ok(sessionsDb.getSessionByProviderSessionId('conv-live')?.external_running_at);
+
+    await fs.rm(brainPathFor(homeDir, 'conv-live'), { recursive: true });
+    await synchronizer.synchronize();
+
+    assert.ok(sessionsDb.getSessionByProviderSessionId('conv-live'));
+  });
+});
+
+test('a deleted conversation is never indexed, and a waiting app session is not bound to it', { concurrency: false }, async () => {
+  await withIndex({
+    rows: [{ conversation_id: 'conv-gone', preview: 'gone', workspace_uris: JSON.stringify([WORKSPACE_URI]) }],
+  }, async ({ synchronizer, homeDir, transcriptPath }) => {
+    await createBrain(homeDir);
+    sessionsDb.createAppSession('app-pending', 'antigravity', WORKSPACE_PATH, 'first words');
+
+    assert.equal(await synchronizer.synchronize(), 0);
+    assert.equal(await synchronizer.synchronizeFile(transcriptPath('conv-gone')), null);
+
+    assert.equal(sessionsDb.getSessionByProviderSessionId('conv-gone'), null);
+    assert.equal(sessionsDb.getSessionById('app-pending')?.provider_session_id, null);
+  });
+});
+
+/** Every file `agy` keeps for one conversation outside the shared index. */
+const createConversationArtifacts = async (homeDir: string, conversationId: string) => {
+  const appDataDir = path.join(homeDir, '.gemini', 'antigravity-cli');
+  const files = [
+    path.join(appDataDir, 'brain', conversationId, '.system_generated', 'logs', 'transcript.jsonl'),
+    path.join(appDataDir, 'conversations', `${conversationId}.db`),
+    path.join(appDataDir, 'conversations', `${conversationId}.db-wal`),
+    path.join(appDataDir, 'conversations', `${conversationId}.db-shm`),
+    path.join(appDataDir, 'annotations', `${conversationId}.pbtxt`),
+    path.join(appDataDir, 'presence', `${conversationId}.lock`),
+  ];
+  for (const file of files) {
+    await fs.mkdir(path.dirname(file), { recursive: true });
+    await fs.writeFile(file, '');
+  }
+  return [brainPathFor(homeDir, conversationId), ...files.slice(1)];
+};
+
+const exists = async (target: string) => fs.access(target).then(() => true, () => false);
+
+test('deleting artifacts removes every file agy keeps for the conversation and nothing else', { concurrency: false }, async () => {
+  await withIndex({ rows: [] }, async ({ homeDir }) => {
+    const targets = await createConversationArtifacts(homeDir, 'conv-a');
+    const neighbours = await createConversationArtifacts(homeDir, 'conv-b');
+    const provider = new AntigravitySessionsProvider();
+
+    assert.equal(await provider.deleteProviderArtifacts('conv-a'), true);
+
+    for (const target of targets) {
+      assert.equal(await exists(target), false, target);
+    }
+    for (const target of neighbours) {
+      assert.equal(await exists(target), true, target);
+    }
+    // Nothing left to remove is a no-op, not a failure.
+    assert.equal(await provider.deleteProviderArtifacts('conv-a'), false);
+    assert.equal(await provider.deleteProviderArtifacts('never-existed'), false);
+  });
+});
+
+test('a conversation id that is not a single path segment deletes nothing', { concurrency: false }, async () => {
+  await withIndex({ rows: [] }, async ({ homeDir }) => {
+    const appDataDir = path.join(homeDir, '.gemini', 'antigravity-cli');
+    const neighbours = await createConversationArtifacts(homeDir, 'conv-b');
+    await fs.mkdir(path.join(appDataDir, 'x'), { recursive: true });
+    await fs.writeFile(path.join(appDataDir, 'x.db'), '');
+    const provider = new AntigravitySessionsProvider();
+
+    for (const id of ['', ' ', '.', '..', '../x', '..\\x', 'a/b']) {
+      assert.equal(await provider.deleteProviderArtifacts(id), false, JSON.stringify(id));
+    }
+
+    for (const target of [...neighbours, path.join(appDataDir, 'x'), path.join(appDataDir, 'x.db')]) {
+      assert.equal(await exists(target), true, target);
+    }
+  });
+});
+
+test('deleting a session from disk removes agy\'s files, and the next scan does not bring it back', { concurrency: false }, async () => {
+  await withIndex({
+    rows: [{ conversation_id: 'conv-a', preview: 'x', workspace_uris: JSON.stringify([WORKSPACE_URI]) }],
+  }, async ({ synchronizer, homeDir }) => {
+    const targets = await createConversationArtifacts(homeDir, 'conv-a');
+    await synchronizer.synchronize();
+    const sessionId = sessionsDb.getSessionByProviderSessionId('conv-a')!.session_id;
+
+    const result = await sessionsService.deleteOrArchiveSessionById(sessionId, { force: true, deletedFromDisk: true });
+
+    assert.equal(result.deletedFromDisk, true);
+    for (const target of targets) {
+      assert.equal(await exists(target), false, target);
+    }
+
+    // The shared index still lists it; the missing directory keeps it out.
+    await synchronizer.synchronize();
+    assert.equal(sessionsDb.getSessionByProviderSessionId('conv-a'), null);
   });
 });

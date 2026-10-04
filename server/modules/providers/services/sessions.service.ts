@@ -5,6 +5,7 @@ import path from 'node:path';
 import { projectsDb, sessionsDb } from '@/modules/database/index.js';
 import { broadcastSessionUpserted, chatRunRegistry } from '@/modules/websocket/index.js';
 import { providerRegistry } from '@/modules/providers/provider.registry.js';
+import { deleteSessionArtifactsFromProvider } from '@/modules/providers/services/session-artifact-cleanup.service.js';
 import { sessionHistoryCache } from '@/modules/providers/services/session-history-cache.service.js';
 import { writeSessionTitleToProvider } from '@/modules/providers/services/session-title-writeback.service.js';
 import type {
@@ -660,6 +661,7 @@ export const sessionsService = {
       for (const transcript of transcripts) {
         removedFromDisk = (await removeFileIfExists(transcript)) || removedFromDisk;
       }
+      removedFromDisk = (await deleteSessionArtifactsFromProvider(session)) || removedFromDisk;
     }
 
     sessionsDb.clearSupersededProviderSessions(sessionId);

@@ -237,6 +237,16 @@ export interface IProviderSessions {
    * CLI keeps titles somewhere CloudCLI may write.
    */
   writeSessionTitle?(providerSessionId: string, title: string): void;
+
+  /**
+   * Deletes the files the provider's own CLI keeps for a session that the
+   * session row does not point at, when the session is deleted from disk.
+   *
+   * Best-effort by contract: the caller deletes the row either way and treats a
+   * throw as a warning. Resolves true when anything was removed. Implemented
+   * only by providers whose sessions live outside a single transcript file.
+   */
+  deleteProviderArtifacts?(providerSessionId: string): Promise<boolean>;
 }
 
 // ---------------------------

@@ -200,6 +200,19 @@ const readLastConversationWorkspaces = (): Map<string, string> => {
 };
 
 /**
+ * Whether `agy` has deleted a conversation.
+ *
+ * Deleting one in `agy` removes `brain/<id>/` but leaves its row in the shared
+ * index, so the row is no proof the conversation exists; the directory is.
+ * Without a `brain/` root at all there is nothing to compare against, and every
+ * conversation counts as present.
+ */
+const isConversationDeleted = (conversationId: string): boolean => {
+  const brainDir = path.join(getAntigravityAppDataDir(), 'brain');
+  return fsSync.existsSync(brainDir) && !fsSync.existsSync(path.join(brainDir, conversationId));
+};
+
+/**
  * Session indexer for Antigravity's shared conversation index.
  */
 export class AntigravitySessionSynchronizer implements IProviderSessionSynchronizer {
@@ -213,7 +226,11 @@ export class AntigravitySessionSynchronizer implements IProviderSessionSynchroni
    * the conversations that moved.
    */
   async synchronize(since?: Date): Promise<number> {
-    return this.synchronizeRows(since).processed;
+    const { processed, indexedConversationIds } = this.synchronizeRows(since);
+    // Outside `synchronizeRows`: a missing index returns early there, and the
+    // rows of conversations deleted since still have to go.
+    await this.pruneDeletedConversations(indexedConversationIds);
+    return processed;
   }
 
   /**
@@ -239,10 +256,11 @@ export class AntigravitySessionSynchronizer implements IProviderSessionSynchroni
   private synchronizeRows(
     since?: Date,
     options: { limit?: number; conversationId?: string } = {},
-  ): { processed: number; firstSessionId: string | null } {
+  ): { processed: number; firstSessionId: string | null; indexedConversationIds: Set<string> } {
+    const indexedConversationIds = new Set<string>();
     const db = openAntigravitySummariesDatabase();
     if (!db) {
-      return { processed: 0, firstSessionId: null };
+      return { processed: 0, firstSessionId: null, indexedConversationIds };
     }
 
     try {
@@ -261,6 +279,9 @@ export class AntigravitySessionSynchronizer implements IProviderSessionSynchroni
           if (!readOptionalString(row.conversation_id)) {
             return false;
           }
+          // Every id, before the cursor narrows them: the prune judges legacy
+          // rows against the whole index, not just the rows that moved.
+          indexedConversationIds.add(row.conversation_id as string);
           if (options.conversationId) {
             return row.conversation_id === options.conversationId;
           }
@@ -290,13 +311,55 @@ export class AntigravitySessionSynchronizer implements IProviderSessionSynchroni
         processed += 1;
       }
 
-      return { processed, firstSessionId };
+      return { processed, firstSessionId, indexedConversationIds };
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       console.warn('[AntigravityProvider] Failed to synchronize sessions:', message);
-      return { processed: 0, firstSessionId: null };
+      return { processed: 0, firstSessionId: null, indexedConversationIds };
     } finally {
       db.close();
+    }
+  }
+
+  /**
+   * Drops the rows of conversations `agy` has deleted.
+   *
+   * The generic orphan prune cannot see them: their `jsonl_path` is null on
+   * purpose (see `upsertSession`). A row is matched by its provider session id,
+   * or by its own id when that is a conversation the index still lists — a row
+   * filed before the id was reported back. A pending app row matches neither
+   * and is left alone, as is anything running right now.
+   */
+  private async pruneDeletedConversations(indexedConversationIds: Set<string>): Promise<void> {
+    if (!fsSync.existsSync(path.join(getAntigravityAppDataDir(), 'brain'))) {
+      return;
+    }
+
+    try {
+      // Imported here, not at the top: the websocket module reaches the
+      // provider registry, which constructs this class while it loads.
+      const { chatRunRegistry } = await import('@/modules/websocket/index.js');
+      let pruned = 0;
+      const rows = [...sessionsDb.getAllSessions(), ...sessionsDb.getArchivedSessions()]
+        .filter((row) => row.provider === this.provider);
+      for (const row of rows) {
+        const conversationId = readOptionalString(row.provider_session_id)
+          ?? (indexedConversationIds.has(row.session_id) ? row.session_id : null);
+        if (!conversationId || chatRunRegistry.getRun(row.session_id) || row.external_running_at) {
+          continue;
+        }
+
+        if (isConversationDeleted(conversationId) && sessionsDb.deleteSessionById(row.session_id)) {
+          pruned += 1;
+        }
+      }
+
+      if (pruned > 0) {
+        console.log(`[AntigravityProvider] Pruned ${pruned} session(s) deleted in agy`);
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.warn('[AntigravityProvider] Failed to prune deleted sessions:', message);
     }
   }
 
@@ -347,6 +410,13 @@ export class AntigravitySessionSynchronizer implements IProviderSessionSynchroni
     lastConversationWorkspaces: Map<string, string>,
   ): string | null {
     const conversationId = readOptionalString(row.conversation_id);
+    // A deleted conversation keeps its index row, so it is skipped here rather
+    // than indexed and pruned again: it would otherwise come back on every
+    // watcher event and take a waiting app row down with it.
+    if (conversationId && isConversationDeleted(conversationId)) {
+      return null;
+    }
+
     const projectPath = conversationId ? this.resolveProjectPath(row, lastConversationWorkspaces) : null;
     if (!conversationId || !projectPath) {
       return null;

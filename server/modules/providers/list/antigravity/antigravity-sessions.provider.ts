@@ -1412,6 +1412,51 @@ export class AntigravitySessionsProvider implements IProviderSessions {
   }
 
   /**
+   * Removes what `agy` keeps for one conversation, so a session deleted from
+   * disk does not come back on the next scan: its directory, its own database,
+   * its title and its presence lock. The shared index row stays — that file is
+   * never written — and the missing directory is what keeps the row out.
+   *
+   * Each target is removed on its own, and a failure (a file held open on
+   * Windows) is only a warning.
+   */
+  async deleteProviderArtifacts(providerSessionId: string): Promise<boolean> {
+    const id = providerSessionId.trim();
+    // `.` would name `brain/` itself, `..` the app data directory.
+    if (!id || id === '.' || id !== path.basename(id) || id.includes('..')) {
+      return false;
+    }
+
+    const appDataDir = getAntigravityAppDataDir();
+    const conversationDb = path.join(appDataDir, 'conversations', `${id}.db`);
+    const targets = [
+      getAntigravityConversationDir(id),
+      conversationDb,
+      `${conversationDb}-wal`,
+      `${conversationDb}-shm`,
+      path.join(getAntigravityAnnotationsDir(), `${id}${ANNOTATION_EXTENSION}`),
+      path.join(appDataDir, 'presence', `${id}.lock`),
+    ];
+
+    let removed = false;
+    for (const target of targets) {
+      if (!fsSync.existsSync(target)) {
+        continue;
+      }
+
+      try {
+        fsSync.rmSync(target, { recursive: true, force: true });
+        removed = true;
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        console.warn(`[AntigravityProvider] Could not delete ${target}:`, message);
+      }
+    }
+
+    return removed;
+  }
+
+  /**
    * Normalizes one `transcript.jsonl` record into frontend messages.
    *
    * Live turns do not come through here — the runtime maps `agy`'s NDJSON
