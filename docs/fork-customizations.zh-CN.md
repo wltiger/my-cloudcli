@@ -528,3 +528,13 @@ Stop 是能看见的那一半。`chat.abort` 现在接受「run 已结束、但�
 **和官方模型的差别（与其他所有 provider 不同——那边名字一旦存下就以 CloudCLI 里的为准）：** antigravity 以 annotation 文件为准。文件存在且有标题时，synchronizer 用它覆盖已存的名字；只靠 upsert 的话，CloudCLI 自己建的行（`session_id <> provider_session_id`）会保留旧名，所以两者不一致时 synchronizer 还会显式调 `updateSessionCustomName`（两边都先过 `normalizeSessionName` 再比较，长名字不会每次扫描都被重写）。没有 annotation 时沿用旧逻辑。改名和 Clear 反方向，经 `writeSessionTitleToProvider` → `writeSessionTitle?` 写回：先改 DB，写文件尽力而为（失败只打 warn，下次同步会用文件里的标题恢复），经临时文件加 rename 写入，保留文件里其他行，会话 id 必须是单个路径段。第二个监听根目录 `annotations/` 触发按会话的同步；增量扫描还会放进 annotation 修改时间晚于游标的会话，因为改名不会推动索引的 `last_modified_time`（否则 CloudCLI 没运行时写的标题会一直过期）。antigravity 不支持 fork，所以只有改名和 Clear 会写回；Clear 的 `[Cleared] …` 名字也会出现在 `agy` 自己的列表里。
 
 **同步官方时怎么办：** 两边都留。本 fork 自有的文件永远不冲突。接口方法、监听根目录、`isWatcherTargetFile` 分支和 `renameSessionById` 里那一行调用都是纯新增：如果官方重写了这些函数，把这四处小改动重新套上，不要丢掉——少了那次调用，CloudCLI 里的改名会悄悄不再传到 `agy`；少了监听根目录，服务运行时写的标题要等下一次全量扫描才更新。
+
+## 37. iOS 桌面书签：不透明状态栏（`default`）
+
+**文件：** 官方已有的 `index.html`（`apple-mobile-web-app-status-bar-style` 这个 meta）、官方已有的 `src/shared/context/ThemeContext.tsx`（去掉运行中修改该 meta 的两处 `setAttribute`，`theme-color` 的处理保留）。
+
+**为什么改：** 在无刘海 iPhone（SE / 8）上从“添加到主屏幕”启动时，`black-translucent` 会让页面从屏幕顶部开始画，但布局高度只有屏幕高度减 20pt。真机实测：`innerHeight` = `100dvh` = 647，`100vh` = 667 = `screen.height`，底部 20pt 里什么都画不出来（`position: fixed` 加 `height: 100vh` 也不行）。表现为登录页和聊天输入框下方一条空白。主题代码还会在运行中把这个 meta 在 `default` 和 `black-translucent` 之间切换。
+
+**和官方的差异：** 状态栏样式固定为 `default`（不透明，页面从状态栏下面开始，正好填满；在 iPhone SE 上保留 `viewport-fit=cover` 实测通过），主题不再改这个 meta。iOS 15 起桌面书签的状态栏跟随 `theme-color`（二手资料；`ThemeContext` 本来就按主题同步它），所以两种主题下应该和页面同色。改成 `black` 也能修好缺口，但亮色模式下状态栏是纯黑。只在 iPhone SE 3（iOS 26.5.2）上验证过，**有刘海的 iPhone 没测**。疑似原因是 iOS 26 的 WebKit 回归（WebKit bug 301108，只见于二手资料）：缺口等于状态栏高度，刘海机缺得更多。刘海机上页面现在会铺到屏幕底，而聊天输入框没有底部安全区内边距，Home 指示条可能压住输入框，发现了再补。实际操作中每次改动后我们都重新添加了桌面图标，所以已有的图标建议删掉重新添加。`index.css` 里的安全区规则没动。
+
+**同步官方时怎么办：** 这个 meta 和被删掉的 `setAttribute` 保留我方。如果官方重新引入 `black-translucent`，先在无刘海 iPhone 上实测。

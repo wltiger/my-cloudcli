@@ -58,12 +58,7 @@ export const ThemeProvider = ({ children }: { children: ReactNode }) => {
     if (isDarkMode) {
       document.documentElement.classList.add('dark');
 
-      // Update iOS status bar style and theme color for dark mode
-      const statusBarMeta = document.querySelector('meta[name="apple-mobile-web-app-status-bar-style"]');
-      if (statusBarMeta) {
-        statusBarMeta.setAttribute('content', 'black-translucent');
-      }
-
+      // Update theme color for dark mode
       const themeColorMeta = document.querySelector('meta[name="theme-color"]');
       if (themeColorMeta) {
         themeColorMeta.setAttribute('content', '#141414'); // Dark background color (hsl(0 0% 8%))
@@ -71,12 +66,7 @@ export const ThemeProvider = ({ children }: { children: ReactNode }) => {
     } else {
       document.documentElement.classList.remove('dark');
 
-      // Update iOS status bar style and theme color for light mode
-      const statusBarMeta = document.querySelector('meta[name="apple-mobile-web-app-status-bar-style"]');
-      if (statusBarMeta) {
-        statusBarMeta.setAttribute('content', 'default');
-      }
-
+      // Update theme color for light mode
       const themeColorMeta = document.querySelector('meta[name="theme-color"]');
       if (themeColorMeta) {
         themeColorMeta.setAttribute('content', '#f6f4ef'); // Light background color (warm cream)
