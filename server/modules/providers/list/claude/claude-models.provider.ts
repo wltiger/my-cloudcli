@@ -43,7 +43,7 @@ export const CLAUDE_PREDEFINED_MODELS: ProviderModelsDefinition = {
       label: 'Best available',
       description: 'Use Fable 5 when available, otherwise the latest Opus model.',
       effort: {
-        default: 'high',
+        default: 'medium',
         values: [
           { value: 'low' },
           { value: 'medium' },
@@ -59,7 +59,7 @@ export const CLAUDE_PREDEFINED_MODELS: ProviderModelsDefinition = {
       label: 'Fable 5',
       description: 'Most capable Claude model for the hardest, longest-running tasks.',
       effort: {
-        default: 'high',
+        default: 'medium',
         values: [
           { value: 'low' },
           { value: 'medium' },
@@ -75,7 +75,7 @@ export const CLAUDE_PREDEFINED_MODELS: ProviderModelsDefinition = {
       label: 'Sonnet',
       description: 'Latest Sonnet model for everyday coding tasks.',
       effort: {
-        default: 'high',
+        default: 'xhigh',
         values: [
           { value: 'low' },
           { value: 'medium' },
@@ -91,7 +91,7 @@ export const CLAUDE_PREDEFINED_MODELS: ProviderModelsDefinition = {
       label: 'Sonnet (1M context)',
       description: 'Latest Sonnet model with a 1M context window.',
       effort: {
-        default: 'high',
+        default: 'xhigh',
         values: [
           { value: 'low' },
           { value: 'medium' },
@@ -107,7 +107,7 @@ export const CLAUDE_PREDEFINED_MODELS: ProviderModelsDefinition = {
       label: 'Opus',
       description: 'Latest Opus model for complex reasoning and coding tasks.',
       effort: {
-        default: 'high',
+        default: 'medium',
         values: [
           { value: 'low' },
           { value: 'medium' },
@@ -123,7 +123,7 @@ export const CLAUDE_PREDEFINED_MODELS: ProviderModelsDefinition = {
       label: 'Opus (1M context)',
       description: 'Latest Opus model with a 1M context window.',
       effort: {
-        default: 'high',
+        default: 'medium',
         values: [
           { value: 'low' },
           { value: 'medium' },
@@ -138,6 +138,17 @@ export const CLAUDE_PREDEFINED_MODELS: ProviderModelsDefinition = {
       value: 'haiku',
       label: 'Haiku',
       description: 'Fast and efficient Claude model for simple tasks.',
+      effort: {
+        default: 'xhigh',
+        values: [
+          { value: 'low' },
+          { value: 'medium' },
+          { value: 'high' },
+          { value: 'xhigh' },
+          { value: 'max' },
+          ULTRACODE_EFFORT_OPTION,
+        ],
+      },
     },
     {
       value: 'opusplan',

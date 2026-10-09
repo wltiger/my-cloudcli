@@ -168,6 +168,45 @@ test('Claude runtime environment overrides', async (t) => {
     assert.equal(call?.options.effort, undefined);
   });
 
+  await t.test('resolves the composer\'s "default" sentinel into the model\'s declared default', async () => {
+    await queryClaudeSDK(
+      'hello',
+      { sessionId: 'session-8', model: 'local-model-with-effort', effort: 'default', images: [], files: [] },
+      createFakeWs(),
+      createFakeContext(CUSTOM_ENDPOINT_CATALOG),
+    );
+
+    const call = calls.at(-1);
+    assert.equal(call?.options.effort, 'medium');
+  });
+
+  // The external agent API omits `effort` rather than sending the sentinel, and
+  // an omitted field has always meant "let the SDK decide". Resolving the
+  // sentinel must not quietly swallow that second, distinct meaning.
+  await t.test('leaves an omitted effort to the SDK even when the model declares a default', async () => {
+    await queryClaudeSDK(
+      'hello',
+      { sessionId: 'session-9', model: 'local-model-with-effort', images: [], files: [] },
+      createFakeWs(),
+      createFakeContext(CUSTOM_ENDPOINT_CATALOG),
+    );
+
+    const call = calls.at(-1);
+    assert.equal(call?.options.effort, undefined);
+  });
+
+  await t.test('drops the sentinel for a model that declares no default', async () => {
+    await queryClaudeSDK(
+      'hello',
+      { sessionId: 'session-10', model: 'plain-model', effort: 'default', images: [], files: [] },
+      createFakeWs(),
+      createFakeContext(CUSTOM_ENDPOINT_CATALOG),
+    );
+
+    const call = calls.at(-1);
+    assert.equal(call?.options.effort, undefined);
+  });
+
   await t.test('leaves a plain custom model\'s environment unchanged (no regression)', async () => {
     await queryClaudeSDK(
       'hello',

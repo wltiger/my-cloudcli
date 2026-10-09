@@ -538,3 +538,21 @@ Stop 是能看见的那一半。`chat.abort` 现在接受「run 已结束、但�
 **和官方的差异：** 状态栏样式固定为 `default`（不透明，页面从状态栏下面开始，正好填满；在 iPhone SE 上保留 `viewport-fit=cover` 实测通过），主题不再改这个 meta。iOS 15 起桌面书签的状态栏跟随 `theme-color`（二手资料；`ThemeContext` 本来就按主题同步它），所以两种主题下应该和页面同色。改成 `black` 也能修好缺口，但亮色模式下状态栏是纯黑。只在 iPhone SE 3（iOS 26.5.2）上验证过，**有刘海的 iPhone 没测**。疑似原因是 iOS 26 的 WebKit 回归（WebKit bug 301108，只见于二手资料）：缺口等于状态栏高度，刘海机缺得更多。刘海机上页面现在会铺到屏幕底，而聊天输入框没有底部安全区内边距，Home 指示条可能压住输入框，发现了再补。实际操作中每次改动后我们都重新添加了桌面图标，所以已有的图标建议删掉重新添加。`index.css` 里的安全区规则没动。
 
 **同步官方时怎么办：** 这个 meta 和被删掉的 `setAttribute` 保留我方。如果官方重新引入 `black-translucent`，先在无刘海 iPhone 上实测。
+
+## 38. Claude 目录：fork 自定的各模型 effort 默认值、给 `haiku` 补上 effort 列表，以及让运行时真正认这些默认值
+
+**文件：** 官方已有的 `server/modules/providers/list/claude/claude-models.provider.ts`（只动 `CLAUDE_PREDEFINED_MODELS`）、`server/modules/providers/list/claude/claude-runtime.provider.js`（`resolveClaudeEffort`）。
+
+**为什么改：** 官方目录里所有支持 effort 的档位默认值都是 `effort.default: 'high'`，而 `haiku` 干脆没有 `effort` 块——所以输入框的 Reasoning 菜单对 Haiku 是空的，并且 `resolveClaudeEffort`（按白名单读 `option.effort.values`）会把为它选的任何 effort 静默丢掉。Haiku 5.5 支持完整档位，本 fork 因此补上这个块，并把默认值改成这个 fork 各模型想要的值。
+
+**未经验证的外部事实：** “Haiku 5.5 接受 `low`/`medium`/`high`/`xhigh`/`max`”（以及由此可用的 `ultracode`——它展开成 `xhigh` 加会话级的 `enableWorkflows` 设置）这个说法来自本仓库之外。代码里没有任何地方检查模型能力，`applyClaudeEffort` 也没有按模型的门控，所以不支持的档位会照发出去、由 CLI 拒绝或忽略，而不是在这里被挡住。如果实测发现 Haiku 不接受高档位，请直接裁掉它 `values` 里的档位，不要加门控。
+
+**`effort.default` 在官方那边是死字段——本次改动的关键就在这里。** 输入框表示“用户没明确选”的哨兵值是字符串 `'default'`（`src/shared/constants.ts` 的 `DEFAULT_EFFORT_VALUE`），前端在用户选档位之前一直存的就是它，而 `resolveClaudeEffort` 原来直接把它拒掉——所以 `server/` 和 `src/` 里根本没有任何地方读 `effort.default`。（有一个单测断言了 default，但那是 `provider-models.service.test.ts` 里自定义模型的用例，不是目录档位。）也就是说官方那个统一的 `'high'` 同样从没生效过，每次 turn 走的都是 SDK 自己的默认值。本 fork 的 `resolveClaudeEffort` 现在会把 `'default'` 解析成所选模型在目录里声明的 `effort.default`，下面那些值才真正起作用。`server/modules/providers/tests/claude-runtime.test.ts` 覆盖了三种情形：哨兵被解析、不传 effort 时仍是 undefined、没有 default 的模型上哨兵被丢弃；`claude-models.test.ts` 则守住目录的不变量——每个 `effort.default` 必须在它自己的 `values` 里，因为越界的 default 会被同一个白名单挡掉，等于悄悄重现了这个条目要修的 bug。
+
+**改动范围——只有字面量 `'default'` 这个哨兵会被解析。** 不传 effort（`undefined`）保持原来的含义“交给 SDK 决定”，外部 agent API（`agent.routes.ts` 的 `POST /api/agents`）在调用方不带该字段时给的就是 `undefined`，这条路径不变。但**显式传字符串 `'default'`** 的调用方现在会拿到模型默认值——API 无法把这个意图和输入框的哨兵区分开。haiku 自身的档位生效是另一件事、也在预期内：它原来没有 `effort` 块，用户选的每个档位都被白名单丢掉，现在会生效。
+
+**还有谁受影响。** 会话行里存的是字面量 `'default'` 的会解析成新档位。起作用的是前端而不是服务端：服务端组装 turn 时从不读 `sessions.effort`，effort 只从请求体来（`setSessionEffort` 只负责写库）。输入框在打开会话时把存的值读回来，随下一次 turn 发出去，所以用户从没选过档位的会话和新会话受同样影响；记录过具体档位的会话不变。声明了 effort 档位的自定义模型也受影响：`buildCustomModelEffort`（`custom-model-endpoint.ts`）会给它生成自己的 `default`——有 medium 就取 medium，否则取 `CUSTOM_MODEL_EFFORT_LEVELS` **规范顺序**（low→max）里的第一个，不是用户声明的顺序；声明 `['xhigh','low']` 的模型因此默认到 `low`。没声明档位的自定义模型没有 `default`，仍然解析成 `undefined`。
+
+**和官方的差异：** `sonnet` 与 `sonnet[1m]` 默认 `xhigh`；`opus`、`opus[1m]`、`fable`、`best` 默认 `medium`；`haiku` 新增 effort 块（`values` = low / medium / high / xhigh / max + ultracode，`default: 'xhigh'`），官方此处没有；`default` 和 `opusplan` 保持 `'high'`。**这会改变既有安装的行为。** 相对官方统一的 `'high'`，这些逐模型的值对 `opus`、`opus[1m]`、`fable`、`best` 是降一档，对 `sonnet`、`sonnet[1m]` 是升一档——但要注意官方那个 `'high'` 本身就没被读过，所以真正对比的基准是 **SDK 自己的默认值，而它没有实测过**。下次再动这些值之前先测一次。
+
+**同步官方时怎么办：** 保留我方——但这只是“一张数据表 + 一个解析函数”，所以要手工套，不要整份取任一方。官方很可能自己也会补 Haiku 的 effort 块，或者开始认 `effort.default`；真那样的话，`values` 数组和解析函数的形状采用官方那份，只重新套上本 fork 的 `default` 选择——它的列表更权威，它新增的档位否则会被本 fork 丢掉。反过来同样成立：丢掉本 fork 的这个块，Haiku 的 Reasoning 菜单会重新变空；丢掉解析函数的改动，所有 `default` 值会第二次变成没人读的死数据。届时值得重新判断一次：各模型分别设默认值是否仍优于官方统一的 `high`。

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { extractClaudeEventModel } from '@/modules/providers/list/claude/claude-models.provider.js';
+import { extractClaudeEventModel, CLAUDE_PREDEFINED_MODELS } from '@/modules/providers/list/claude/claude-models.provider.js';
 
 const SESSION_ID = 'session-1';
 
@@ -84,4 +84,25 @@ test('falls back to the message model when every content hit is a placeholder', 
     ),
     'claude-sonnet-5',
   );
+});
+
+// `resolveClaudeEffort` sends a model's `effort.default` only when the tier is
+// also in that model's `values`; a default outside its own list fails the
+// whitelist and silently falls back to the SDK's own effort. Catalog entries are
+// hand-edited, so this is the invariant that keeps a typo from turning a chosen
+// default into no default at all.
+test('every catalog entry declares an effort default its own values allow', () => {
+  const withEffort = CLAUDE_PREDEFINED_MODELS.OPTIONS.filter((option) => option.effort);
+
+  // Guards against the assertion silently passing if the effort blocks are ever
+  // dropped wholesale.
+  assert.ok(withEffort.length > 0, 'expected at least one catalog entry to declare an effort block');
+
+  for (const option of withEffort) {
+    const allowed = option.effort?.values.map((value) => value.value) ?? [];
+    assert.ok(
+      allowed.includes(option.effort?.default ?? ''),
+      `${option.value}: default "${option.effort?.default}" is not one of its own values [${allowed.join(', ')}]`,
+    );
+  }
 });

@@ -98,12 +98,36 @@ const TOOLS_REQUIRING_INTERACTION = new Set(['AskUserQuestion', 'ExitPlanMode'])
 // selection is translated back into the two options the SDK actually understands here.
 const ULTRACODE_SDK_EFFORT = 'xhigh';
 
+/**
+ * Resolves the effort one Claude turn runs with.
+ *
+ * `'default'` is the composer's sentinel for "no explicit choice" — the value
+ * every provider starts on (DEFAULT_EFFORT_VALUE) and the one the frontend
+ * keeps storing until the user picks a tier. Rather than dropping it (which left
+ * the catalog's per-model `effort.default` unread by anything), it is resolved
+ * here into that model's declared default.
+ *
+ * Only the literal sentinel is resolved. An omitted effort (`undefined`) — what
+ * the external agent API sends when the caller leaves the field out — keeps its
+ * old meaning of "let the SDK decide", so that call path is unchanged. A caller
+ * that explicitly sends the *string* `'default'` does get the model default,
+ * sentinel or not; the API cannot tell that intent apart from the composer's.
+ *
+ * A model whose catalog entry declares no default (a custom model with no
+ * declared effort levels, or any option without an `effort` block) resolves to
+ * undefined, leaving the SDK's default in place. A custom model that *does*
+ * declare levels gets one from `buildCustomModelEffort`, so it resolves to its
+ * own declared default too.
+ */
 function resolveClaudeEffort(model, effort, modelsDefinition = CLAUDE_PREDEFINED_MODELS) {
   const selectedModel = modelsDefinition?.OPTIONS?.find((option) => option.value === model) || null;
   const allowedEfforts = selectedModel?.effort?.values
     ?.map((value) => value.value) || [];
-  return typeof effort === 'string' && effort !== 'default' && allowedEfforts.includes(effort)
-    ? effort
+  const requested = effort === 'default'
+    ? selectedModel?.effort?.default
+    : effort;
+  return typeof requested === 'string' && allowedEfforts.includes(requested)
+    ? requested
     : undefined;
 }
 
