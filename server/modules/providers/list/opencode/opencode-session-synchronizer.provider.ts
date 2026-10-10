@@ -124,7 +124,16 @@ export class OpenCodeSessionSynchronizer implements IProviderSessionSynchronizer
     // ids are read so nothing can interleave between reading them and deleting:
     // the runtime maps a provider id onto its app row as soon as OpenCode
     // reports it, possibly before OpenCode has committed that session.
-    const { chatRunRegistry } = await import('@/modules/websocket/index.js');
+    // A throw here would otherwise reject `synchronize()` and take the whole
+    // round's pruning down with it, this provider's and the generic one's.
+    let chatRunRegistry: typeof import('@/modules/websocket/index.js')['chatRunRegistry'];
+    try {
+      ({ chatRunRegistry } = await import('@/modules/websocket/index.js'));
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.warn('[OpenCodeProvider] Skipped pruning deleted sessions:', message);
+      return;
+    }
 
     const dbPath = getOpenCodeDatabasePath();
     if (!fsSync.existsSync(dbPath)) {
@@ -155,6 +164,24 @@ export class OpenCodeSessionSynchronizer implements IProviderSessionSynchronizer
       return;
     }
 
+    this.pruneRows(sessionIds, databaseModifiedAt, chatRunRegistry);
+  }
+
+  /**
+   * The judging-and-deleting half of `pruneDeletedSessions`, deliberately
+   * synchronous.
+   *
+   * Nothing may be awaited between reading the ids and deleting the rows: the
+   * runtime binds a provider id onto its app row from another module, and a
+   * yield here would let a row be bound after this snapshot and then deleted
+   * for an id the snapshot never saw. A non-async signature is what keeps that
+   * true, so do not make this method async to add a broadcast or a log.
+   */
+  private pruneRows(
+    sessionIds: Set<string>,
+    databaseModifiedAt: number,
+    chatRunRegistry: typeof import('@/modules/websocket/index.js')['chatRunRegistry'],
+  ): void {
     try {
       let pruned = 0;
       const rows = [...sessionsDb.getAllSessions(), ...sessionsDb.getArchivedSessions()]

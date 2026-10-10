@@ -202,6 +202,25 @@ test('a pending app session OpenCode does not know yet is not pruned', { concurr
   });
 });
 
+test('an app row whose ids differ is judged by its provider id, not its own', { concurrency: false }, async () => {
+  // A row CloudCLI created and then bound: `session_id` is the app id, the
+  // provider's own id lives in `provider_session_id` only. Judging against
+  // `session_id` would delete this live session on every scan, and the
+  // incremental cursor means it would never come back.
+  await withOpenCode({
+    database: [{ id: 'oc-bound' }],
+  }, async ({ synchronizer }) => {
+    sessionsDb.createAppSession('app-mapped', 'opencode', OTHER_WORKSPACE_PATH, 'mapped');
+    sessionsDb.assignProviderSessionId('app-mapped', 'oc-bound');
+
+    await synchronizer.synchronize();
+
+    const bound = sessionsDb.getSessionById('app-mapped');
+    assert.ok(bound, 'the row bound to a live OpenCode session must survive');
+    assert.equal(bound.provider_session_id, 'oc-bound');
+  });
+});
+
 test('a session running in CloudCLI is not pruned before OpenCode commits it', { concurrency: false }, async () => {
   // The runtime maps the provider id as soon as OpenCode reports it, which can
   // be before the session row is visible to a reader.
