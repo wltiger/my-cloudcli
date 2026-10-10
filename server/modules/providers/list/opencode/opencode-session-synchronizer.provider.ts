@@ -39,6 +39,9 @@ export class OpenCodeSessionSynchronizer implements IProviderSessionSynchronizer
    */
   async synchronize(since?: Date): Promise<number> {
     const result = this.synchronizeRows(since);
+    // Independent of `since`: every scan after the first one carries a cursor,
+    // and sessions deleted in OpenCode never move past it.
+    await this.pruneDeletedSessions();
     return result.processed;
   }
 
@@ -102,6 +105,81 @@ export class OpenCodeSessionSynchronizer implements IProviderSessionSynchronizer
       return { processed: 0, firstSessionId: null };
     } finally {
       db.close();
+    }
+  }
+
+  /**
+   * Drops the rows of sessions deleted from OpenCode outside CloudCLI.
+   *
+   * The generic orphan prune cannot see them: their `jsonl_path` is null on
+   * purpose (see `upsertSession`). Judged against every id in `session`,
+   * archived ones included — the upsert's `time_archived IS NULL` filter would
+   * read a session archived in OpenCode as deleted. An unreadable database
+   * skips the whole round.
+   */
+  private async pruneDeletedSessions(): Promise<void> {
+    // Imported here, not at the top: the websocket module reaches the provider
+    // registry, which constructs this class while it loads. Awaited before the
+    // ids are read so nothing can interleave between reading them and deleting:
+    // the runtime maps a provider id onto its app row as soon as OpenCode
+    // reports it, possibly before OpenCode has committed that session.
+    const { chatRunRegistry } = await import('@/modules/websocket/index.js');
+
+    const dbPath = getOpenCodeDatabasePath();
+    if (!fsSync.existsSync(dbPath)) {
+      return;
+    }
+
+    let sessionIds: Set<string>;
+    let databaseModifiedAt: number;
+    try {
+      const db = new Database(dbPath, { readonly: true, fileMustExist: true });
+      try {
+        const rows = db.prepare('SELECT id FROM session').all() as Array<{ id: string }>;
+        sessionIds = new Set(rows.map((row) => row.id));
+      } finally {
+        db.close();
+      }
+
+      const walPath = `${dbPath}-wal`;
+      databaseModifiedAt = Math.max(
+        fsSync.statSync(dbPath).mtimeMs,
+        fsSync.existsSync(walPath) ? fsSync.statSync(walPath).mtimeMs : 0,
+      );
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.warn('[OpenCodeProvider] Skipped pruning deleted sessions:', message);
+      return;
+    }
+
+    try {
+      let pruned = 0;
+      const rows = [...sessionsDb.getAllSessions(), ...sessionsDb.getArchivedSessions()]
+        .filter((row) => row.provider === this.provider);
+      for (const row of rows) {
+        const providerSessionId = readOptionalString(row.provider_session_id);
+        if (!providerSessionId || chatRunRegistry.getRun(row.session_id)) {
+          continue;
+        }
+
+        // A row touched after the database last changed was not judged by this
+        // snapshot. That is the case when OpenCode writes somewhere else than
+        // the path read here (`getOpenCodeDatabasePath` ignores `XDG_DATA_HOME`).
+        if (Date.parse(row.updated_at) > databaseModifiedAt) {
+          continue;
+        }
+
+        if (!sessionIds.has(providerSessionId) && sessionsDb.deleteSessionById(row.session_id)) {
+          pruned += 1;
+        }
+      }
+
+      if (pruned > 0) {
+        console.log(`[OpenCodeProvider] Pruned ${pruned} session(s) deleted in OpenCode`);
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.warn('[OpenCodeProvider] Failed to prune deleted sessions:', message);
     }
   }
 
