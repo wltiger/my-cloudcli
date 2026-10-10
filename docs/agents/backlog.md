@@ -55,10 +55,10 @@
   - 复现:用自定义模型 "glm-5.3-flash[1m]"(声明 1048576 context)跑 Claude Code
   - 现象:错误原文 — Claude Code is running "glm-5.3-flash[1m]" with a 1000000-token context window, not the 1048576 tokens this model declares. CLAUDE_CODE_MAX_CONTEXT_TOKENS was not honored — either the installed Claude Code is too old to know it, or Claude Code recognizes this model name and uses its own window. The context readout still shows the declared value.
   - 期望:readout 与实际窗口一致(或 CLAUDE_CODE_MAX_CONTEXT_TOKENS 生效);具体在哪一侧修,开工时定
-- 2026-09-28 【bug】自定义模型的 Reasoning 选项排序混乱
+- 2026-09-28 【bug】自定义模型的 Reasoning 选项排序混乱,且没有「默认档位」可选
   - 复现:打开自定义模型的 Reasoning 下拉
-  - 现象:选项顺序混乱,如出现 Default / Low / Max / High
-  - 期望:选项按强度合理顺序排列
+  - 现象:选项顺序混乱,如出现 Default / Low / Max / High;且无法为自定义模型指定「默认用哪一档」
+  - 期望:选项按强度合理顺序排列;并支持指定默认 effort —— 即本次给内置模型加的能力(目录 `effort.default` + 运行时把 `'default'` 哨兵解析成它)也要适用于自定义模型,让其默认档位可配、可选
 - 2026-09-28 【bug】antigravity provider 的 tool use 渲染不如 Claude Code 美观
   - 复现:用 antigravity provider 发消息,触发 tool use
   - 现象:tool use 的渲染效果不太美观,与 Claude Code provider 的不一致
@@ -71,6 +71,11 @@
   - 复现:发生一次上下文压缩后,看聊天框显示的上下文占用数量
   - 现象:数量还是压缩前的值,没跟着压缩结果更新
   - 期望:压缩后上下文数量刷新为当前实际值
+- 2026-10-09 【bug】后端下线/网络中断时前端仍能提交提示词,界面一直显示「工作中」但其实没提交
+  - 复现:断开网络或把后端停掉,在前端聊天框里发送提示词
+  - 现象:提示词照样能发出去,界面一直停在「工作中」状态;实际并没有提交成功,用户看不出是失败了
+  - 期望:检测到网络中断/后端不可达时给出明确提示或状态指示(如「连接已断开」「后端不可达」),不要让界面停在假的「工作中」;并说明重连后如何处理那条消息
+  - 待补:WebSocket 断线时的表现(是否有重连、是否静默失败)尚未确认,开工时查
 - 2026-10-04 【bug】外部删除 session 后,claude 侧同步清除但 agy(antigravity)侧没清
   - 复现:在 CloudCLI 外(原生 CLI/文件)删除一个 antigravity session,回 UI 看同步结果
   - 现象:claude 的 session 同步后清掉了,agy 的还在
