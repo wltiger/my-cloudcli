@@ -240,6 +240,13 @@ test('a row newer than the OpenCode database is not judged by it', { concurrency
     await synchronizer.synchronize();
 
     assert.ok(sessionsDb.getSessionByProviderSessionId('oc-elsewhere'));
+
+    // OpenCode writes through its WAL, which can be newer than the main file;
+    // once it is newer than the row, the snapshot does judge it.
+    await fs.writeFile(`${databasePath}-wal`, '');
+    await synchronizer.synchronize();
+
+    assert.equal(sessionsDb.getSessionByProviderSessionId('oc-elsewhere'), null);
   });
 });
 

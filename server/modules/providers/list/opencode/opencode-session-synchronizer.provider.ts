@@ -35,7 +35,8 @@ export class OpenCodeSessionSynchronizer implements IProviderSessionSynchronizer
   private readonly provider = 'opencode' as const;
 
   /**
-   * Scans OpenCode's shared opencode.db and upserts active sessions into DB.
+   * Scans OpenCode's shared opencode.db and upserts active sessions into DB,
+   * then drops the rows of sessions opencode.db no longer has.
    */
   async synchronize(since?: Date): Promise<number> {
     const result = this.synchronizeRows(since);
@@ -133,6 +134,14 @@ export class OpenCodeSessionSynchronizer implements IProviderSessionSynchronizer
     let sessionIds: Set<string>;
     let databaseModifiedAt: number;
     try {
+      // Taken before the snapshot, so a row written while it is read counts as
+      // newer than it rather than being judged by it.
+      const walPath = `${dbPath}-wal`;
+      databaseModifiedAt = Math.max(
+        fsSync.statSync(dbPath).mtimeMs,
+        fsSync.existsSync(walPath) ? fsSync.statSync(walPath).mtimeMs : 0,
+      );
+
       const db = new Database(dbPath, { readonly: true, fileMustExist: true });
       try {
         const rows = db.prepare('SELECT id FROM session').all() as Array<{ id: string }>;
@@ -140,12 +149,6 @@ export class OpenCodeSessionSynchronizer implements IProviderSessionSynchronizer
       } finally {
         db.close();
       }
-
-      const walPath = `${dbPath}-wal`;
-      databaseModifiedAt = Math.max(
-        fsSync.statSync(dbPath).mtimeMs,
-        fsSync.existsSync(walPath) ? fsSync.statSync(walPath).mtimeMs : 0,
-      );
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       console.warn('[OpenCodeProvider] Skipped pruning deleted sessions:', message);
