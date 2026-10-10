@@ -320,6 +320,34 @@ test('an unreadable OpenCode database skips the prune instead of emptying the li
   });
 });
 
+test('a failing chatRunRegistry import skips the round instead of rejecting', { concurrency: false }, async (t) => {
+  // The import is the one statement in `pruneDeletedSessions` outside its own
+  // try/catch. Left unguarded it rejects `synchronize()`, and the service's
+  // `allSettled` turns that into a failed provider — which takes the generic
+  // orphan prune down with it for the whole round.
+  //
+  // Needs `--experimental-test-module-mocks` (already in `npm test`'s script;
+  // add it by hand when running this file directly).
+  t.mock.module('@/modules/websocket/index.js', {
+    namedExports: {
+      get chatRunRegistry(): never {
+        throw new Error('websocket module unavailable');
+      },
+    },
+  });
+
+  await withOpenCode({ database: [{ id: 'oc-live' }] }, async ({ synchronizer }) => {
+    indexSession('oc-live');
+
+    // Asserts only that the failure does not escape. The row is not checked:
+    // a skipped round keeps every row, but so does a healthy round here, since
+    // `oc-live` really is in the database.
+    await assert.doesNotReject(() => synchronizer.synchronize());
+
+    assert.ok(sessionsDb.getSessionByProviderSessionId('oc-live'));
+  });
+});
+
 test('a watcher event indexes but does not prune', { concurrency: false }, async () => {
   await withOpenCode({
     database: [{ id: 'oc-kept' }],
