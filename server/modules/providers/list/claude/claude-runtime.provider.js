@@ -24,7 +24,7 @@ import {
   buildClaudeUserContent,
   normalizeImageDescriptors
 } from '@/shared/image-attachments.js';
-import { createBackgroundWorkLedger } from '@/modules/providers/list/claude/claude-background-work.js';
+import { createBackgroundWorkSnapshot } from '@/modules/providers/list/claude/claude-background-work.js';
 import { resolveClaudeCustomModelEnv } from '@/modules/providers/list/claude/claude-custom-endpoint.js';
 import {
   CLAUDE_PREDEFINED_MODELS,
@@ -52,9 +52,14 @@ import {
   notifyRunStopped,
   notifyUserIfEnabled
 } from '@/modules/notifications/index.js';
+import { sessionHistoryCache } from '@/modules/providers/services/session-history-cache.service.js';
 import { createCompleteMessage, createNormalizedMessage } from '@/shared/utils.js';
 
 const activeSessions = new Map();
+// Outstanding background tasks per live session, keyed like activeSessions. An
+// entry lives exactly as long as the map entry it shadows: cleared when the
+// session is removed, and reset when a newer run takes the key over.
+const backgroundWork = createBackgroundWorkTracker();
 const pendingToolApprovals = new Map();
 // Sessions cancelled via abort-session. The abort handler already sent the
 // terminal `complete` (aborted: true) to the client, so the run loop must not
@@ -401,6 +406,9 @@ function addSession(sessionId, queryInstance, writer = null, releaseInput = null
         console.error(`Error interrupting superseded run for session ${sessionId}:`, error?.message || error);
       });
     existing.releaseInput?.();
+    // Whatever the superseded process had outstanding dies with it and will
+    // never report, so the new run starts from an empty task set.
+    backgroundWork.clear(sessionId);
   }
   const carried = superseding ? null : existing;
   activeSessions.set(sessionId, {
@@ -411,6 +419,9 @@ function addSession(sessionId, queryInstance, writer = null, releaseInput = null
     // Re-registered mid-run once the provider session id lands; keep the closer.
     releaseInput: releaseInput || carried?.releaseInput || null
   });
+  // The history reader reports a background agent as running or stopped by
+  // whether this entry exists, and the cached history does not see this map.
+  sessionHistoryCache.invalidate(sessionId);
 }
 
 /**
@@ -419,6 +430,11 @@ function addSession(sessionId, queryInstance, writer = null, releaseInput = null
  */
 function removeSession(sessionId) {
   activeSessions.delete(sessionId);
+  // No process, no background work: anything still tracked was killed with it.
+  backgroundWork.clear(sessionId);
+  // See addSession: a page cached while the process was up still says
+  // `running` for any agent that never reported back.
+  sessionHistoryCache.invalidate(sessionId);
 }
 
 /**
@@ -611,6 +627,195 @@ function extractCumulativeTokenBudget(sdkMessage, declaredContextWindow = null) 
   };
 }
 
+// Tool calls that leave work running past the end of a turn. Bash and Agent only
+// count when they are backgrounded; the rest defer or watch work by nature.
+// Workflow belongs here rather than in a branch of its own: its input schema has
+// no foreground option at all, so every call returns a task id immediately and
+// reports back in a later turn.
+const DEFERRED_WORK_TOOLS = new Set(['Monitor', 'ScheduleWakeup', 'CronCreate', 'TaskCreate', 'Workflow']);
+
+/**
+ * Detects tool calls that keep working after the turn's `result` arrives.
+ *
+ * Only turns that start background work need their CLI process held open; every
+ * other turn can let it exit immediately, as it did before the hold existed.
+ *
+ * Used by the providers module's tests, which pin the tool matching directly:
+ * the alternative is driving a whole SDK run to observe whether stdin was held,
+ * and the cost of getting this wrong is silently killed background work.
+ *
+ * @param {Object} sdkMessage - SDK stream message
+ * @returns {boolean} True when the message launches work that outlives the turn
+ */
+export function startsBackgroundWork(sdkMessage) {
+  const content = sdkMessage?.message?.content;
+  if (!Array.isArray(content)) {
+    return false;
+  }
+
+  return content.some((block) => {
+    if (block?.type !== 'tool_use') {
+      return false;
+    }
+    if (block.name === 'Bash') {
+      return block.input?.run_in_background === true;
+    }
+    // A backgrounded subagent outlives the turn exactly like a backgrounded
+    // Bash does, so the process has to be held open for it to report back.
+    // Agents background by default — `run_in_background` is optional and only
+    // an explicit `false` opts out — hence `!== false` rather than `=== true`.
+    // A foreground agent must stay out of DEFERRED_WORK_TOOLS: it never pushes
+    // a follow-up turn, so it would pin the process for the full ceiling.
+    if (block.name === 'Agent') {
+      return block.input?.run_in_background !== false;
+    }
+    return DEFERRED_WORK_TOOLS.has(block.name);
+  });
+}
+
+// `task_updated` patch statuses after which a task is gone for good. `pending`,
+// `running` and `paused` are still outstanding; `killed` is what the CLI
+// writes when it stops a task itself (the task notification spells it
+// `stopped`).
+const TERMINAL_TASK_STATUSES = new Set(['completed', 'failed', 'killed']);
+
+/**
+ * Tracks the background tasks each live session still has outstanding, folded
+ * from the `system` task events the SDK stream already carries.
+ *
+ * `startsBackgroundWork` above only knows that a turn *launched* something
+ * lasting; this knows what is still running and which task ids it answers to,
+ * which is what the running-sessions list and a stop request need once the
+ * turn's `result` has gone out and nothing else remembers the session is busy.
+ *
+ * Verified against a real query (SDK 0.3.165): `task_started` carries
+ * `task_id`, `tool_use_id`, `task_type` and `description` for every agent,
+ * workflow and backgrounded command (a foreground Bash emits nothing);
+ * `task_notification` settles a task with any status; `task_updated` carries
+ * only `task_id` and a patch, and is terminal when the patch's `status` is.
+ * Housekeeping tasks the CLI starts on its own have no `tool_use_id` and are
+ * not tracked — nothing in the transcript could show them.
+ *
+ * Exported so the folding can be driven with the four event shapes directly;
+ * the runtime keeps one instance keyed like `activeSessions`.
+ *
+ * @returns {{
+ *   apply: (sessionKey: string, message: Object) => void,
+ *   hasOutstanding: (sessionKey: string) => boolean,
+ *   has: (sessionKey: string, taskId: string) => boolean,
+ *   outstanding: (sessionKey: string) => Array<import('@/shared/types.js').BackgroundTaskSummary>,
+ *   clear: (sessionKey: string) => void,
+ *   list: () => Array<{ sessionId: string, tasks: Array<import('@/shared/types.js').BackgroundTaskSummary> }>
+ * }}
+ */
+export function createBackgroundWorkTracker() {
+  /** @type {Map<string, Map<string, import('@/shared/types.js').BackgroundTaskSummary>>} */
+  const sessions = new Map();
+  /**
+   * Tool-use ids the session's own turns issued. A task started for a call an
+   * agent made inside its own transcript — a workflow agent's backgrounded
+   * command, say — reaches this stream too, and nothing in the parent
+   * transcript could show it; it is kept for stopping but flagged `nested`.
+   * @type {Map<string, Set<string>>}
+   */
+  const ownToolUseIds = new Map();
+
+  const remove = (sessionKey, taskId) => {
+    const tasks = sessions.get(sessionKey);
+    if (!tasks) {
+      return;
+    }
+    tasks.delete(taskId);
+    if (tasks.size === 0) {
+      sessions.delete(sessionKey);
+    }
+  };
+
+  return {
+    apply(sessionKey, message) {
+      if (message?.type === 'assistant' && !message.parent_tool_use_id) {
+        const content = message.message?.content;
+        if (Array.isArray(content)) {
+          for (const block of content) {
+            if (block?.type === 'tool_use' && typeof block.id === 'string') {
+              let ids = ownToolUseIds.get(sessionKey);
+              if (!ids) {
+                ids = new Set();
+                ownToolUseIds.set(sessionKey, ids);
+              }
+              ids.add(block.id);
+            }
+          }
+        }
+        return;
+      }
+      if (message?.type !== 'system' || typeof message.task_id !== 'string') {
+        return;
+      }
+      switch (message.subtype) {
+        case 'task_started': {
+          if (typeof message.tool_use_id !== 'string') {
+            return;
+          }
+          const task = {
+            taskId: message.task_id,
+            toolUseId: message.tool_use_id,
+            taskType: message.task_type,
+            description: message.description,
+            startedAt: Date.now()
+          };
+          if (typeof message.workflow_name === 'string') {
+            task.workflowName = message.workflow_name;
+          }
+          if (!ownToolUseIds.get(sessionKey)?.has(message.tool_use_id)) {
+            task.nested = true;
+          }
+          let tasks = sessions.get(sessionKey);
+          if (!tasks) {
+            tasks = new Map();
+            sessions.set(sessionKey, tasks);
+          }
+          tasks.set(task.taskId, task);
+          return;
+        }
+        case 'task_notification':
+          remove(sessionKey, message.task_id);
+          return;
+        case 'task_updated':
+          if (TERMINAL_TASK_STATUSES.has(message.patch?.status)) {
+            remove(sessionKey, message.task_id);
+          }
+          return;
+        default:
+      }
+    },
+
+    hasOutstanding(sessionKey) {
+      return sessions.has(sessionKey);
+    },
+
+    has(sessionKey, taskId) {
+      return Boolean(sessions.get(sessionKey)?.has(taskId));
+    },
+
+    outstanding(sessionKey) {
+      return Array.from(sessions.get(sessionKey)?.values() ?? []);
+    },
+
+    clear(sessionKey) {
+      sessions.delete(sessionKey);
+      ownToolUseIds.delete(sessionKey);
+    },
+
+    list() {
+      return Array.from(sessions, ([sessionId, tasks]) => ({
+        sessionId,
+        tasks: Array.from(tasks.values())
+      }));
+    }
+  };
+}
+
 /**
  * Builds the SDK user messages for one turn.
  *
@@ -796,9 +1001,23 @@ async function queryClaudeSDK(command, options = {}, ws, context) {
   // The client is told the turn is over as soon as `result` lands, even though
   // the process lingers, so the UI never waits out the idle hold.
   let turnCompleteSent = false;
-  // Reports what is still running when a turn wraps up — only turns with work
-  // still outstanding hold their process open.
-  const backgroundWork = createBackgroundWorkLedger();
+  // Set when a turn starts background work, cleared when the next `result`
+  // arrives — only turns with work still outstanding hold their process open.
+  let backgroundWorkPending = false;
+  // Set when the stream reports a task starting during this turn. Task events
+  // are the exact word on what is still running, so when the turn produced
+  // any, the tracker decides the hold; `startsBackgroundWork` is the fallback
+  // for tools that emit none (Monitor, ScheduleWakeup, CronCreate, TaskCreate)
+  // and for an SDK that does not report tasks at all.
+  let sawTaskEventThisTurn = false;
+  // The Stop hook's reading of what is still running as a turn wraps up — the
+  // third hold signal, and the only one that sees a cron set up in an earlier
+  // turn. Named apart from the module-level task tracker on purpose.
+  const snapshotSource = createBackgroundWorkSnapshot();
+  // True from the moment a turn starts on the main thread (a pushed prompt, or
+  // the CLI's own first message of a turn) until its `result`. A stopped last
+  // task must not close stdin under a turn that is still being answered.
+  let turnInFlight = false;
   // True while the process is being held open for background work, so a later
   // `result` can be recognised as that work reporting back.
   let heldForBackgroundWork = false;
@@ -949,8 +1168,8 @@ async function queryClaudeSDK(command, options = {}, ws, context) {
 
     sdkOptions.hooks = {
       // Stop/SubagentStop report what is still in flight as each turn ends; the
-      // ledger turns that into this run's hold-or-release answer.
-      ...backgroundWork.buildHooks(),
+      // snapshot source is one of the three signals the hold decision reads.
+      ...snapshotSource.buildHooks(),
       Notification: [{
         matcher: '',
         hooks: [async (input) => {
@@ -1066,6 +1285,9 @@ async function queryClaudeSDK(command, options = {}, ws, context) {
       return { behavior: 'deny', message: decision.message ?? 'User denied tool use' };
     };
 
+    // The SDK's own `query`, unless the caller supplies one (tests script the
+    // stream to drive the hold logic below without a CLI process).
+    const createQuery = context.createQuery ?? query;
     let heldPrompt = createHeldPromptStream(promptMessages);
     // Reads `heldPrompt` through the closure so the retry below can swap the
     // stream without leaving a stale closer behind in activeSessions.
@@ -1077,7 +1299,7 @@ async function queryClaudeSDK(command, options = {}, ws, context) {
       heldPrompt.release();
     };
     try {
-      queryInstance = query({
+      queryInstance = createQuery({
         prompt: heldPrompt.stream,
         options: sdkOptions
       });
@@ -1085,13 +1307,14 @@ async function queryClaudeSDK(command, options = {}, ws, context) {
       // Older/newer SDK versions may not accept hook shapes yet.
       // Keep notification behavior operational via runtime events even if hook registration fails.
       console.warn('Failed to initialize Claude query with hooks, retrying without hooks:', hookError?.message || hookError);
-      // No hooks means no Stop snapshot can ever arrive, which is exactly how
-      // the ledger ends up deciding from the backgrounded-Bash fallback instead.
+      // No hooks means no Stop snapshot can ever arrive, so the snapshot source
+      // stays silent and the hold falls back to the task tracker and
+      // `startsBackgroundWork` alone — the upstream behaviour.
       delete sdkOptions.hooks;
       // Discard the abandoned stream and build a fresh one for the retry.
       heldPrompt.release();
       heldPrompt = createHeldPromptStream(promptMessages);
-      queryInstance = query({
+      queryInstance = createQuery({
         prompt: heldPrompt.stream,
         options: sdkOptions
       });
@@ -1130,7 +1353,14 @@ async function queryClaudeSDK(command, options = {}, ws, context) {
         sessionSummary = nextSessionSummary ?? sessionSummary;
         turnCompleteSent = false;
         assistantBudgetSent = false;
-        backgroundWork.resetFallbackSignal();
+        // The per-turn hold signals start over for the pushed turn. The task
+        // tracker is left alone: the work it lists is still running.
+        backgroundWorkPending = false;
+        sawTaskEventThisTurn = false;
+        // Without replayed user messages the push produces no stream message
+        // of its own, so the turn is marked in flight here rather than on the
+        // first assistant message.
+        turnInFlight = true;
         followUpPromptPending = true;
         // Re-registered with the same instance, purely so the map's `writer`
         // stops naming the finished run's one.
@@ -1205,7 +1435,44 @@ async function queryClaudeSDK(command, options = {}, ws, context) {
         ws.send(createNormalizedMessage({ kind: 'status', text: 'token_budget', tokenBudget: tokenBudgetData, sessionId: capturedSessionId || sessionId || null, provider: 'claude' }));
       }
 
-      backgroundWork.observeMessage(message);
+      if (startsBackgroundWork(message)) {
+        backgroundWorkPending = true;
+      }
+      if (message.type === 'system' && message.subtype === 'task_started') {
+        sawTaskEventThisTurn = true;
+      }
+      // Read off the raw SDK message, never the normalized rows: a subagent's
+      // traffic carries a parent tool-use id and is not a turn of this session,
+      // and rows synthesized during normalization are not turns at all.
+      if ((message.type === 'user' || message.type === 'assistant') && !message.parent_tool_use_id) {
+        turnInFlight = true;
+      }
+      backgroundWork.apply(sessionKey(), message);
+      // Before the release check below, so a stopped task has already left
+      // the snapshot when it is asked whether anything is still running.
+      snapshotSource.observe(message);
+
+      // A task the user stopped gets no follow-up turn from the CLI — only its
+      // `stopped` notification — so when that was the last outstanding task
+      // nothing will ever push the `result` the release below waits for, and
+      // the process would sit until the idle ceiling. Release it here. A
+      // completed task is different: the CLI relays its result in a turn of
+      // its own, which closing stdin now would cut short. So is a turn still
+      // being answered — a prompt pushed into this process, or the CLI's own
+      // report — which closing stdin now would cut off mid-reply; its `result`
+      // makes the same decision once it lands.
+      if (
+        heldForBackgroundWork
+        && !turnInFlight
+        && message.type === 'system'
+        && message.subtype === 'task_notification'
+        && message.status === 'stopped'
+        && !backgroundWork.hasOutstanding(sessionKey())
+        && !snapshotSource.snapshotOutstanding()
+      ) {
+        heldForBackgroundWork = false;
+        releasePromptStream();
+      }
 
       if (message.type === 'result') {
         warnOnContextWindowMismatch(message);
@@ -1215,22 +1482,37 @@ async function queryClaudeSDK(command, options = {}, ws, context) {
         // process, rather than background work reporting back on its own.
         const answersFollowUpPrompt = followUpPromptPending;
         followUpPromptPending = false;
-        // The Stop hook fires immediately before this `result`, so the ledger's
-        // newest snapshot is this turn's answer. Without one (hooks refused, or
-        // an SDK build that reports no snapshot) fall back to the pre-existing
-        // rule that work from an earlier turn has yet to report back, and
-        // answering the user in between must not cut it short.
-        // Read before the reset: the reason the hold stands on is what the
-        // decision log reports, and the reset clears this turn's observed start.
-        const holdReason = backgroundWork.outstandingReason();
-        const holdForBackgroundWork = holdReason !== null
-          || (!backgroundWork.hasSnapshot() && answersFollowUpPrompt && heldForBackgroundWork);
-        backgroundWork.resetFallbackSignal();
-        if (holdForBackgroundWork) {
+        turnInFlight = false;
+        // Work started during this turn, or work from an earlier turn that
+        // has not settled yet (a follow-up turn reports one task in while
+        // another is still going), is still running. Hold the process open
+        // so it can finish and report back in a follow-up turn; the ceiling
+        // is only a backstop for work that never reports.
+        //
+        // The release when the last task settles is this same branch on the
+        // follow-up turn the CLI pushes for it, not the settling event
+        // itself: closing stdin at that moment would cut the turn that
+        // relays the task's result.
+        //
+        // When the turn reported its tasks, the tracker is the whole truth
+        // about tasks: an Agent call without `run_in_background` is scored as
+        // background by `startsBackgroundWork`, but the CLI runs it in the
+        // foreground and it has settled before this `result` — holding for it
+        // kept a process alive for the full ceiling with nothing outstanding.
+        // The Stop-hook snapshot is read on both branches: a cron set up in an
+        // earlier turn reaches neither the tracker nor `startsBackgroundWork`.
+        const stillOutstanding = backgroundWork.hasOutstanding(sessionKey());
+        const snapshotOutstanding = snapshotSource.snapshotOutstanding();
+        const holdForTurn = sawTaskEventThisTurn
+          ? (stillOutstanding || snapshotOutstanding)
+          : (backgroundWorkPending || stillOutstanding || snapshotOutstanding);
+        if (holdForTurn) {
           console.log(
-            `[Claude SDK] Holding the process for outstanding background work (${holdReason ?? 'carried hold'}): session ${sessionKey() ?? capturedSessionId ?? 'unknown'}`,
+            `[Claude SDK] Holding the process for outstanding background work (tasks: ${stillOutstanding}, snapshot: ${snapshotOutstanding}, started this turn: ${backgroundWorkPending}): session ${sessionKey() ?? capturedSessionId ?? 'unknown'}`,
           );
         }
+        backgroundWorkPending = false;
+        sawTaskEventThisTurn = false;
         if (!turnCompleteSent && !abortPending) {
           turnCompleteSent = true;
           ws.send(createCompleteMessage({ provider: 'claude', sessionId: capturedSessionId || sessionId || null, exitCode: 0 }));
@@ -1241,13 +1523,13 @@ async function queryClaudeSDK(command, options = {}, ws, context) {
             sessionName: sessionSummary,
             stopReason: 'completed'
           });
-        } else if (heldForBackgroundWork && !answersFollowUpPrompt && !abortPending && !holdForBackgroundWork) {
+        } else if (heldForBackgroundWork && !answersFollowUpPrompt && !abortPending && !holdForTurn) {
           // A result after the turn already reported complete means work we held
           // the process open for has finished and pushed a follow-up turn — but
           // one turn can background several tasks, and each reports back on its
-          // own. Telling the user the work is done while the snapshot still
-          // lists a sibling would announce results that are not there yet, so
-          // this waits for the reading that also ends the hold.
+          // own. Telling the user the work is done while a sibling is still
+          // running would announce results that are not there yet, so this
+          // waits for the reading that also ends the hold.
           notifyBackgroundWorkCompleted({
             userId: ws?.userId || null,
             provider: 'claude',
@@ -1255,10 +1537,7 @@ async function queryClaudeSDK(command, options = {}, ws, context) {
             sessionName: sessionSummary
           });
         }
-        if (holdForBackgroundWork) {
-          // Work is still running. Hold the process open so it can finish and
-          // report back in a follow-up turn; the ceiling is only a backstop for
-          // work that never reports.
+        if (holdForTurn) {
           heldForBackgroundWork = true;
           scheduleRelease();
           if (sessionKey()) {
@@ -1359,11 +1638,23 @@ async function queryClaudeSDK(command, options = {}, ws, context) {
     // explicit teardown, so leave the process to the ceiling instead. A run
     // whose stdin is already closed (abort, supersede, an ordinary turn) has
     // nothing left to protect.
-    // `heldForBackgroundWork` matters as much as the ledger here: a run held by
-    // the fallback signal has already had that signal cleared by the `result`
-    // that started the hold, so asking the ledger alone would tear down exactly
-    // the work the hold exists to protect.
-    if (!inputReleased && (heldForBackgroundWork || backgroundWork.hasOutstandingWork())) {
+    //
+    // All three hold signals are read here, because no one of them covers the
+    // other two. `heldForBackgroundWork` is the one that carries across turns:
+    // a run held by the snapshot or by the observed start has already had the
+    // per-turn signals cleared by the `result` that began the hold. The
+    // *observed start* (`backgroundWorkPending`) is what protects a run that
+    // died before any Stop hook could speak — its snapshot is still null, so
+    // nothing else would hold it. The tracker is the last resort, and only a
+    // loop that died early can still find it non-empty: a run that reached its
+    // own `removeSession` has already had it cleared. Asking the tracker alone
+    // would tear down exactly the work the hold exists to protect, which is how
+    // a backgrounded Bash was killed by a socket hang-up before it ever got a
+    // snapshot.
+    if (
+      !inputReleased
+      && (heldForBackgroundWork || backgroundWorkPending || backgroundWork.hasOutstanding(sessionKey()))
+    ) {
       // Its stdin lives on, but its message loop does not, so the run is no
       // longer able to answer a follow-up prompt — unpublish the handle or the
       // next turn pushes into a loop that will never produce a `result`.
@@ -1430,13 +1721,58 @@ async function abortClaudeSDKSession(sessionId) {
 }
 
 /**
+ * Sessions whose background tasks are still outstanding, with the tasks.
+ *
+ * A session stays here after its turn's `result` for as long as the process
+ * is held open for the work — which is exactly the window in which nothing
+ * else (the chat run registry marks the run completed at `result`) knows the
+ * session is still busy.
+ * @returns {Array<{ sessionId: string, tasks: Array<import('@/shared/types.js').BackgroundTaskSummary> }>}
+ */
+function listClaudeSDKBackgroundWork() {
+  return backgroundWork.list();
+}
+
+/**
+ * Stops one outstanding background task through the SDK, which then emits a
+ * `task_notification` with status `stopped` — the same event that drops the
+ * task from the tracker and settles its card.
+ * @param {string} sessionId - Session identifier
+ * @param {string} taskId - The task's `task_id` as reported on `task_started`
+ * @returns {Promise<boolean>} False when no live process is tracking the task
+ */
+async function stopClaudeSDKTask(sessionId, taskId) {
+  const session = getSession(sessionId);
+  if (!session || !backgroundWork.has(sessionId, taskId)) {
+    return false;
+  }
+  await session.instance.stopTask(taskId);
+  return true;
+}
+
+/**
  * Checks if an SDK session is currently active
  * @param {string} sessionId - Session identifier
  * @returns {boolean} True if session is active
  */
 function isClaudeSDKSessionActive(sessionId) {
   const session = getSession(sessionId);
-  return session && session.status === 'active';
+  return Boolean(session && session.status === 'active');
+}
+
+/**
+ * When the run behind a session started, or null when no run is up.
+ *
+ * The history reader uses this to tell a background agent launched by the
+ * live process (still able to report back) from one launched by an earlier
+ * process that has since exited (never will): a launch row older than the
+ * live run cannot belong to it.
+ * @param {string} sessionId - Session identifier
+ * @returns {number|null} Epoch milliseconds the live run started, or null
+ */
+function getClaudeSDKSessionStartTime(sessionId) {
+  const session = getSession(sessionId);
+  return session && session.status === 'active' ? session.startTime : null;
 }
 
 /**
@@ -1491,13 +1827,18 @@ export const claudeRuntime = {
     resolve: resolveToolApproval,
     listPending: getPendingApprovalsForSession,
   },
+  listBackgroundWork: listClaudeSDKBackgroundWork,
+  stopBackgroundTask: stopClaudeSDKTask,
 };
 
 // Export public API
 export {
   queryClaudeSDK,
   abortClaudeSDKSession,
+  listClaudeSDKBackgroundWork,
+  stopClaudeSDKTask,
   isClaudeSDKSessionActive,
+  getClaudeSDKSessionStartTime,
   getActiveClaudeSDKSessions,
   resolveToolApproval,
   getPendingApprovalsForSession,

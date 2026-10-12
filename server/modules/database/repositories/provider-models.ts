@@ -1,5 +1,6 @@
 import { getConnection } from '@/modules/database/connection.js';
 import type {
+  CustomProviderModelEffort,
   CustomProviderModelInput,
   CustomProviderModelRecord,
   LLMProvider,
@@ -13,18 +14,59 @@ type CustomProviderModelRow = {
   sort_order: number;
   base_url: string | null;
   api_key: string | null;
-  effort_levels: string | null;
   context_window: number | null;
+  effort_values: string | null;
+  effort_default: string | null;
 };
 
-const CUSTOM_PROVIDER_MODEL_COLUMNS =
-  'id, provider, model_id, model_name, sort_order, base_url, api_key, effort_levels, context_window';
+const CUSTOM_PROVIDER_MODEL_COLUMNS = `
+  id, provider, model_id, model_name, sort_order, base_url, api_key, context_window,
+  effort_values, effort_default
+`;
 
-const parseEffortLevels = (value: string | null): string[] | null =>
-  value ? (JSON.parse(value) as string[]) : null;
+/**
+ * Decodes the stored effort columns. Anything that is not a non-empty JSON
+ * array of strings reads back as "no metadata" rather than failing the whole
+ * catalog, so one hand-edited row cannot break every model picker.
+ */
+const readStoredEffort = (row: CustomProviderModelRow): CustomProviderModelEffort | null => {
+  if (!row.effort_values) {
+    return null;
+  }
 
-const serializeEffortLevels = (levels: string[] | undefined): string | null =>
-  levels && levels.length > 0 ? JSON.stringify(levels) : null;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(row.effort_values);
+  } catch {
+    return null;
+  }
+
+  if (!Array.isArray(parsed)) {
+    return null;
+  }
+  const values = parsed.filter((value): value is string => typeof value === 'string' && value.length > 0);
+  if (values.length === 0) {
+    return null;
+  }
+
+  return row.effort_default && values.includes(row.effort_default)
+    ? { values, default: row.effort_default }
+    : { values };
+};
+
+/** Encodes effort metadata into the two nullable columns; no levels means NULL for both. */
+const toStoredEffortColumns = (
+  effort: CustomProviderModelEffort | null | undefined,
+): { values: string | null; defaultValue: string | null } => {
+  if (!effort || effort.values.length === 0) {
+    return { values: null, defaultValue: null };
+  }
+
+  return {
+    values: JSON.stringify(effort.values),
+    defaultValue: effort.default ?? null,
+  };
+};
 
 const toCustomProviderModelRecord = (
   row: CustomProviderModelRow,
@@ -36,8 +78,8 @@ const toCustomProviderModelRecord = (
   sortOrder: row.sort_order,
   baseUrl: row.base_url,
   apiKey: row.api_key,
-  effortLevels: parseEffortLevels(row.effort_levels),
   contextWindow: row.context_window,
+  effort: readStoredEffort(row),
 });
 
 const readCustomProviderModelRow = (
@@ -105,9 +147,13 @@ export const providerModelsDb = {
       WHERE provider = ?
     `).get(provider) as { next_order: number };
 
+    const effort = toStoredEffortColumns(input.effort);
     const result = db.prepare(`
-      INSERT INTO provider_models (provider, model_id, model_name, sort_order, base_url, api_key, effort_levels, context_window)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO provider_models (
+        provider, model_id, model_name, sort_order, base_url, api_key, context_window,
+        effort_values, effort_default
+      )
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       provider,
       input.id,
@@ -115,8 +161,9 @@ export const providerModelsDb = {
       nextOrder.next_order,
       input.baseUrl ?? null,
       input.apiKey ?? null,
-      serializeEffortLevels(input.effortLevels),
       input.contextWindow ?? null,
+      effort.values,
+      effort.defaultValue,
     );
 
     const row = readCustomProviderModelRow(provider, Number(result.lastInsertRowid));
@@ -141,18 +188,28 @@ export const providerModelsDb = {
 
       db.prepare(`
         UPDATE provider_models
-        SET model_id = ?, model_name = ?, base_url = ?, api_key = ?, effort_levels = ?, context_window = ?, updated_at = CURRENT_TIMESTAMP
+        SET model_id = ?, model_name = ?, base_url = ?, api_key = ?, context_window = ?, updated_at = CURRENT_TIMESTAMP
         WHERE provider = ? AND id = ?
       `).run(
         input.id,
         input.model,
         input.baseUrl ?? null,
         input.apiKey ?? null,
-        serializeEffortLevels(input.effortLevels),
         input.contextWindow ?? null,
         provider,
         recordId,
       );
+
+      // An omitted `effort` keeps the stored levels so clients that only edit
+      // the name or id cannot wipe them; `null` explicitly clears them.
+      if (input.effort !== undefined) {
+        const effort = toStoredEffortColumns(input.effort);
+        db.prepare(`
+          UPDATE provider_models
+          SET effort_values = ?, effort_default = ?
+          WHERE provider = ? AND id = ?
+        `).run(effort.values, effort.defaultValue, provider, recordId);
+      }
 
       if (previous.model_id !== input.id) {
         db.prepare(`

@@ -153,6 +153,26 @@ const BACKGROUND_BASH: AnyRecord = {
   },
 };
 
+// What the SDK streams once the CLI has registered that command as a task
+// (every backgrounded command, agent and workflow gets one), and when it ends.
+const BACKGROUND_BASH_STARTED: AnyRecord = {
+  type: 'system',
+  subtype: 'task_started',
+  session_id: 'provider-1',
+  task_id: 'bash-1',
+  tool_use_id: 'toolu_bash',
+  task_type: 'local_bash',
+  description: 'sleep 100',
+};
+const BACKGROUND_BASH_COMPLETED: AnyRecord = {
+  type: 'system',
+  subtype: 'task_notification',
+  session_id: 'provider-1',
+  task_id: 'bash-1',
+  tool_use_id: 'toolu_bash',
+  status: 'completed',
+};
+
 let closeConnection: typeof import('@/modules/database/index.js')['closeConnection'];
 let initializeDatabase: typeof import('@/modules/database/index.js')['initializeDatabase'];
 let sessionsDb: typeof import('@/modules/database/index.js')['sessionsDb'];
@@ -253,6 +273,7 @@ test('Claude held-process reuse across turns', async (t) => {
       assert.ok(live);
 
       await live.emit(BACKGROUND_BASH);
+      await live.emit(BACKGROUND_BASH_STARTED);
       await live.emit({ type: 'result', session_id: 'provider-1' });
 
       assert.equal(live.promptStreamClosed, false, 'the process stays held for the background command');
@@ -296,6 +317,7 @@ test('Claude held-process reuse across turns', async (t) => {
       assert.deepEqual(backgroundNotifications, [], 'answering the user is not reported as background work completing');
 
       // The background command finally reports back: now the process is let go.
+      await live.emit(BACKGROUND_BASH_COMPLETED);
       await live.emit({ type: 'result', session_id: 'provider-1' });
       assert.equal(backgroundNotifications.length, 1, 'an unprompted turn is reported as background work completing');
       await firstTurn;

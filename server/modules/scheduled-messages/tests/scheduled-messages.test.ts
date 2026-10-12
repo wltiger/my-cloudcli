@@ -37,9 +37,15 @@ async function withIsolatedDatabase(runTest: (userId: number) => void | Promise<
 
 type RunCall = { provider: string; command: string; options: Record<string, unknown> };
 
-function createRuntime(runs: RunCall[], behaviour: 'ok' | 'throw' = 'ok', aborts: string[] = []) {
+function createRuntime(
+  runs: RunCall[],
+  behaviour: 'ok' | 'throw' = 'ok',
+  aborts: string[] = [],
+  hasBackgroundWork: (sessionId: string) => boolean = () => false,
+) {
   return {
     hasRuntime: () => true,
+    hasBackgroundWork,
     run: async (provider: string, command: string, options: Record<string, unknown>) => {
       if (behaviour === 'throw') {
         throw new Error('provider exploded');
@@ -114,6 +120,37 @@ test('a queued message stays pending while its session is busy', async () => {
     assert.deepEqual(sessionDraftsDb.getDrafts(userId)[0]?.queuedMessage, {
       content: 'send after this run',
     });
+  });
+});
+
+// Upstream holds a queued message back while background work runs, because its
+// new turn would stop that work. This fork pushes the turn into the held
+// process instead (the gate reads turn-in-flight only), so the message goes now.
+test("a queued message is not held back by background work its session's last turn left running", async () => {
+  await withIsolatedDatabase(async (userId) => {
+    sessionDraftsDb.saveDraft(userId, SESSION_ID, {
+      text: '',
+      queuedMessage: { content: 'send during the background job' },
+    });
+    // Turn A ended, so its run is completed, but it backgrounded a command
+    // that is still running under A's CLI process.
+    const runA = chatRunRegistry.startRun({
+      appSessionId: SESSION_ID,
+      provider: 'claude',
+      providerSessionId: null,
+      connection: null,
+      userId,
+    });
+    runA!.writer.sendComplete({ exitCode: 0 });
+    assert.equal(chatRunRegistry.isProcessing(SESSION_ID), false);
+
+    const runs: RunCall[] = [];
+    const runtime = createRuntime(runs, 'ok', [], (sessionId) => sessionId === SESSION_ID);
+
+    assert.equal(await dispatchQueuedMessages(runtime), 1);
+    assert.equal(runs.length, 1);
+    assert.equal(runs[0].command, 'send during the background job');
+    assert.equal(sessionDraftsDb.getDrafts(userId).length, 0);
   });
 });
 

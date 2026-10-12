@@ -20,7 +20,7 @@ const notice = (overrides: Partial<ChatMessage> = {}): ChatMessage => ({
   content: 'task-72 · exit code 1',
   timestamp: '2026-09-30T10:00:00.000Z',
   isTaskNotification: true,
-  taskStatus: 'failed',
+  taskNotificationStatus: 'failed',
   taskBody: 'Task task-72 exited with code 1.\nError: build failed',
   ...overrides,
 });
@@ -46,7 +46,7 @@ test('a notice keeps its full body next to its one-line summary', () => {
   }]);
 
   assert.equal(row?.content, 'task-72 · exit code 1');
-  assert.equal(row?.taskStatus, 'failed');
+  assert.equal(row?.taskNotificationStatus, 'failed');
   assert.equal(row?.taskBody, 'Task task-72 exited with code 1.\nError: build failed');
 });
 
@@ -59,7 +59,7 @@ test('a notice with a body expands to show it', () => {
 });
 
 test('a notice whose summary is its whole body offers nothing to expand', () => {
-  renderNotice(notice({ content: 'build finished', taskBody: 'build finished', taskStatus: 'completed' }));
+  renderNotice(notice({ content: 'build finished', taskBody: 'build finished', taskNotificationStatus: 'completed' }));
 
   assert.equal(screen.queryByRole('button'), null);
 });
@@ -73,7 +73,7 @@ test('the dot follows the outcome, and an unknown status keeps the old amber', (
   ];
 
   for (const [taskStatus, colour] of colours) {
-    const { container, unmount } = renderNotice(notice({ taskStatus }));
+    const { container, unmount } = renderNotice(notice({ taskNotificationStatus: taskStatus }));
     assert.ok(container.querySelector(`.${colour}`), `${taskStatus} should paint ${colour}`);
     unmount();
   }

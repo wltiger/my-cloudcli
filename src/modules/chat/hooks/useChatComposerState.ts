@@ -10,6 +10,7 @@ import type {
   TouchEvent,
 } from 'react';
 import { useDropzone } from 'react-dropzone';
+import { useTranslation } from 'react-i18next';
 
 import { api } from '@/shared/api';
 import { PROVIDER_PERMISSION_PREFERENCE_KEYS } from '@/shared/constants';
@@ -27,9 +28,16 @@ import {
   writeQueuedMessage,
 } from '@/shared/chatDrafts';
 import { escapeRegExp } from '@/modules/chat/utils/chatFormatting';
+import { describeBackgroundTask, ownBackgroundTasks } from '@/modules/chat/utils/backgroundTasks';
 import { useFileMentions } from '@/modules/chat/hooks/useFileMentions';
 import { useInputHistory } from '@/modules/chat/hooks/useInputHistory';
 import { useSlashCommands } from '@/modules/chat/hooks/useSlashCommands';
+
+// Upstream asks before a send while background work runs, promising that the
+// new turn stops that work. This fork pushes the turn into the held process
+// instead and the work keeps running, so the promise is false and the prompt
+// never shows.
+const PROMPT_BEFORE_SEND_OVER_BACKGROUND_WORK = false as const;
 
 type UseChatComposerStateArgs = {
   selectedProject: Project | null;
@@ -160,6 +168,18 @@ const getNotificationSessionSummary = (
   return normalizedFallback.length > 80 ? `${normalizedFallback.slice(0, 77)}...` : normalizedFallback;
 };
 
+/**
+ * Enter that CONFIRMS an IME candidate must not also submit.
+ *
+ * `event.isComposing` alone is not enough: Safari fires `compositionend` BEFORE the confirming
+ * Enter's `keydown`, so the flag is already `false` by the time the handler runs. Chrome and
+ * Firefox fire it after, which is why the naive guard looks correct on those two and the bug
+ * reads as Safari-only. A tight window after `compositionend` covers it — that sequence is
+ * synchronous (microseconds), while a human pressing Enter a second time takes >= 100ms and
+ * never lands inside it.
+ */
+const SAFARI_IME_RACE_WINDOW_MS = 30;
+
 export function useChatComposerState({
   selectedProject,
   selectedSession,
@@ -174,6 +194,7 @@ export function useChatComposerState({
   currentProviderSupportsClear,
   onClearSession,
   isLoading,
+  processingSessions,
   canAbortSession,
   tokenBudget,
   sendMessage,
@@ -187,6 +208,7 @@ export function useChatComposerState({
   setIsUserScrolledUp,
   setPendingPermissionRequests,
 }: UseChatComposerStateArgs) {
+  const { t } = useTranslation('chat');
   // The composer text together with the chat scope it belongs to. They are one
   // state rather than a value plus a ref because they have to move in lockstep:
   // on a session switch there is one commit where the scope has already changed
@@ -245,6 +267,34 @@ export function useChatComposerState({
   const draftScope = sessionKey ?? (selectedProjectId ? `project:${selectedProjectId}` : null);
   const draftScopeRef = useRef(draftScope);
   draftScopeRef.current = draftScope;
+  // Composition is tracked on `window` in the capture phase rather than on the textarea, so a
+  // composition that starts in one field and ends after focus moves still closes cleanly.
+  const isComposingRef = useRef(false);
+  const lastCompositionEndAtRef = useRef(0);
+
+  useEffect(() => {
+    const onStart = () => {
+      isComposingRef.current = true;
+    };
+    const onEnd = () => {
+      isComposingRef.current = false;
+      lastCompositionEndAtRef.current = performance.now();
+    };
+    // `blur` does not bubble, but a capture-phase listener on `window` still sees it on the way
+    // down — otherwise a composition abandoned by clicking away would stay open forever.
+    const onBlur = () => {
+      isComposingRef.current = false;
+    };
+    window.addEventListener('compositionstart', onStart, true);
+    window.addEventListener('compositionend', onEnd, true);
+    window.addEventListener('blur', onBlur, true);
+    return () => {
+      window.removeEventListener('compositionstart', onStart, true);
+      window.removeEventListener('compositionend', onEnd, true);
+      window.removeEventListener('blur', onBlur, true);
+    };
+  }, []);
+
   const setInput = useCallback<Dispatch<SetStateAction<string>>>((next) => {
     setInputState((previous) => ({
       scope: draftScopeRef.current,
@@ -650,7 +700,14 @@ export function useChatComposerState({
     selectedSession,
   ]);
 
-  const handleSubmit = useCallback(
+  // Read at send time through a ref: the map changes on every poll, and a
+  // submit handler rebuilt that often would re-render the whole composer.
+  const processingSessionsRef = useRef(processingSessions);
+  useEffect(() => {
+    processingSessionsRef.current = processingSessions;
+  }, [processingSessions]);
+
+  const submitMessage = useCallback(
     async (
       event: FormEvent<HTMLFormElement> | MouseEvent | TouchEvent | KeyboardEvent<HTMLTextAreaElement>,
       queuedSubmission?: QueuedDraft,
@@ -855,6 +912,24 @@ export function useChatComposerState({
         });
       }
 
+      // A new turn replaces the CLI process a session's background work runs
+      // under: the agents, workflows and commands it still has going are
+      // stopped, or finish where nothing is listening. Sending is the user's
+      // call, but not one to make for them.
+      const backgroundActivity = processingSessionsRef.current?.get(targetSessionId);
+      if (PROMPT_BEFORE_SEND_OVER_BACKGROUND_WORK && backgroundActivity?.background) {
+        const work = ownBackgroundTasks(backgroundActivity.tasks ?? [])
+          .map((task) => `• ${describeBackgroundTask(task, t)}`)
+          .join('\n');
+        const confirmed = window.confirm(t('claudeStatus.backgroundTask.sendAnyway', {
+          work,
+          defaultValue: 'This session still has background work running:\n{{work}}\n\nA new message starts a new turn, which stops that work; anything it has not reported yet is lost. Send anyway?',
+        }));
+        if (!confirmed) {
+          return;
+        }
+      }
+
       const attachmentRecords = uploadedAttachments as ChatAttachment[];
       const userMessage: ChatMessage = {
         type: 'user',
@@ -940,7 +1015,36 @@ export function useChatComposerState({
       addMessage,
       setIsUserScrolledUp,
       slashCommands,
+      t,
     ],
+  );
+
+  // Chat scopes with a submit still awaiting its upload or, for a brand-new
+  // chat, its session id. The composer does not change until that returns (the
+  // text stays, send stays enabled), so on a slow server the user submits
+  // again — and each extra submit of a new chat allocated its own session and
+  // sent it the same first message.
+  const submittingScopesRef = useRef(new Set<string>());
+
+  const handleSubmit = useCallback(
+    async (
+      event: FormEvent<HTMLFormElement> | MouseEvent | TouchEvent | KeyboardEvent<HTMLTextAreaElement>,
+      queuedSubmission?: QueuedDraft,
+    ) => {
+      const scope = draftScopeRef.current ?? '';
+      if (submittingScopesRef.current.has(scope)) {
+        // Still cancel the event: an ignored form submit must not reload the page.
+        event.preventDefault();
+        return;
+      }
+      submittingScopesRef.current.add(scope);
+      try {
+        await submitMessage(event, queuedSubmission);
+      } finally {
+        submittingScopesRef.current.delete(scope);
+      }
+    },
+    [submitMessage],
   );
 
   useEffect(() => {
@@ -1126,7 +1230,9 @@ export function useChatComposerState({
       }
 
       if (event.key === 'Enter') {
-        if (event.nativeEvent.isComposing) {
+        const endedJustNow =
+          performance.now() - lastCompositionEndAtRef.current < SAFARI_IME_RACE_WINDOW_MS;
+        if (event.nativeEvent.isComposing || isComposingRef.current || endedJustNow) {
           return;
         }
 

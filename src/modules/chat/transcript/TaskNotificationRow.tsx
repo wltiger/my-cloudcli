@@ -61,7 +61,7 @@ export default function TaskNotificationRow({ message }: { message: ChatMessage 
         <span
           className={cn(
             'inline-block h-1.5 w-1.5 flex-shrink-0 rounded-full',
-            STATUS_DOT_CLASSES[String(message.taskStatus)] ?? 'bg-amber-400 dark:bg-amber-500',
+            STATUS_DOT_CLASSES[String(message.taskNotificationStatus)] ?? 'bg-amber-400 dark:bg-amber-500',
           )}
         />
         <span className="text-xs text-gray-500 dark:text-gray-400">{summary}</span>

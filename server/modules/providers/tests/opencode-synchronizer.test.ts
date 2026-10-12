@@ -93,7 +93,8 @@ async function withOpenCode(
         title TEXT NOT NULL,
         time_created INTEGER NOT NULL,
         time_updated INTEGER NOT NULL,
-        time_archived INTEGER
+        time_archived INTEGER,
+        parent_id TEXT
       );
     `);
     db.prepare('INSERT INTO project (id, worktree) VALUES (?, ?)').run('project-1', WORKSPACE_PATH);

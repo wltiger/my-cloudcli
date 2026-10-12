@@ -510,15 +510,15 @@ const dropLegacyScheduledTriggersTable = (db: Database): void => {
 };
 
 /**
- * Adds the `base_url`/`api_key`/`effort_levels`/`context_window` columns that
- * let a Claude custom model override the SDK's endpoint/credential, declare
- * which reasoning-effort levels its own sessions can use, and declare the
- * context window it really accepts.
+ * Adds the `base_url`/`api_key`/`context_window` columns that let a Claude
+ * custom model override the SDK's endpoint/credential and declare the context
+ * window it really accepts.
  *
  * Left NULL for every pre-existing row (and every non-Claude row going
  * forward): the runtime only overrides the SDK environment when both
- * base_url/api_key are set, only offers effort when effort_levels is set, and
- * only declares a window when context_window is set.
+ * base_url/api_key are set, and only declares a window when context_window is
+ * set. The fork's former `effort_levels` column is no longer added here — see
+ * `copyProviderModelEffortLevels`.
  */
 const addProviderModelCustomEndpointColumns = (db: Database): void => {
   const providerModelsTableInfo = getTableInfo(db, 'provider_models');
@@ -526,7 +526,6 @@ const addProviderModelCustomEndpointColumns = (db: Database): void => {
 
   addColumnToTableIfNotExists(db, 'provider_models', columnNames, 'base_url', 'TEXT');
   addColumnToTableIfNotExists(db, 'provider_models', columnNames, 'api_key', 'TEXT');
-  addColumnToTableIfNotExists(db, 'provider_models', columnNames, 'effort_levels', 'TEXT');
   addColumnToTableIfNotExists(db, 'provider_models', columnNames, 'context_window', 'INTEGER');
 };
 
@@ -536,9 +535,12 @@ const addProviderModelCustomEndpointColumns = (db: Database): void => {
  * A `CREATE TABLE IF NOT EXISTS` cannot alter a table that already exists, so
  * a pre-existing database keeps the old constraint until this rebuilds the
  * table with the widened list. Rebuild order matters: the new table is created
- * from the full canonical column set (the custom-endpoint columns above are
- * guaranteed present by the time this runs), and the provider-order index is
- * recreated by the `CREATE INDEX IF NOT EXISTS` that follows in `runMigrations`.
+ * from the full canonical column set (the custom-endpoint and effort columns
+ * are guaranteed present by the time this runs, and the effort columns stay
+ * last to match a fresh install), and the provider-order index is recreated by
+ * the `CREATE INDEX IF NOT EXISTS` that follows in `runMigrations`. A legacy
+ * `effort_levels` column is left behind by the rebuild on purpose: its data was
+ * copied into `effort_values` just before this runs.
  *
  * Merge rule (recorded in fork-customizations.md): if upstream ever widens the
  * same `CHECK`, the list is always the union of both sides and this fork's
@@ -572,19 +574,20 @@ const widenProviderModelsProviderCheck = (db: Database): void => {
         updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
         base_url TEXT,
         api_key TEXT,
-        effort_levels TEXT,
         context_window INTEGER,
+        effort_values TEXT DEFAULT NULL,
+        effort_default TEXT DEFAULT NULL,
         UNIQUE(provider, model_id)
       )
     `);
     db.exec(`
       INSERT INTO provider_models__new (
         id, provider, model_id, model_name, sort_order, created_at, updated_at,
-        base_url, api_key, effort_levels, context_window
+        base_url, api_key, context_window, effort_values, effort_default
       )
       SELECT
         id, provider, model_id, model_name, sort_order, created_at, updated_at,
-        base_url, api_key, effort_levels, context_window
+        base_url, api_key, context_window, effort_values, effort_default
       FROM provider_models
     `);
     db.exec('DROP TABLE provider_models');
@@ -596,6 +599,57 @@ const widenProviderModelsProviderCheck = (db: Database): void => {
   } finally {
     db.exec('PRAGMA foreign_keys = ON');
   }
+};
+
+/**
+ * Adds the reasoning-effort metadata columns to the custom-model library.
+ *
+ * Existing rows stay NULL on purpose: no effort levels were ever declared for
+ * them, and a guessed list could offer levels the model rejects. Those models
+ * keep hiding the composer's Reasoning section until the user declares levels.
+ */
+const addProviderModelEffortColumns = (db: Database): void => {
+  const columnNames = getTableInfo(db, 'provider_models').map((column) => column.name);
+  addColumnToTableIfNotExists(db, 'provider_models', columnNames, 'effort_values', 'TEXT DEFAULT NULL');
+  addColumnToTableIfNotExists(db, 'provider_models', columnNames, 'effort_default', 'TEXT DEFAULT NULL');
+};
+
+/**
+ * Carries the fork's former `effort_levels` declarations into upstream's
+ * `effort_values` column, while the old column still exists to read from.
+ *
+ * Runs after `addProviderModelEffortColumns` and before
+ * `widenProviderModelsProviderCheck`, whose rebuild no longer lists
+ * `effort_levels`. `effort_default` stays NULL: the catalog derives a default
+ * from the declared levels. A value already set through the new column — or
+ * cleared there — is never overwritten.
+ */
+const copyProviderModelEffortLevels = (db: Database): void => {
+  const columnNames = getTableInfo(db, 'provider_models').map((column) => column.name);
+  if (!columnNames.includes('effort_levels')) {
+    return;
+  }
+
+  db.exec(`
+    UPDATE provider_models SET effort_values = effort_levels
+    WHERE effort_levels IS NOT NULL AND effort_values IS NULL
+  `);
+};
+
+/**
+ * Drops the fork's former `effort_levels` column once its data has been
+ * copied into `effort_values` (see `copyProviderModelEffortLevels`). A table
+ * the CHECK widening rebuilt has already lost it, and a fresh install never had
+ * it.
+ */
+const dropProviderModelEffortLevelsColumn = (db: Database): void => {
+  const columnNames = getTableInfo(db, 'provider_models').map((column) => column.name);
+  if (!columnNames.includes('effort_levels')) {
+    return;
+  }
+
+  console.log('Running migration: Dropping retired provider_models.effort_levels column');
+  db.exec('ALTER TABLE provider_models DROP COLUMN effort_levels');
 };
 
 const ensureProjectsForSessionPaths = (db: Database): void => {
@@ -744,7 +798,12 @@ export const runMigrations = (db: Database) => {
     db.exec('CREATE INDEX IF NOT EXISTS idx_notification_channel_endpoints_enabled ON notification_channel_endpoints(enabled)');
     db.exec(PROVIDER_MODELS_TABLE_SCHEMA_SQL);
     addProviderModelCustomEndpointColumns(db);
+    // Order matters: the effort columns and the legacy `effort_levels` data
+    // must be in place before the CHECK widening rebuilds the table without it.
+    addProviderModelEffortColumns(db);
+    copyProviderModelEffortLevels(db);
     widenProviderModelsProviderCheck(db);
+    dropProviderModelEffortLevelsColumn(db);
     db.exec(`
       CREATE INDEX IF NOT EXISTS idx_provider_models_provider_order
       ON provider_models(provider, sort_order, id)

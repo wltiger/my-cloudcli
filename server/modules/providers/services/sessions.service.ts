@@ -6,13 +6,16 @@ import { projectsDb, sessionsDb } from '@/modules/database/index.js';
 import { broadcastSessionUpserted, chatRunRegistry } from '@/modules/websocket/index.js';
 import { providerRegistry } from '@/modules/providers/provider.registry.js';
 import { deleteSessionArtifactsFromProvider } from '@/modules/providers/services/session-artifact-cleanup.service.js';
+import { listBusyClaudeCliSessions } from '@/modules/providers/services/claude-cli-liveness.service.js';
 import { sessionHistoryCache } from '@/modules/providers/services/session-history-cache.service.js';
 import { writeSessionTitleToProvider } from '@/modules/providers/services/session-title-writeback.service.js';
 import type {
+  BackgroundTaskSummary,
   FetchHistoryOptions,
   FetchHistoryResult,
   LLMProvider,
   NormalizedMessage,
+  WorkflowAgentActivity,
 } from '@/shared/types.js';
 import { AppError, sliceTailPage, UNTITLED_SESSION_NAME } from '@/shared/utils.js';
 
@@ -26,6 +29,32 @@ import { AppError, sliceTailPage, UNTITLED_SESSION_NAME } from '@/shared/utils.j
  * single slow tool call never trips it.
  */
 const EXTERNAL_RUN_STALE_MS = 10 * 60 * 1_000;
+
+/**
+ * One session the running-sessions poll reports as busy.
+ *
+ * A chat run in progress is listed as before. A session whose turn has ended
+ * but whose background tasks are still outstanding is listed with
+ * `background: true` and `canInterrupt: false`: the composer stays usable
+ * (the runtime accepts a new turn while the work runs) and there is no run to
+ * abort — a task is stopped by id through `chat.stop-task` instead. `tasks`
+ * rides along on both kinds whenever the session has any.
+ *
+ * A turn driven outside CloudCLI — the Claude CLI in the Shell view, or a
+ * terminal the user opened themselves — is listed the same way, with
+ * `canInterrupt: false` because there is no run here to abort, and a
+ * `statusText` saying where the work is happening.
+ */
+type RunningSessionEntry = {
+  sessionId: string;
+  provider: LLMProvider;
+  startedAt: number;
+  lastSeq: number;
+  background?: true;
+  canInterrupt?: false;
+  statusText?: string;
+  tasks?: BackgroundTaskSummary[];
+};
 
 type CreateAppSessionResult = {
   sessionId: string;
@@ -138,7 +167,8 @@ export const sessionsService = {
   },
 
   /**
-   * Returns app-facing ids for provider runs that are currently processing.
+   * Returns app-facing ids for provider runs that are currently processing,
+   * plus every session whose background work outlived its turn.
    *
    * This is intentionally status-only: callers that only need sidebar activity
    * indicators should not attach to chat streams or request replayed messages.
@@ -151,42 +181,76 @@ export const sessionsService = {
    * synchronization. An externally started run is reported with
    * `canInterrupt: false`, because there is no process of ours to stop.
    */
-  listRunningSessions(): Array<{
-    sessionId: string;
-    provider: LLMProvider;
-    startedAt: number;
-    lastSeq: number;
-    canInterrupt?: boolean;
-  }> {
-    const runs = chatRunRegistry.listRunningRuns();
-    const ownRunIds = new Set(runs.map((run) => run.sessionId));
-    const staleBefore = Date.now() - EXTERNAL_RUN_STALE_MS;
+  async listRunningSessions(): Promise<RunningSessionEntry[]> {
+    const entries: RunningSessionEntry[] = chatRunRegistry.listRunningRuns();
+    const runningById = new Map(entries.map((entry) => [entry.sessionId, entry]));
 
-    const externalRuns = sessionsDb
-      .getExternallyRunningSessions()
-      .flatMap((row) => {
-        if (ownRunIds.has(row.session_id)) {
-          return [];
+    for (const provider of providerRegistry.listProviders()) {
+      for (const { sessionId, tasks } of provider.runtime.listBackgroundWork?.() ?? []) {
+        const running = runningById.get(sessionId);
+        if (running) {
+          running.tasks = tasks;
+          continue;
         }
-
-        // The marker records when the provider last moved the conversation
-        // on, so a CLI that died mid-turn stops refreshing it and ages out of
-        // this list instead of showing as busy forever.
-        const startedAt = Date.parse(row.external_running_at);
-        if (!Number.isFinite(startedAt) || startedAt < staleBefore) {
-          return [];
-        }
-
-        return [{
-          sessionId: row.session_id,
-          provider: row.provider as LLMProvider,
-          startedAt,
-          lastSeq: 0,
+        entries.push({
+          sessionId,
+          provider: provider.id,
+          startedAt: Math.min(...tasks.map((task) => task.startedAt)),
+          // The completed run stays in the registry for a while, and a client
+          // that subscribes with its lastSeq replays the tail it missed.
+          lastSeq: chatRunRegistry.getRun(sessionId)?.lastSeq ?? 0,
+          background: true,
           canInterrupt: false,
-        }];
-      });
+          tasks,
+        });
+      }
+    }
 
-    return [...runs, ...externalRuns];
+    // A provider CLI driving one of these sessions outside CloudCLI marks it
+    // running (see `external_running_at`). The marker records when the provider
+    // last moved the conversation on, so a CLI that died mid-turn stops
+    // refreshing it and ages out of this list instead of showing as busy forever.
+    const staleBefore = Date.now() - EXTERNAL_RUN_STALE_MS;
+    for (const row of sessionsDb.getExternallyRunningSessions()) {
+      const startedAt = Date.parse(row.external_running_at);
+      if (runningById.has(row.session_id) || !Number.isFinite(startedAt) || startedAt < staleBefore) {
+        continue;
+      }
+
+      entries.push({
+        sessionId: row.session_id,
+        provider: row.provider as LLMProvider,
+        startedAt,
+        lastSeq: 0,
+        canInterrupt: false,
+      });
+      runningById.set(row.session_id, entries[entries.length - 1]);
+    }
+
+    // The chat-run registry only knows about turns CloudCLI drives itself, so
+    // without this a session working under the Claude CLI — including one
+    // CloudCLI spawned for its own Shell view — looks idle. A session already
+    // listed above keeps its richer entry.
+    for (const live of await listBusyClaudeCliSessions()) {
+      const session = sessionsDb.getSessionByProviderSessionId(live.providerSessionId);
+      if (!session || runningById.has(session.session_id)) {
+        continue;
+      }
+
+      entries.push({
+        sessionId: session.session_id,
+        provider: session.provider as LLMProvider,
+        startedAt: live.startedAt,
+        lastSeq: chatRunRegistry.getRun(session.session_id)?.lastSeq ?? 0,
+        // There is no run here to abort: the turn belongs to a CLI process
+        // CloudCLI does not own, so it can be reported but not interrupted.
+        canInterrupt: false,
+        statusText: 'Running in the Claude CLI',
+      });
+      runningById.set(session.session_id, entries[entries.length - 1]);
+    }
+
+    return entries;
   },
 
   /**
@@ -537,6 +601,34 @@ export const sessionsService = {
         sessionId,
       })),
     };
+  },
+
+  /**
+   * Reads what one agent of a workflow run did, for the card that opened it.
+   *
+   * Not found covers both a provider that spawns no workflow agents and a run
+   * that left no transcript for this agent: either way there is nothing to
+   * show, and the card says so in one line.
+   */
+  async readWorkflowAgentActivity(sessionId: string, runId: string, agentId: string): Promise<WorkflowAgentActivity> {
+    const session = sessionsDb.getSessionById(sessionId);
+    if (!session) {
+      throw new AppError(`Session "${sessionId}" was not found.`, {
+        code: 'SESSION_NOT_FOUND',
+        statusCode: 404,
+      });
+    }
+
+    const sessions = providerRegistry.resolveProvider(session.provider as LLMProvider).sessions;
+    const activity = await sessions.readWorkflowAgentActivity?.(sessionId, runId, agentId);
+    if (!activity) {
+      throw new AppError(`Workflow agent "${agentId}" was not found.`, {
+        code: 'WORKFLOW_AGENT_NOT_FOUND',
+        statusCode: 404,
+      });
+    }
+
+    return activity;
   },
 
   /**

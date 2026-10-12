@@ -1,8 +1,10 @@
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import type { TFunction } from 'i18next';
 
 import { Shimmer } from '@/shared/ui';
-import type { SessionActivity } from '@/shared/types';
+import type { BackgroundTaskSummary, SessionActivity } from '@/shared/types';
+import { describeBackgroundTask, ownBackgroundTasks } from '@/modules/chat/utils/backgroundTasks';
 
 type ActivityIndicatorProps = {
   activity: SessionActivity | null;
@@ -31,6 +33,14 @@ const ACTION_KEYS = [
 const DEFAULT_ACTION_WORDS = ['Thinking', 'Processing', 'Analyzing', 'Working', 'Computing', 'Reasoning'];
 const EXIT_ANIMATION_MS = 220;
 
+/** What the background work is: the one task by kind and name, or how many when there are several. */
+function describeBackgroundTasks(allTasks: BackgroundTaskSummary[], t: TFunction): string {
+  const tasks = ownBackgroundTasks(allTasks);
+  return tasks.length === 1
+    ? describeBackgroundTask(tasks[0], t)
+    : t('claudeStatus.backgroundTask.count', { count: tasks.length, defaultValue: '{{count}} tasks' });
+}
+
 /**
  * Minimal response-in-progress indicator, in the spirit of the inline status
  * lines in Claude Code / Codex / OpenCode: a shimmering activity label, the
@@ -44,6 +54,11 @@ const EXIT_ANIMATION_MS = 220;
  * purpose — no shimmer, no clock — because nothing is answering the user; it is
  * there to say the work is alive and to keep Stop within reach. It never blocks
  * the composer, which stays a send button throughout.
+ *
+ * A session whose turn has ended while the tasks it launched still run (an
+ * activity entry flagged `background`) is drawn in the workflow and agent
+ * cards' purple, naming the work. Nothing is responding and the composer can
+ * send; Stop still follows `backgroundWorkOutstanding`, as for the quiet tab.
  *
  * Rendered by chat's ChatComposer above the input so the user can see and
  * interrupt without leaving the composer.
@@ -97,11 +112,15 @@ export default function ActivityIndicator({
 
   if (!renderedActivity && !backgroundWorkOutstanding) return null;
 
+  const isBackground = Boolean(renderedActivity?.background);
   const actionWords = ACTION_KEYS.map((key, i) => t(key, { defaultValue: DEFAULT_ACTION_WORDS[i] }));
-  const label = renderedActivity
-    ? (renderedActivity.statusText || actionWords[Math.floor(elapsedSeconds / 4) % actionWords.length])
-      .replace(/\.+$/, '')
-    : t('claudeStatus.backgroundWork.label', { defaultValue: 'Background work still running' });
+  const label = !renderedActivity
+    ? t('claudeStatus.backgroundHold.label', { defaultValue: 'Background work still running' })
+    : isBackground
+      ? t('claudeStatus.backgroundWork', 'Background work')
+      : (renderedActivity.statusText || actionWords[Math.floor(elapsedSeconds / 4) % actionWords.length])
+        .replace(/\.+$/, '');
+  const detail = isBackground ? describeBackgroundTasks(renderedActivity?.tasks ?? [], t) : '';
 
   const minutes = Math.floor(elapsedSeconds / 60);
   const seconds = elapsedSeconds % 60;
@@ -112,11 +131,11 @@ export default function ActivityIndicator({
   // Stop tears the whole process down, children included, so while background
   // work is outstanding it is no longer only "interrupt this reply" — say so
   // rather than letting a user discard a half-hour build by reflex.
-  const stopLabel = renderedActivity
+  const stopLabel = renderedActivity && !isBackground
     ? t('claudeStatus.stop', { defaultValue: 'Stop' })
-    : t('claudeStatus.backgroundWork.stop', { defaultValue: 'Stop background work' });
+    : t('claudeStatus.backgroundHold.stop', { defaultValue: 'Stop background work' });
   const stopHint = backgroundWorkOutstanding
-    ? t('claudeStatus.backgroundWork.stopHint', {
+    ? t('claudeStatus.backgroundHold.stopHint', {
       defaultValue: 'Stopping now also ends the background work that is still running, not just the reply.',
     })
     : stopLabel;
@@ -139,17 +158,24 @@ export default function ActivityIndicator({
           isFaded ? 'opacity-40' : 'opacity-100'
         }`}
       >
-        <div className={`${tabSurfaceClassName} gap-2`}>
+        <div className={`${tabSurfaceClassName} min-w-0 max-w-full gap-2`}>
           <span
             className={`h-1.5 w-1.5 shrink-0 rounded-full ${
-              renderedActivity ? 'animate-pulse bg-primary' : 'bg-amber-500'
+              !renderedActivity
+                ? 'bg-amber-500'
+                : isBackground
+                  ? 'animate-pulse bg-purple-500 dark:bg-purple-400'
+                  : 'animate-pulse bg-primary'
             }`}
             aria-hidden
           />
           {renderedActivity ? (
             <>
-              <Shimmer className="font-medium">{`${label}…`}</Shimmer>
-              <span className="tabular-nums text-muted-foreground/60">{elapsedLabel}</span>
+              <Shimmer className="shrink-0 font-medium">{`${label}…`}</Shimmer>
+              {detail && (
+                <span className="min-w-0 truncate text-muted-foreground" title={detail}>{detail}</span>
+              )}
+              <span className="shrink-0 tabular-nums text-muted-foreground/60">{elapsedLabel}</span>
             </>
           ) : (
             <span className="font-medium text-muted-foreground">{label}</span>

@@ -82,6 +82,7 @@ async function withGateway(runTest: (context: GatewayContext) => Promise<void>):
       },
       getPendingApprovalsForSession: () => [],
       resolveToolApproval: () => {},
+      hasBackgroundWork: () => false,
     } as never,
   };
 

@@ -1,4 +1,4 @@
-import type { ProviderModelOption } from '@/shared/types.js';
+import type { CustomProviderModelEffort, ProviderModelOption } from '@/shared/types.js';
 import { AppError } from '@/shared/utils.js';
 
 /**
@@ -24,48 +24,32 @@ export const assertCustomModelEndpointFieldsPaired = (
 };
 
 /**
- * Reasoning-effort levels Claude's own models are known to accept, in the
- * order the built-in catalog (`claude-models.provider.ts`) lists them.
- */
-export const CUSTOM_MODEL_EFFORT_LEVELS = ['low', 'medium', 'high', 'xhigh', 'max'] as const;
-
-/**
- * Rejects any level a custom model declares that isn't one CloudCLI knows how
- * to send to Claude. Used by `provider-models.service.ts` when normalizing a
- * create/update payload.
- */
-export const assertValidEffortLevels = (levels: string[] | undefined): void => {
-  const unknown = levels?.find((level) => !(CUSTOM_MODEL_EFFORT_LEVELS as readonly string[]).includes(level));
-  if (!unknown) {
-    return;
-  }
-
-  throw new AppError(`Unknown reasoning-effort level: ${unknown}.`, {
-    code: 'MODEL_INVALID_EFFORT_LEVEL',
-    statusCode: 400,
-  });
-};
-
-/**
  * Builds the `effort` block a custom model's declared levels should expose in
- * its `ProviderModelOption`, picking "medium" as the default when offered and
- * otherwise the first declared level in canonical order. Used by
+ * its `ProviderModelOption`. A stored default always wins. Without one, and
+ * only when `canonicalLevels` is given (the provider's `effortLevels`
+ * capability, weakest first), a default is derived: "medium" when offered,
+ * otherwise the first declared level in that order. Claude passes them so the
+ * composer's `default` sentinel resolves to a level (see `resolveClaudeEffort`);
+ * other providers pass null and keep the stored shape. Used by
  * `provider-models.service.ts`'s `toCustomProviderModelOption`.
  */
 export const buildCustomModelEffort = (
-  effortLevels: string[] | null,
+  effort: CustomProviderModelEffort | null,
+  canonicalLevels: string[] | null,
 ): ProviderModelOption['effort'] => {
-  if (!effortLevels || effortLevels.length === 0) {
+  if (!effort || effort.values.length === 0) {
     return undefined;
   }
 
-  const defaultLevel = effortLevels.includes('medium')
-    ? 'medium'
-    : CUSTOM_MODEL_EFFORT_LEVELS.find((level) => effortLevels.includes(level));
+  const { values } = effort;
+  const derivedDefault = canonicalLevels
+    ? (values.includes('medium') ? 'medium' : canonicalLevels.find((level) => values.includes(level)) ?? values[0])
+    : undefined;
+  const defaultLevel = effort.default ?? derivedDefault;
 
   return {
-    default: defaultLevel,
-    values: effortLevels.map((value) => ({ value })),
+    ...(defaultLevel ? { default: defaultLevel } : {}),
+    values: values.map((value) => ({ value })),
   };
 };
 

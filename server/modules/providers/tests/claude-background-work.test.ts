@@ -1,11 +1,218 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
+import {
+  createBackgroundWorkTracker,
+  queryClaudeSDK,
+  startsBackgroundWork,
+} from '@/modules/providers/list/claude/claude-runtime.provider.js';
 import type { AnyRecord, ProviderModelsDefinition } from '@/shared/types.js';
 
-// The runtime is imported dynamically inside the test, after the module mocks
-// are installed: a static import here would cache the real Claude Agent SDK
-// before it could be replaced.
+// Only turns that start work outliving the turn hold their CLI process open. A
+// turn scored `false` here has its stdin released the moment `result` arrives,
+// and the CLI reads that EOF as print wind-down — so anything still running dies.
+const turn = (...blocks: Array<{ name: string; input?: Record<string, unknown> }>) => ({
+  type: 'assistant',
+  message: { content: blocks.map((block) => ({ type: 'tool_use', input: {}, ...block })) },
+});
+
+test('a backgrounded Bash holds the process open', () => {
+  assert.equal(startsBackgroundWork(turn({ name: 'Bash', input: { run_in_background: true } })), true);
+});
+
+test('a foreground Bash does not', () => {
+  assert.equal(startsBackgroundWork(turn({ name: 'Bash', input: { run_in_background: false } })), false);
+});
+
+test('a backgrounded Agent holds the process open', () => {
+  // The gap this suite exists for: a background agent used to be scored as
+  // nothing outstanding, so the CLI wound down and killed it mid-run.
+  assert.equal(startsBackgroundWork(turn({ name: 'Agent', input: { run_in_background: true } })), true);
+});
+
+test('an Agent with no run_in_background holds the process open', () => {
+  // `run_in_background` is optional on AgentInput and agents background by
+  // default, so an omitted field means background, not foreground.
+  assert.equal(startsBackgroundWork(turn({ name: 'Agent', input: { prompt: 'Investigate' } })), true);
+});
+
+test('a foreground Agent does not', () => {
+  // It never pushes a follow-up turn, so holding for it would pin the process
+  // for the full BG_WAIT_CEILING_MS.
+  assert.equal(startsBackgroundWork(turn({ name: 'Agent', input: { run_in_background: false } })), false);
+});
+
+test('a Workflow holds the process open', () => {
+  // WorkflowInput has no foreground option: every call returns a task id
+  // immediately and reports back in a later turn.
+  assert.equal(startsBackgroundWork(turn({ name: 'Workflow', input: { script: 'export const meta = {}' } })), true);
+});
+
+test('a deferred-work tool holds the process open', () => {
+  assert.equal(startsBackgroundWork(turn({ name: 'Monitor' })), true);
+});
+
+test('a turn that starts nothing lasting does not', () => {
+  assert.equal(startsBackgroundWork(turn({ name: 'Read' })), false);
+});
+
+test('one backgrounded agent among foreground calls is enough', () => {
+  assert.equal(
+    startsBackgroundWork(
+      turn(
+        { name: 'Read' },
+        { name: 'Agent', input: { run_in_background: false } },
+        { name: 'Agent', input: { run_in_background: true } },
+      ),
+    ),
+    true,
+  );
+});
+
+test('a message carrying no tool calls does not', () => {
+  assert.equal(startsBackgroundWork({ type: 'result', message: { content: 'done' } }), false);
+  assert.equal(startsBackgroundWork({ type: 'assistant', message: { content: [] } }), false);
+  assert.equal(startsBackgroundWork({}), false);
+});
+
+// Once the turn's `result` is out, the tracker below is the only record of
+// what the held process is still running: the running-sessions list reads it
+// and a stop request is refused unless it names one of its tasks. The event
+// shapes are the SDK's own, as a real query emits them.
+const started = (taskId: string, extra: Record<string, unknown> = {}) => ({
+  type: 'system',
+  subtype: 'task_started',
+  task_id: taskId,
+  tool_use_id: `toolu_${taskId}`,
+  description: `Task ${taskId}`,
+  task_type: 'local_agent',
+  ...extra,
+});
+const notified = (taskId: string, status: string) => ({
+  type: 'system', subtype: 'task_notification', task_id: taskId, tool_use_id: `toolu_${taskId}`, status, summary: '', output_file: '',
+});
+const updated = (taskId: string, patch: Record<string, unknown>) => ({
+  type: 'system', subtype: 'task_updated', task_id: taskId, patch,
+});
+
+test('a task_started with a tool_use_id adds the task under its session', () => {
+  const tracker = createBackgroundWorkTracker();
+  const before = Date.now();
+  // The session's own turn issued the call, so the task is its own work.
+  tracker.apply('s1', {
+    type: 'assistant',
+    parent_tool_use_id: null,
+    message: { role: 'assistant', content: [{ type: 'tool_use', id: 'toolu_t1', name: 'Workflow', input: {} }] },
+  });
+  tracker.apply('s1', started('t1', { task_type: 'local_workflow', workflow_name: 'spec' }));
+
+  const [entry] = tracker.list();
+  assert.equal(tracker.list().length, 1);
+  assert.equal(entry.sessionId, 's1');
+  assert.equal(entry.tasks.length, 1);
+  const { startedAt, ...task } = entry.tasks[0];
+  assert.deepEqual(task, {
+    taskId: 't1',
+    toolUseId: 'toolu_t1',
+    taskType: 'local_workflow',
+    description: 'Task t1',
+    workflowName: 'spec',
+  });
+  assert.ok(startedAt >= before && startedAt <= Date.now());
+  assert.equal(tracker.hasOutstanding('s1'), true);
+  assert.equal(tracker.has('s1', 't1'), true);
+});
+
+test('a task started for a call the session itself made is its own; one from inside an agent is nested', () => {
+  // Verified on a real run: a workflow agent that backgrounds `sleep 60` puts
+  // a `task_started` on the parent's stream, with a tool_use_id from the
+  // agent's transcript. The parent transcript has no card for it, and the
+  // pill would otherwise read "3 tasks" for one workflow.
+  const tracker = createBackgroundWorkTracker();
+  tracker.apply('s1', {
+    type: 'assistant',
+    parent_tool_use_id: null,
+    message: { role: 'assistant', content: [{ type: 'tool_use', id: 'toolu_t1', name: 'Workflow', input: {} }] },
+  });
+  tracker.apply('s1', started('t1', { task_type: 'local_workflow', workflow_name: 'spec' }));
+  tracker.apply('s1', started('t2', { task_type: 'local_bash', description: 'Sleep for 60 seconds' }));
+
+  const [entry] = tracker.list();
+  assert.deepEqual(entry.tasks.map((task) => [task.taskId, task.nested ?? false]), [['t1', false], ['t2', true]]);
+  assert.equal(tracker.has('s1', 't2'), true, 'a nested task can still be stopped');
+
+  // The set of own calls dies with the session, like the tasks.
+  tracker.clear('s1');
+  tracker.apply('s1', started('t1', { task_type: 'local_workflow' }));
+  assert.equal(tracker.list()[0].tasks[0].nested, true);
+});
+
+test('a task_started without a tool_use_id is not tracked', () => {
+  // Housekeeping tasks the CLI starts on its own have no launching call and
+  // nothing in the transcript to show them under.
+  const tracker = createBackgroundWorkTracker();
+  tracker.apply('s1', { type: 'system', subtype: 'task_started', task_id: 'ambient', description: 'x' });
+
+  assert.deepEqual(tracker.list(), []);
+  assert.equal(tracker.hasOutstanding('s1'), false);
+});
+
+test('a task_notification removes the task whatever its status', () => {
+  const tracker = createBackgroundWorkTracker();
+  tracker.apply('s1', started('t1'));
+  tracker.apply('s1', started('t2'));
+  tracker.apply('s1', notified('t1', 'completed'));
+
+  assert.equal(tracker.has('s1', 't1'), false);
+  assert.equal(tracker.has('s1', 't2'), true);
+  assert.equal(tracker.hasOutstanding('s1'), true);
+
+  tracker.apply('s1', notified('t2', 'stopped'));
+  assert.equal(tracker.hasOutstanding('s1'), false);
+  assert.deepEqual(tracker.list(), []);
+});
+
+test('a terminal task_updated removes the task', () => {
+  const tracker = createBackgroundWorkTracker();
+  for (const [taskId, status] of [['a', 'completed'], ['b', 'failed'], ['c', 'killed']]) {
+    tracker.apply('s1', started(taskId));
+    tracker.apply('s1', updated(taskId, { status, end_time: 1 }));
+    assert.equal(tracker.has('s1', taskId), false, `${status} settles the task`);
+  }
+  assert.equal(tracker.hasOutstanding('s1'), false);
+});
+
+test('a non-terminal task_updated keeps the task', () => {
+  const tracker = createBackgroundWorkTracker();
+  tracker.apply('s1', started('t1'));
+  tracker.apply('s1', updated('t1', { status: 'running' }));
+  tracker.apply('s1', updated('t1', { is_backgrounded: true }));
+  tracker.apply('s1', updated('t1', { status: 'paused' }));
+
+  assert.equal(tracker.has('s1', 't1'), true);
+  assert.equal(tracker.hasOutstanding('s1'), true);
+});
+
+test('clearing a session empties it and leaves the others alone', () => {
+  const tracker = createBackgroundWorkTracker();
+  tracker.apply('s1', started('t1'));
+  tracker.apply('s2', started('t2'));
+  tracker.clear('s1');
+
+  assert.equal(tracker.hasOutstanding('s1'), false);
+  assert.equal(tracker.has('s1', 't1'), false);
+  assert.deepEqual(tracker.list().map((entry) => entry.sessionId), ['s2']);
+});
+
+test('messages that are not task events leave the set untouched', () => {
+  const tracker = createBackgroundWorkTracker();
+  tracker.apply('s1', started('t1'));
+  tracker.apply('s1', { type: 'assistant', message: { content: [] } });
+  tracker.apply('s1', { type: 'system', subtype: 'task_progress', task_id: 't1', description: 'x', usage: {} });
+  tracker.apply('s1', { type: 'result', task_id: 't1' });
+
+  assert.equal(tracker.has('s1', 't1'), true);
+});
 
 const MODELS: ProviderModelsDefinition = {
   OPTIONS: [{ value: 'default', label: 'Default' }],
@@ -134,6 +341,7 @@ function createFakeQuery({ prompt, options }: { prompt: AsyncIterable<AnyRecord>
 
 function createContext(): AnyRecord {
   return {
+    createQuery: createFakeQuery,
     resolveProviderSessionId: () => undefined,
     resolveResumeModel: async (_sessionId: string | undefined, model: string | undefined) => model,
     getProviderModels: async () => MODELS,
@@ -185,38 +393,10 @@ async function fireHook(live: FakeQuery, event: 'Stop' | 'SubagentStop', payload
 
 const CEILING_MS = 30 * 60 * 1000;
 
+// The Stop-hook snapshot is this fork's third hold signal, next to the task
+// tracker and `startsBackgroundWork` above: the only one that sees a cron set up
+// in an earlier turn. These drive whole runs through `context.createQuery`.
 test('Claude background-work detection via the Stop-hook snapshot', async (t) => {
-  t.mock.module('@anthropic-ai/claude-agent-sdk', {
-    // `forkSession`/`getSessionMessages` are unused here, but the providers
-    // barrel imports them, and a mocked module must provide every export its
-    // importers name.
-    namedExports: {
-      query: createFakeQuery,
-      forkSession: () => {
-        throw new Error('forkSession is not part of these tests');
-      },
-      getSessionMessages: () => {
-        throw new Error('getSessionMessages is not part of these tests');
-      },
-    },
-  });
-  // Mocked one level below the notifications barrel the runtime imports, so the
-  // barrel's other exports keep working for its other importers. Delivery needs
-  // a user row and push channels; none of that is under test here.
-  t.mock.module('@/modules/notifications/services/notification-orchestrator.service.js', {
-    namedExports: {
-      buildNotificationPayload: () => ({}),
-      createNotificationEvent: (event: AnyRecord) => event,
-      notifyUserIfEnabled: () => {},
-      notifyRunStopped: () => {},
-      notifyRunFailed: () => {},
-      notifyPermissionResolved: () => {},
-      notifyBackgroundWorkCompleted: () => {},
-    },
-  });
-
-  const { queryClaudeSDK } = await import('@/modules/providers/list/claude/claude-runtime.provider.js');
-
   t.beforeEach(() => {
     queries.length = 0;
     rejectHooksOnce = false;
@@ -275,7 +455,7 @@ test('Claude background-work detection via the Stop-hook snapshot', async (t) =>
     const { connection, turn, live } = await startTurn('bg-empty');
 
     // Even a subagent tool call releases when the snapshot says it already finished.
-    await live.emit(toolUse('Agent', { subagent_type: 'general-purpose' }));
+    await live.emit(toolUse('Agent', { subagent_type: 'general-purpose', run_in_background: false }));
     await fireHook(live, 'Stop', { background_tasks: [], session_crons: [] });
     await live.emit(RESULT);
     await turn;
@@ -331,6 +511,35 @@ test('Claude background-work detection via the Stop-hook snapshot', async (t) =>
     assert.equal(live.promptStreamClosed, true, 'the last snapshot before the result decides');
   });
 
+  await t.test('a stopped task leaves the snapshot, so stopping the last one releases the process', async () => {
+    // A stopped task never fires another Stop hook — only its `stopped`
+    // notification — so a snapshot that kept listing it would hold the process
+    // until the ceiling.
+    const { turn, live } = await startTurn('bg-stopped');
+
+    await fireHook(live, 'Stop', { background_tasks: [RUNNING_SUBAGENT], session_crons: [] });
+    await live.emit(RESULT);
+    assert.equal(live.promptStreamClosed, false);
+
+    await live.emit({ type: 'system', subtype: 'task_notification', session_id: 'provider-1', task_id: 'a1', status: 'stopped' });
+    await turn;
+    assert.equal(live.promptStreamClosed, true, 'nothing is left in the snapshot once its task is stopped');
+  });
+
+  await t.test('a cron keeps the process held after its last task is stopped', async () => {
+    const { turn, live } = await startTurn('bg-stopped-cron');
+
+    await fireHook(live, 'Stop', {
+      background_tasks: [RUNNING_SUBAGENT],
+      session_crons: [{ id: 'c1', schedule: '0 9 * * *', recurring: true, prompt: 'daily' }],
+    });
+    await live.emit(RESULT);
+    await live.emit({ type: 'system', subtype: 'task_notification', session_id: 'provider-1', task_id: 'a1', status: 'stopped' });
+
+    assert.equal(live.promptStreamClosed, false, 'the cron will still wake this session');
+    await finishHeldTurn(live, turn);
+  });
+
   await t.test('an SDK error mid-hold does not kill outstanding background work', async () => {
     const { connection, turn, live } = await startTurn('bg-error');
 
@@ -346,22 +555,24 @@ test('Claude background-work detection via the Stop-hook snapshot', async (t) =>
   });
 
   await t.test('an SDK error before any Stop hook still protects a backgrounded Bash', async () => {
-    // The hooks registered fine, but the run died before one could speak. With
-    // no snapshot to override it the fallback signal is all there is, and
-    // releasing here would kill a command that is still running.
-    const { turn, live } = await startTurn('bg-error-pre-hook');
+    // The hooks registered fine, but the run died before one could speak, so no
+    // snapshot exists to hold on. The *observed start* (`backgroundWorkPending`)
+    // is all there is, and the cleanup path has to consult it — releasing here
+    // would kill a command that is still running, which is exactly the failure
+    // the `finally` guard exists to prevent.
+    const { live } = await startTurn('bg-error-pre-hook');
 
     await live.emit(toolUse('Bash', { command: 'sleep 100', run_in_background: true }));
     await live.fail(new Error('socket hang up'));
-    await turn;
+    await flush();
 
-    assert.equal(live.promptStreamClosed, false);
+    assert.equal(live.promptStreamClosed, false, 'the observed start must keep stdin open through the failure');
   });
 
   await t.test('an SDK error mid-hold does not kill work the fallback is holding', async () => {
     // Without hooks the only signal is the backgrounded Bash, and the `result`
     // that started the hold has already consumed it — so the cleanup path has
-    // to remember that this run is held, not just re-ask the ledger.
+    // to remember that this run is held, not just re-ask the tracker.
     rejectHooksOnce = true;
     const { live } = await startTurn('bg-error-fallback');
 
@@ -384,6 +595,21 @@ test('Claude background-work detection via the Stop-hook snapshot', async (t) =>
     assert.equal(live.promptStreamClosed, true);
   });
 
+  await t.test('an SDK error after a foreground tool still releases the process', async () => {
+    // The mirror of the observed-start case above, and the one that keeps that
+    // guard honest: a tool that plainly does *not* outlive the turn must not
+    // hold the process open when the run dies. A foreground Agent opts out with
+    // `run_in_background: false`, so neither `startsBackgroundWork` nor the
+    // tracker has anything to report — the failure still releases.
+    const { turn, live } = await startTurn('bg-error-foreground');
+
+    await live.emit(toolUse('Agent', { subagent_type: 'general-purpose', run_in_background: false }));
+    await live.fail(new Error('socket hang up'));
+    await turn;
+
+    assert.equal(live.promptStreamClosed, true, 'a foreground tool must not hold the process through a failure');
+  });
+
   await t.test('without hooks, an explicitly backgrounded Bash holds the process', async () => {
     rejectHooksOnce = true;
     const { turn, live } = await startTurn('bg-fallback-bash');
@@ -400,7 +626,6 @@ test('Claude background-work detection via the Stop-hook snapshot', async (t) =>
   await t.test('without hooks, a backgrounded subagent holds the process', async () => {
     for (const [sessionId, block] of [
       ['bg-fallback-agent-bg', toolUse('Agent', { subagent_type: 'general-purpose', run_in_background: true })],
-      ['bg-fallback-task-bg', toolUse('Task', { subagent_type: 'general-purpose', run_in_background: true })],
     ] as Array<[string, AnyRecord]>) {
       rejectHooksOnce = true;
       const { turn, live } = await startTurn(sessionId);
@@ -415,8 +640,7 @@ test('Claude background-work detection via the Stop-hook snapshot', async (t) =>
 
   await t.test('without hooks, a foreground subagent or a foreground Bash releases as usual', async () => {
     for (const [sessionId, block] of [
-      ['bg-fallback-agent', toolUse('Agent', { subagent_type: 'general-purpose' })],
-      ['bg-fallback-monitor', toolUse('Monitor', { command: 'watch' })],
+      ['bg-fallback-agent', toolUse('Agent', { subagent_type: 'general-purpose', run_in_background: false })],
       ['bg-fallback-fg-bash', toolUse('Bash', { command: 'ls' })],
     ] as Array<[string, AnyRecord]>) {
       rejectHooksOnce = true;

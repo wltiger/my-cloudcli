@@ -189,6 +189,11 @@ CREATE TABLE IF NOT EXISTS app_config (
  * controlled in each provider's `-models.provider.ts` adapter so they can be
  * updated without migrating application data. `model_id` is unique only within
  * a provider because different CLIs can accept the same identifier.
+ *
+ * `effort_values` (JSON array of level ids) and `effort_default` hold the
+ * reasoning-effort levels the user declared for the model; both stay NULL when
+ * none were declared. They sit after the timestamps so fresh installs match the
+ * column order that `runMigrations` produces on upgraded databases.
  */
 export const PROVIDER_MODELS_TABLE_SCHEMA_SQL = `
 CREATE TABLE IF NOT EXISTS provider_models (
@@ -203,14 +208,14 @@ CREATE TABLE IF NOT EXISTS provider_models (
     -- every other row). Stored unmasked by design -- see fork-customizations.md.
     base_url TEXT,
     api_key TEXT,
-    -- JSON array of reasoning-effort levels this custom endpoint accepts (e.g.
-    -- '["low","medium","xhigh"]'), or NULL to leave effort unavailable for it.
-    effort_levels TEXT,
     -- Context window this custom model accepts, in raw tokens (a whole number
     -- of 1024-token K units), or NULL to leave Claude Code's own assumption in
     -- place. Drives both the spawned process's CLAUDE_CODE_MAX_CONTEXT_TOKENS
     -- and the session's context usage readout.
     context_window INTEGER,
+    -- Kept last: upgraded databases add these after the columns above.
+    effort_values TEXT DEFAULT NULL,
+    effort_default TEXT DEFAULT NULL,
     UNIQUE(provider, model_id)
 );
 `;
