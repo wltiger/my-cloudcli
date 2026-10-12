@@ -140,6 +140,12 @@ Vite dev server proxies `/api`, `/ws`, `/shell`, `/plugin-ws` to the Express bac
 - Import order is enforced by `eslint-plugin-import-x` (bridged in via oxlint, see `.oxlintrc.json`) (`builtin → external → internal → parent → sibling → index`, blank line between groups) on both `src/` and `server/`.
 - All Claude Code tools are disabled by default in the UI itself (a safety default for end users of the app, not for development in this repo) — enabled per-tool from Settings.
 
+## Dispatched agents
+
+**When a dispatched agent fails or comes back empty, report it and ask before changing anything.** Do not silently re-dispatch to a different label, model or runner — which agent does the work is the maintainer's call, and a substitution made on your own initiative looks like the same agent ran when it did not. Report what failed, what the evidence was, and offer the options (retry the same one, switch model, switch runner, drop it); wait for the answer.
+
+This covers the whole class: an empty result file, a timeout, a rate limit, a `check` that reports no output. Note that some runners exit `0` with nothing written yet because the agent is *still working* (dispatching a subagent of its own, waiting on a long tool call) — look at whether it is still running before calling it a failure at all.
+
 ## Agent skills
 
 ### Issue tracker

@@ -1,0 +1,443 @@
+
+> @cloudcli-ai/cloudcli@1.37.4 test:client
+> vitest run
+
+
+[1m[46m RUN [49m[22m [36mv3.2.7 [39m[90mD:/code/opensource/claudecodeui[39m
+
+ [32m✓[39m src/modules/chat/tests/fileMentionsRefresh.test.tsx [2m([22m[2m6 tests[22m[2m)[22m[33m 490[2mms[22m[39m
+[90mstderr[2m | src/modules/chat/tests/backgroundWorkAfterComplete.test.tsx[2m > [22m[2ma refused stop request does not idle the session it was sent on
+[22m[39m[Chat] Protocol error: NO_SUCH_TASK Session has no such task
+[Chat] Protocol error: TASK_ID_REQUIRED chat.stop-task requires a taskId
+[Chat] Protocol error: SESSION_NOT_FOUND gone
+
+ [32m✓[39m src/modules/chat/tests/backgroundWorkAfterComplete.test.tsx [2m([22m[2m6 tests[22m[2m)[22m[32m 115[2mms[22m[39m
+[90mstderr[2m | src/modules/git-panel/tests/useBranchCompare.test.ts[2m > [22m[2mrecords a failed file diff load so the row can show it, and clears it on a successful retry
+[22m[39mError fetching branch diff for file: Git operation failed
+
+ [32m✓[39m src/modules/project-workspace/tests/projectsStateSelectionSync.test.ts [2m([22m[2m6 tests[22m[2m)[22m[33m 1729[2mms[22m[39m
+   [33m[2m✓[22m[39m a refresh that renames the selected project updates the selected copy [33m 983[2mms[22m[39m
+ [32m✓[39m src/modules/git-panel/tests/useBranchCompare.test.ts [2m([22m[2m8 tests[22m[2m)[22m[33m 1940[2mms[22m[39m
+   [33m[2m✓[22m[39m loads the default base on mount and re-fetches when the base changes [33m 780[2mms[22m[39m
+ [32m✓[39m src/modules/shell/tests/shellTerminalTheme.test.ts [2m([22m[2m8 tests[22m[2m)[22m[32m 226[2mms[22m[39m
+ [32m✓[39m src/modules/chat/tests/transcriptScrollOwnership.test.tsx [2m([22m[2m3 tests[22m[2m)[22m[33m 481[2mms[22m[39m
+   [33m[2m✓[22m[39m deferred scroll-to-bottom[2m > [22mdoes not yank the view back down when the user scrolls up inside the delay [33m 419[2mms[22m[39m
+ [32m✓[39m src/modules/quick-settings-panel/tests/quickSettingsPanelState.test.ts [2m([22m[2m19 tests[22m[2m)[22m[32m 20[2mms[22m[39m
+ [32m✓[39m src/modules/sidebar/tests/sidebarRowProps.test.tsx [2m([22m[2m9 tests[22m[2m)[22m[32m 46[2mms[22m[39m
+ [32m✓[39m src/modules/chat/tests/backgroundWorkState.test.tsx [2m([22m[2m8 tests[22m[2m)[22m[33m 2520[2mms[22m[39m
+   [33m[2m✓[22m[39m Stop stays available while only background work is outstanding [33m 2366[2mms[22m[39m
+ [32m✓[39m src/modules/sidebar/tests/sessionBulkSelection.test.ts [2m([22m[2m18 tests[22m[2m)[22m[33m 776[2mms[22m[39m
+ [32m✓[39m src/modules/settings/tests/settingsControllerCodeEditor.test.ts [2m([22m[2m5 tests[22m[2m)[22m[33m 571[2mms[22m[39m
+   [33m[2m✓[22m[39m opening settings writes no code-editor preference for a user who never set one [33m 416[2mms[22m[39m
+ [32m✓[39m src/modules/project-workspace/tests/workspaceTitleRename.test.tsx [2m([22m[2m8 tests[22m[2m)[22m[32m 187[2mms[22m[39m
+ [32m✓[39m src/modules/project-workspace/tests/projectsStateSessionAlias.test.ts [2m([22m[2m3 tests[22m[2m)[22m[33m 473[2mms[22m[39m
+ [32m✓[39m src/modules/project-workspace/tests/projectsStateRenameSession.test.ts [2m([22m[2m5 tests[22m[2m)[22m[33m 664[2mms[22m[39m
+ [32m✓[39m src/modules/chat/tests/compactionRows.test.ts [2m([22m[2m12 tests[22m[2m)[22m[32m 9[2mms[22m[39m
+ [32m✓[39m src/modules/chat/tests/streamingMarkdownRenderEquivalence.test.tsx [2m([22m[2m32 tests[22m[2m)[22m[33m 3878[2mms[22m[39m
+   [33m[2m✓[22m[39m every streaming prefix renders identically: display math [33m 453[2mms[22m[39m
+   [33m[2m✓[22m[39m every streaming prefix renders identically: mixed [33m 826[2mms[22m[39m
+ [32m✓[39m src/shared/tests/authenticatedFetch.test.ts [2m([22m[2m10 tests[22m[2m)[22m[32m 236[2mms[22m[39m
+[90mstderr[2m | src/shared/tests/userSettings.test.ts[2m > [22m[2ma failed hydrate keeps the mirrored values instead of snapping back to defaults
+[22m[39mFailed to load user preferences: Error: offline
+    at Object.preferences [90m(D:\code\opensource\claudecodeui\[39msrc\shared\tests\userSettings.test.ts:26:17[90m)[39m
+    at Module.hydrateUserPreferences [90m(D:\code\opensource\claudecodeui\[39msrc\shared\userSettings.ts:286:37[90m)[39m
+    at [90mD:\code\opensource\claudecodeui\[39msrc\shared\tests\userSettings.test.ts:190:15
+    at [90mfile:///D:/code/opensource/claudecodeui/[39mnode_modules/[4m@vitest/runner[24m/dist/chunk-hooks.js:752:20
+
+ [32m✓[39m src/shared/tests/userSettings.test.ts [2m([22m[2m13 tests[22m[2m)[22m[32m 259[2mms[22m[39m
+ [32m✓[39m src/modules/chat/tests/backgroundTasksStrip.test.tsx [2m([22m[2m16 tests[22m[2m)[22m[33m 1251[2mms[22m[39m
+   [33m[2m✓[22m[39m the background tasks strip[2m > [22mlists a running workflow and a running agent with what each has got to [33m 454[2mms[22m[39m
+[90mstderr[2m | src/modules/chat/tests/composerNewChatSingleSession.test.ts[2m > [22m[2ma failed session creation does not block the retry
+[22m[39mSession creation failed: Error: Failed to create session (500)
+    at [90mD:\code\opensource\claudecodeui\[39msrc\modules\chat\hooks\useChatComposerState.ts:876:19
+    at Object.handleSubmit [90m(D:\code\opensource\claudecodeui\[39msrc\modules\chat\hooks\useChatComposerState.ts:1042:9[90m)[39m
+
+ [32m✓[39m src/modules/chat/tests/composerNewChatSingleSession.test.ts [2m([22m[2m4 tests[22m[2m)[22m[33m 639[2mms[22m[39m
+   [33m[2m✓[22m[39m submitting again while the new chat's session is being created allocates one session and sends once [33m 361[2mms[22m[39m
+[90mstderr[2m | src/shared/tests/chatDrafts.test.ts[2m > [22m[2ma failed hydrate keeps the mirrored draft rather than blanking the composer
+[22m[39mFailed to load chat drafts: Error: offline
+    at Object.drafts [90m(D:\code\opensource\claudecodeui\[39msrc\shared\tests\chatDrafts.test.ts:26:17[90m)[39m
+    at Module.hydrateChatDrafts [90m(D:\code\opensource\claudecodeui\[39msrc\shared\chatDrafts.ts:240:37[90m)[39m
+    at [90mD:\code\opensource\claudecodeui\[39msrc\shared\tests\chatDrafts.test.ts:155:15
+    at [90mfile:///D:/code/opensource/claudecodeui/[39mnode_modules/[4m@vitest/runner[24m/dist/chunk-hooks.js:752:20
+
+ [32m✓[39m src/modules/chat/tests/sessionStoreTruncate.test.tsx [2m([22m[2m9 tests[22m[2m)[22m[33m 1005[2mms[22m[39m
+   [33m[2m✓[22m[39m truncateAt[2m > [22mdrops the anchored message and everything after it [33m 955[2mms[22m[39m
+ [32m✓[39m src/shared/tests/chatDrafts.test.ts [2m([22m[2m15 tests[22m[2m)[22m[32m 40[2mms[22m[39m
+ [32m✓[39m src/modules/settings/tests/claudeSettingsFileRules.test.tsx [2m([22m[2m6 tests[22m[2m)[22m[33m 1834[2mms[22m[39m
+   [33m[2m✓[22m[39m Claude permissions: rules from the Claude settings files[2m > [22mlists the user file rules grouped by allow, ask and deny, with the file path and the read-only note [33m 973[2mms[22m[39m
+   [33m[2m✓[22m[39m Claude permissions: rules from the Claude settings files[2m > [22mshows the managed settings file when one exists [33m 330[2mms[22m[39m
+ [32m✓[39m src/shared/tests/webSocketConnectionStatus.test.tsx [2m([22m[2m6 tests[22m[2m)[22m[32m 35[2mms[22m[39m
+ [32m✓[39m src/shared/tests/backgroundSessionActivity.test.tsx [2m([22m[2m6 tests[22m[2m)[22m[32m 20[2mms[22m[39m
+ [32m✓[39m src/modules/chat/tests/revealMessageRetries.test.tsx [2m([22m[2m2 tests[22m[2m)[22m[33m 473[2mms[22m[39m
+ [32m✓[39m src/modules/sidebar/tests/recentConversationRowActions.test.tsx [2m([22m[2m7 tests[22m[2m)[22m[32m 57[2mms[22m[39m
+ [32m✓[39m src/modules/chat/tests/askUserQuestionPanel.test.tsx [2m([22m[2m6 tests[22m[2m)[22m[32m 199[2mms[22m[39m
+ [31m❯[39m src/modules/chat/tests/customModelEffort.test.tsx [2m([22m[2m5 tests[22m[2m | [22m[31m1 failed[39m[2m)[22m[33m 4334[2mms[22m[39m
+[31m   [31m×[31m the model library declares effort levels for a new custom model[39m[33m 2083[2mms[22m[39m
+[31m     → Expected values to be strictly deep-equal:
++ actual - expected
+
+  {
+    input: {
++     contextWindow: undefined,
+      effort: {
+        values: [
+          'low',
+          'max'
+        ]
+[39m
+   [33m[2m✓[22m[39m editing a custom model keeps its default level and can clear its levels [33m 1133[2mms[22m[39m
+   [33m[2m✓[22m[39m OpenCode offers its effort levels even when no visible built-in model declares any [33m 510[2mms[22m[39m
+   [32m✓[39m providers without effort support show no effort levels and send none[32m 263[2mms[22m[39m
+   [33m[2m✓[22m[39m the composer offers exactly the declared levels for a selected custom model [33m 343[2mms[22m[39m
+[90mstderr[2m | src/modules/code-editor/tests/editorLayoutSwitch.test.tsx[2m > [22m[2mthe pop-out button keeps the unsaved buffer and the dirty dot
+[22m[39mreact-i18next:: useTranslation: You will need to pass in an i18next instance by using initReactI18next { code: [32m'NO_I18NEXT_INSTANCE'[39m }
+
+[90mstderr[2m | src/modules/code-editor/tests/unsavedChangesGuard.test.tsx[2m > [22m[2mEscape with unsaved edits asks first and stays open when declined
+[22m[39mreact-i18next:: useTranslation: You will need to pass in an i18next instance by using initReactI18next { code: [32m'NO_I18NEXT_INSTANCE'[39m }
+
+ [32m✓[39m src/modules/chat/tests/chatProviderModels.test.ts [2m([22m[2m5 tests[22m[2m)[22m[32m 133[2mms[22m[39m
+ [32m✓[39m src/shared/tests/busySessionIds.test.tsx [2m([22m[2m5 tests[22m[2m)[22m[33m 348[2mms[22m[39m
+ [32m✓[39m src/modules/code-editor/tests/editorLayoutSwitch.test.tsx [2m([22m[2m4 tests[22m[2m)[22m[33m 849[2mms[22m[39m
+   [33m[2m✓[22m[39m the pop-out button keeps the unsaved buffer and the dirty dot [33m 492[2mms[22m[39m
+ [32m✓[39m src/modules/chat/tests/streamingPlayer.test.ts [2m([22m[2m3 tests[22m[2m)[22m[32m 109[2mms[22m[39m
+[90mstderr[2m | src/modules/chat/tests/latexDelimiters.test.tsx[2m > [22m[2mLaTeX inside code stays literal
+[22m[39mreact-i18next:: useTranslation: You will need to pass in an i18next instance by using initReactI18next { code: [32m'NO_I18NEXT_INSTANCE'[39m }
+
+[90mstderr[2m | src/modules/chat/tests/markdownSyntaxThemeInjection.test.tsx[2m > [22m[2mthe dark block declares every custom property a rendered code block references
+[22m[39mreact-i18next:: useTranslation: You will need to pass in an i18next instance by using initReactI18next { code: [32m'NO_I18NEXT_INSTANCE'[39m }
+
+[90mstderr[2m | src/modules/chat/tests/composerToolsSettingsResolution.test.ts[2m > [22m[2ma claude send carries the tools stored under that provider own preference
+[22m[39mreact-i18next:: useTranslation: You will need to pass in an i18next instance by using initReactI18next { code: [32m'NO_I18NEXT_INSTANCE'[39m }
+
+ [32m✓[39m src/modules/chat/tests/composerToolsSettingsResolution.test.ts [2m([22m[2m7 tests[22m[2m)[22m[32m 76[2mms[22m[39m
+ [32m✓[39m src/modules/code-editor/tests/unsavedChangesGuard.test.tsx [2m([22m[2m19 tests[22m[2m)[22m[33m 2264[2mms[22m[39m
+   [33m[2m✓[22m[39m Escape with unsaved edits asks first and stays open when declined [33m 398[2mms[22m[39m
+[90mstderr[2m | src/modules/chat/tests/composerDraftScoping.test.tsx[2m > [22m[2ma draft is stored under the open session, not the project
+[22m[39mreact-i18next:: useTranslation: You will need to pass in an i18next instance by using initReactI18next { code: [32m'NO_I18NEXT_INSTANCE'[39m }
+Error fetching files: TypeError: __vite_ssr_import_2__.api.getFiles is not a function
+    at [90mD:\code\opensource\claudecodeui\[39msrc\modules\chat\hooks\useFileMentions.tsx:78:34
+    at fetchProjectFiles [90m(D:\code\opensource\claudecodeui\[39msrc\modules\chat\hooks\useFileMentions.tsx:112:13[90m)[39m
+    at [90mD:\code\opensource\claudecodeui\[39msrc\modules\chat\hooks\useFileMentions.tsx:115:5
+    at commitHookEffectListMount [90m(D:\code\opensource\claudecodeui\[39mnode_modules\[4mreact-dom[24m\cjs\react-dom.development.js:23189:26[90m)[39m
+    at commitPassiveMountOnFiber [90m(D:\code\opensource\claudecodeui\[39mnode_modules\[4mreact-dom[24m\cjs\react-dom.development.js:24970:11[90m)[39m
+    at commitPassiveMountEffects_complete [90m(D:\code\opensource\claudecodeui\[39mnode_modules\[4mreact-dom[24m\cjs\react-dom.development.js:24930:9[90m)[39m
+    at commitPassiveMountEffects_begin [90m(D:\code\opensource\claudecodeui\[39mnode_modules\[4mreact-dom[24m\cjs\react-dom.development.js:24917:7[90m)[39m
+    at commitPassiveMountEffects [90m(D:\code\opensource\claudecodeui\[39mnode_modules\[4mreact-dom[24m\cjs\react-dom.development.js:24905:3[90m)[39m
+    at flushPassiveEffectsImpl [90m(D:\code\opensource\claudecodeui\[39mnode_modules\[4mreact-dom[24m\cjs\react-dom.development.js:27078:3[90m)[39m
+    at flushPassiveEffects [90m(D:\code\opensource\claudecodeui\[39mnode_modules\[4mreact-dom[24m\cjs\react-dom.development.js:27023:14[90m)[39m
+
+[90mstderr[2m | src/modules/chat/tests/composerDraftScoping.test.tsx[2m > [22m[2ma draft is stored under the open session, not the project
+[22m[39mError fetching slash commands: TypeError: Cannot read properties of undefined (reading 'skills')
+    at fetchCommands [90m(D:\code\opensource\claudecodeui\[39msrc\shared\hooks\useProjectSlashCommands.ts:118:52[90m)[39m
+[90m    at processTicksAndRejections (node:internal/process/task_queues:103:5)[39m
+
+[90mstderr[2m | src/modules/chat/tests/composerDraftScoping.test.tsx[2m > [22m[2ma chat with no session yet is stored under its project
+[22m[39mError fetching files: TypeError: __vite_ssr_import_2__.api.getFiles is not a function
+    at [90mD:\code\opensource\claudecodeui\[39msrc\modules\chat\hooks\useFileMentions.tsx:78:34
+    at fetchProjectFiles [90m(D:\code\opensource\claudecodeui\[39msrc\modules\chat\hooks\useFileMentions.tsx:112:13[90m)[39m
+    at [90mD:\code\opensource\claudecodeui\[39msrc\modules\chat\hooks\useFileMentions.tsx:115:5
+    at commitHookEffectListMount [90m(D:\code\opensource\claudecodeui\[39mnode_modules\[4mreact-dom[24m\cjs\react-dom.development.js:23189:26[90m)[39m
+    at commitPassiveMountOnFiber [90m(D:\code\opensource\claudecodeui\[39mnode_modules\[4mreact-dom[24m\cjs\react-dom.development.js:24970:11[90m)[39m
+    at commitPassiveMountEffects_complete [90m(D:\code\opensource\claudecodeui\[39mnode_modules\[4mreact-dom[24m\cjs\react-dom.development.js:24930:9[90m)[39m
+    at commitPassiveMountEffects_begin [90m(D:\code\opensource\claudecodeui\[39mnode_modules\[4mreact-dom[24m\cjs\react-dom.development.js:24917:7[90m)[39m
+    at commitPassiveMountEffects [90m(D:\code\opensource\claudecodeui\[39mnode_modules\[4mreact-dom[24m\cjs\react-dom.development.js:24905:3[90m)[39m
+    at flushPassiveEffectsImpl [90m(D:\code\opensource\claudecodeui\[39mnode_modules\[4mreact-dom[24m\cjs\react-dom.development.js:27078:3[90m)[39m
+    at flushPassiveEffects [90m(D:\code\opensource\claudecodeui\[39mnode_modules\[4mreact-dom[24m\cjs\react-dom.development.js:27023:14[90m)[39m
+
+[90mstderr[2m | src/modules/chat/tests/composerDraftScoping.test.tsx[2m > [22m[2ma chat with no session yet is stored under its project
+[22m[39mError fetching slash commands: TypeError: Cannot read properties of undefined (reading 'skills')
+    at fetchCommands [90m(D:\code\opensource\claudecodeui\[39msrc\shared\hooks\useProjectSlashCommands.ts:118:52[90m)[39m
+
+[90mstderr[2m | src/modules/chat/tests/composerDraftScoping.test.tsx[2m > [22m[2mswitching sessions swaps the draft instead of carrying it across
+[22m[39mError fetching files: TypeError: __vite_ssr_import_2__.api.getFiles is not a function
+    at [90mD:\code\opensource\claudecodeui\[39msrc\modules\chat\hooks\useFileMentions.tsx:78:34
+    at fetchProjectFiles [90m(D:\code\opensource\claudecodeui\[39msrc\modules\chat\hooks\useFileMentions.tsx:112:13[90m)[39m
+    at [90mD:\code\opensource\claudecodeui\[39msrc\modules\chat\hooks\useFileMentions.tsx:115:5
+    at commitHookEffectListMount [90m(D:\code\opensource\claudecodeui\[39mnode_modules\[4mreact-dom[24m\cjs\react-dom.development.js:23189:26[90m)[39m
+    at commitPassiveMountOnFiber [90m(D:\code\opensource\claudecodeui\[39mnode_modules\[4mreact-dom[24m\cjs\react-dom.development.js:24970:11[90m)[39m
+    at commitPassiveMountEffects_complete [90m(D:\code\opensource\claudecodeui\[39mnode_modules\[4mreact-dom[24m\cjs\react-dom.development.js:24930:9[90m)[39m
+    at commitPassiveMountEffects_begin [90m(D:\code\opensource\claudecodeui\[39mnode_modules\[4mreact-dom[24m\cjs\react-dom.development.js:24917:7[90m)[39m
+    at commitPassiveMountEffects [90m(D:\code\opensource\claudecodeui\[39mnode_modules\[4mreact-dom[24m\cjs\react-dom.development.js:24905:3[90m)[39m
+    at flushPassiveEffectsImpl [90m(D:\code\opensource\claudecodeui\[39mnode_modules\[4mreact-dom[24m\cjs\react-dom.development.js:27078:3[90m)[39m
+    at flushPassiveEffects [90m(D:\code\opensource\claudecodeui\[39mnode_modules\[4mreact-dom[24m\cjs\react-dom.development.js:27023:14[90m)[39m
+
+[90mstderr[2m | src/modules/chat/tests/composerDraftScoping.test.tsx[2m > [22m[2mswitching sessions swaps the draft instead of carrying it across
+[22m[39mError fetching slash commands: TypeError: Cannot read properties of undefined (reading 'skills')
+    at fetchCommands [90m(D:\code\opensource\claudecodeui\[39msrc\shared\hooks\useProjectSlashCommands.ts:118:52[90m)[39m
+
+[90mstderr[2m | src/modules/chat/tests/composerDraftScoping.test.tsx[2m > [22m[2mswitching back restores the draft that was left behind
+[22m[39mError fetching files: TypeError: __vite_ssr_import_2__.api.getFiles is not a function
+    at [90mD:\code\opensource\claudecodeui\[39msrc\modules\chat\hooks\useFileMentions.tsx:78:34
+    at fetchProjectFiles [90m(D:\code\opensource\claudecodeui\[39msrc\modules\chat\hooks\useFileMentions.tsx:112:13[90m)[39m
+    at [90mD:\code\opensource\claudecodeui\[39msrc\modules\chat\hooks\useFileMentions.tsx:115:5
+    at commitHookEffectListMount [90m(D:\code\opensource\claudecodeui\[39mnode_modules\[4mreact-dom[24m\cjs\react-dom.development.js:23189:26[90m)[39m
+    at commitPassiveMountOnFiber [90m(D:\code\opensource\claudecodeui\[39mnode_modules\[4mreact-dom[24m\cjs\react-dom.development.js:24970:11[90m)[39m
+    at commitPassiveMountEffects_complete [90m(D:\code\opensource\claudecodeui\[39mnode_modules\[4mreact-dom[24m\cjs\react-dom.development.js:24930:9[90m)[39m
+    at commitPassiveMountEffects_begin [90m(D:\code\opensource\claudecodeui\[39mnode_modules\[4mreact-dom[24m\cjs\react-dom.development.js:24917:7[90m)[39m
+    at commitPassiveMountEffects [90m(D:\code\opensource\claudecodeui\[39mnode_modules\[4mreact-dom[24m\cjs\react-dom.development.js:24905:3[90m)[39m
+    at flushPassiveEffectsImpl [90m(D:\code\opensource\claudecodeui\[39mnode_modules\[4mreact-dom[24m\cjs\react-dom.development.js:27078:3[90m)[39m
+    at flushPassiveEffects [90m(D:\code\opensource\claudecodeui\[39mnode_modules\[4mreact-dom[24m\cjs\react-dom.development.js:27023:14[90m)[39m
+
+[90mstderr[2m | src/modules/chat/tests/composerDraftScoping.test.tsx[2m > [22m[2mswitching back restores the draft that was left behind
+[22m[39mError fetching slash commands: TypeError: Cannot read properties of undefined (reading 'skills')
+    at fetchCommands [90m(D:\code\opensource\claudecodeui\[39msrc\shared\hooks\useProjectSlashCommands.ts:118:52[90m)[39m
+
+[90mstderr[2m | src/modules/chat/tests/composerDraftScoping.test.tsx[2m > [22m[2ma draft written on another device is picked up while the session is open
+[22m[39mError fetching files: TypeError: __vite_ssr_import_2__.api.getFiles is not a function
+    at [90mD:\code\opensource\claudecodeui\[39msrc\modules\chat\hooks\useFileMentions.tsx:78:34
+    at fetchProjectFiles [90m(D:\code\opensource\claudecodeui\[39msrc\modules\chat\hooks\useFileMentions.tsx:112:13[90m)[39m
+    at [90mD:\code\opensource\claudecodeui\[39msrc\modules\chat\hooks\useFileMentions.tsx:115:5
+    at commitHookEffectListMount [90m(D:\code\opensource\claudecodeui\[39mnode_modules\[4mreact-dom[24m\cjs\react-dom.development.js:23189:26[90m)[39m
+    at commitPassiveMountOnFiber [90m(D:\code\opensource\claudecodeui\[39mnode_modules\[4mreact-dom[24m\cjs\react-dom.development.js:24970:11[90m)[39m
+    at commitPassiveMountEffects_complete [90m(D:\code\opensource\claudecodeui\[39mnode_modules\[4mreact-dom[24m\cjs\react-dom.development.js:24930:9[90m)[39m
+    at commitPassiveMountEffects_begin [90m(D:\code\opensource\claudecodeui\[39mnode_modules\[4mreact-dom[24m\cjs\react-dom.development.js:24917:7[90m)[39m
+    at commitPassiveMountEffects [90m(D:\code\opensource\claudecodeui\[39mnode_modules\[4mreact-dom[24m\cjs\react-dom.development.js:24905:3[90m)[39m
+    at flushPassiveEffectsImpl [90m(D:\code\opensource\claudecodeui\[39mnode_modules\[4mreact-dom[24m\cjs\react-dom.development.js:27078:3[90m)[39m
+    at flushPassiveEffects [90m(D:\code\opensource\claudecodeui\[39mnode_modules\[4mreact-dom[24m\cjs\react-dom.development.js:27023:14[90m)[39m
+
+[90mstderr[2m | src/modules/chat/tests/composerDraftScoping.test.tsx[2m > [22m[2ma draft written on another device is picked up while the session is open
+[22m[39mError fetching slash commands: TypeError: Cannot read properties of undefined (reading 'skills')
+    at fetchCommands [90m(D:\code\opensource\claudecodeui\[39msrc\shared\hooks\useProjectSlashCommands.ts:118:52[90m)[39m
+
+[90mstderr[2m | src/modules/chat/tests/composerDraftScoping.test.tsx[2m > [22m[2mclearing the composer clears that session's stored draft
+[22m[39mError fetching files: TypeError: __vite_ssr_import_2__.api.getFiles is not a function
+    at [90mD:\code\opensource\claudecodeui\[39msrc\modules\chat\hooks\useFileMentions.tsx:78:34
+    at fetchProjectFiles [90m(D:\code\opensource\claudecodeui\[39msrc\modules\chat\hooks\useFileMentions.tsx:112:13[90m)[39m
+    at [90mD:\code\opensource\claudecodeui\[39msrc\modules\chat\hooks\useFileMentions.tsx:115:5
+    at commitHookEffectListMount [90m(D:\code\opensource\claudecodeui\[39mnode_modules\[4mreact-dom[24m\cjs\react-dom.development.js:23189:26[90m)[39m
+    at commitPassiveMountOnFiber [90m(D:\code\opensource\claudecodeui\[39mnode_modules\[4mreact-dom[24m\cjs\react-dom.development.js:24970:11[90m)[39m
+    at commitPassiveMountEffects_complete [90m(D:\code\opensource\claudecodeui\[39mnode_modules\[4mreact-dom[24m\cjs\react-dom.development.js:24930:9[90m)[39m
+    at commitPassiveMountEffects_begin [90m(D:\code\opensource\claudecodeui\[39mnode_modules\[4mreact-dom[24m\cjs\react-dom.development.js:24917:7[90m)[39m
+    at commitPassiveMountEffects [90m(D:\code\opensource\claudecodeui\[39mnode_modules\[4mreact-dom[24m\cjs\react-dom.development.js:24905:3[90m)[39m
+    at flushPassiveEffectsImpl [90m(D:\code\opensource\claudecodeui\[39mnode_modules\[4mreact-dom[24m\cjs\react-dom.development.js:27078:3[90m)[39m
+    at flushPassiveEffects [90m(D:\code\opensource\claudecodeui\[39mnode_modules\[4mreact-dom[24m\cjs\react-dom.development.js:27023:14[90m)[39m
+
+[90mstderr[2m | src/modules/chat/tests/composerDraftScoping.test.tsx[2m > [22m[2mclearing the composer clears that session's stored draft
+[22m[39mError fetching slash commands: TypeError: Cannot read properties of undefined (reading 'skills')
+    at fetchCommands [90m(D:\code\opensource\claudecodeui\[39msrc\shared\hooks\useProjectSlashCommands.ts:118:52[90m)[39m
+
+ [32m✓[39m src/modules/chat/tests/composerDraftScoping.test.tsx [2m([22m[2m6 tests[22m[2m)[22m[32m 63[2mms[22m[39m
+ [32m✓[39m src/modules/chat/tests/lazyMessageRow.test.tsx [2m([22m[2m8 tests[22m[2m)[22m[32m 46[2mms[22m[39m
+ [32m✓[39m src/modules/shell/tests/shellErrorFrame.test.ts [2m([22m[2m4 tests[22m[2m)[22m[32m 29[2mms[22m[39m
+ [32m✓[39m src/modules/chat/tests/markdownSyntaxThemeInjection.test.tsx [2m([22m[2m4 tests[22m[2m)[22m[33m 2179[2mms[22m[39m
+   [33m[2m✓[22m[39m the dark block declares every custom property a rendered code block references [33m 340[2mms[22m[39m
+   [33m[2m✓[22m[39m re-evaluating the module reuses the stylesheet already in the document [33m 1511[2mms[22m[39m
+ [32m✓[39m src/modules/chat/tests/QuestionAnswerContent.test.tsx [2m([22m[2m8 tests[22m[2m)[22m[32m 11[2mms[22m[39m
+ [32m✓[39m src/modules/chat/tests/latexDelimiters.test.tsx [2m([22m[2m9 tests[22m[2m)[22m[33m 3200[2mms[22m[39m
+   [33m[2m✓[22m[39m the reporter's sample renders as math, not as literal delimiters [33m 644[2mms[22m[39m
+   [33m[2m✓[22m[39m every streaming prefix renders identically: display latex [33m 626[2mms[22m[39m
+   [33m[2m✓[22m[39m every streaming prefix renders identically: display latex with a blank line inside [33m 496[2mms[22m[39m
+   [33m[2m✓[22m[39m every streaming prefix renders identically: inline latex after a paragraph [33m 786[2mms[22m[39m
+ [32m✓[39m src/modules/settings/tests/codeEditorSettingsPersistence.test.ts [2m([22m[2m8 tests[22m[2m)[22m[32m 7[2mms[22m[39m
+ [32m✓[39m src/modules/chat/tests/messageHistoryRefreshCoordinator.test.ts [2m([22m[2m7 tests[22m[2m)[22m[32m 4[2mms[22m[39m
+ [32m✓[39m src/modules/chat/tests/searchTargetLocator.test.ts [2m([22m[2m15 tests[22m[2m)[22m[32m 6[2mms[22m[39m
+[90mstderr[2m | src/modules/chat/tests/streamingMarkdownComponent.test.tsx[2m > [22m[2mthe split render matches the unsplit render: a fenced block
+[22m[39mreact-i18next:: useTranslation: You will need to pass in an i18next instance by using initReactI18next { code: [32m'NO_I18NEXT_INSTANCE'[39m }
+
+ [32m✓[39m src/modules/project-creation-wizard/tests/workspaceApi.test.ts [2m([22m[2m3 tests[22m[2m)[22m[32m 126[2mms[22m[39m
+[90mstderr[2m | src/modules/chat/tests/diffStatsBadgeRender.test.tsx[2m > [22m[2mdiff stats in the tool header[2m > [22m[2mleaves tools that render no diff without a stats badge
+[22m[39mreact-i18next:: useTranslation: You will need to pass in an i18next instance by using initReactI18next { code: [32m'NO_I18NEXT_INSTANCE'[39m }
+
+ [32m✓[39m src/modules/chat/tests/diffStatsBadgeRender.test.tsx [2m([22m[2m6 tests[22m[2m)[22m[32m 140[2mms[22m[39m
+[90mstderr[2m | src/modules/chat/tests/toolResultMedia.test.tsx[2m > [22m[2ma thumbnail shows on a row whose result is hidden, fetched with the auth header
+[22m[39mreact-i18next:: useTranslation: You will need to pass in an i18next instance by using initReactI18next { code: [32m'NO_I18NEXT_INSTANCE'[39m }
+
+[90mstderr[2m | src/modules/chat/tests/taskNotificationRow.test.tsx[2m > [22m[2ma notice with a body expands to show it
+[22m[39mreact-i18next:: useTranslation: You will need to pass in an i18next instance by using initReactI18next { code: [32m'NO_I18NEXT_INSTANCE'[39m }
+
+ [32m✓[39m src/modules/chat/tests/taskNotificationRow.test.tsx [2m([22m[2m4 tests[22m[2m)[22m[33m 534[2mms[22m[39m
+   [33m[2m✓[22m[39m a notice with a body expands to show it [33m 406[2mms[22m[39m
+ [32m✓[39m src/modules/chat/tests/toolResultMedia.test.tsx [2m([22m[2m3 tests[22m[2m)[22m[33m 608[2mms[22m[39m
+   [33m[2m✓[22m[39m a thumbnail shows on a row whose result is hidden, fetched with the auth header [33m 519[2mms[22m[39m
+ [32m✓[39m src/modules/project-workspace/tests/workspaceConnectionIndicator.test.tsx [2m([22m[2m3 tests[22m[2m)[22m[33m 438[2mms[22m[39m
+ [32m✓[39m src/modules/chat/tests/bashEditDiff.test.tsx [2m([22m[2m16 tests[22m[2m)[22m[33m 1579[2mms[22m[39m
+ [32m✓[39m src/modules/chat/tests/workflowPanel.test.tsx [2m([22m[2m20 tests[22m[2m)[22m[33m 1689[2mms[22m[39m
+   [33m[2m✓[22m[39m a workflow card[2m > [22mshows the live phase in place of the plain running word [33m 315[2mms[22m[39m
+ [32m✓[39m src/modules/project-workspace/tests/fileOpenResolver.test.tsx [2m([22m[2m5 tests[22m[2m)[22m[33m 301[2mms[22m[39m
+[90mstderr[2m | src/modules/chat/tests/transcriptStreamingRerenders.test.tsx
+[22m[39mError: Not implemented: HTMLCanvasElement.prototype.getContext (without installing the canvas npm package)
+    at module.exports (D:\code\opensource\claudecodeui\node_modules\jsdom\lib\jsdom\browser\not-implemented.js:9:17)
+    at HTMLCanvasElementImpl.getContext (D:\code\opensource\claudecodeui\node_modules\jsdom\lib\jsdom\living\nodes\HTMLCanvasElement-impl.js:42:5)
+    at HTMLCanvasElement.getContext (D:\code\opensource\claudecodeui\node_modules\jsdom\lib\jsdom\living\generated\HTMLCanvasElement.js:131:58)
+    at D:\code\opensource\claudecodeui\node_modules\@xterm\addon-webgl\lib\webpack:\WebglAddon\src\common\Color.ts:127:24
+    at Object.call (D:\code\opensource\claudecodeui\node_modules\@xterm\addon-webgl\lib\webpack:\WebglAddon\src\common\Color.ts:118:1)
+    at i (D:\code\opensource\claudecodeui\node_modules\@xterm\addon-webgl\lib\webpack:\WebglAddon\webpack\bootstrap:19:32)
+    at Object.call (D:\code\opensource\claudecodeui\node_modules\@xterm\addon-webgl\lib\webpack:\WebglAddon\src\browser\renderer\shared\CellColorResolver.ts:8:1)
+    at i (D:\code\opensource\claudecodeui\node_modules\@xterm\addon-webgl\lib\webpack:\WebglAddon\webpack\bootstrap:19:32)
+    at Object.call (D:\code\opensource\claudecodeui\node_modules\@xterm\addon-webgl\lib\webpack:\WebglAddon\src\WebglRenderer.ts:8:1)
+    at i (D:\code\opensource\claudecodeui\node_modules\@xterm\addon-webgl\lib\webpack:\WebglAddon\webpack\bootstrap:19:32) [90mundefined[39m
+
+ [32m✓[39m src/shared/tests/runningSessionsPoll.test.tsx [2m([22m[2m2 tests[22m[2m)[22m[32m 226[2mms[22m[39m
+ [32m✓[39m src/modules/chat/tests/leaveSessionWithBackgroundWork.test.tsx [2m([22m[2m2 tests[22m[2m)[22m[32m 147[2mms[22m[39m
+[90mstderr[2m | src/modules/chat/tests/transcriptStreamingRerenders.test.tsx
+[22m[39mError: Not implemented: HTMLCanvasElement.prototype.getContext (without installing the canvas npm package)
+    at module.exports (D:\code\opensource\claudecodeui\node_modules\jsdom\lib\jsdom\browser\not-implemented.js:9:17)
+    at HTMLCanvasElementImpl.getContext (D:\code\opensource\claudecodeui\node_modules\jsdom\lib\jsdom\living\nodes\HTMLCanvasElement-impl.js:42:5)
+    at HTMLCanvasElement.getContext (D:\code\opensource\claudecodeui\node_modules\jsdom\lib\jsdom\living\generated\HTMLCanvasElement.js:131:58)
+    at D:\code\opensource\claudecodeui\node_modules\@xterm\xterm\lib\webpack:\@xterm\xterm\src\common\Color.ts:127:24
+    at Object.call (D:\code\opensource\claudecodeui\node_modules\@xterm\xterm\lib\webpack:\@xterm\xterm\src\common\Color.ts:118:1)
+    at i (D:\code\opensource\claudecodeui\node_modules\@xterm\xterm\lib\webpack:\@xterm\xterm\webpack\bootstrap:19:32)
+    at Object.call (D:\code\opensource\claudecodeui\node_modules\@xterm\xterm\lib\webpack:\@xterm\xterm\src\browser\renderer\dom\DomRendererRowFactory.ts:11:1)
+    at i (D:\code\opensource\claudecodeui\node_modules\@xterm\xterm\lib\webpack:\@xterm\xterm\webpack\bootstrap:19:32)
+    at Object.call (D:\code\opensource\claudecodeui\node_modules\@xterm\xterm\lib\webpack:\@xterm\xterm\src\browser\renderer\dom\DomRenderer.ts:6:1)
+    at i (D:\code\opensource\claudecodeui\node_modules\@xterm\xterm\lib\webpack:\@xterm\xterm\webpack\bootstrap:19:32) [90mundefined[39m
+
+ [32m✓[39m src/modules/sidebar/tests/recentConversationTitleSync.test.ts [2m([22m[2m2 tests[22m[2m)[22m[32m 235[2mms[22m[39m
+ [32m✓[39m src/modules/sidebar/tests/sessionRowBackgroundWork.test.tsx [2m([22m[2m2 tests[22m[2m)[22m[32m 44[2mms[22m[39m
+ [32m✓[39m src/modules/chat/tests/composerSendOverBackgroundWork.test.ts [2m([22m[2m2 tests[22m[2m)[22m[32m 233[2mms[22m[39m
+ [32m✓[39m src/modules/project-workspace/tests/projectsInitialFetch.test.tsx [2m([22m[2m2 tests[22m[2m)[22m[32m 256[2mms[22m[39m
+ [32m✓[39m src/modules/settings/tests/accountContentSubscriptionOverride.test.tsx [2m([22m[2m5 tests[22m[2m)[22m[32m 72[2mms[22m[39m
+ [32m✓[39m src/modules/chat/tests/transcriptExport.test.tsx [2m([22m[2m13 tests[22m[2m)[22m[33m 505[2mms[22m[39m
+ [32m✓[39m src/modules/sidebar/tests/sidebarModeTabs.test.tsx [2m([22m[2m3 tests[22m[2m)[22m[33m 1058[2mms[22m[39m
+   [33m[2m✓[22m[39m a wide row shows every tab and no overflow menu [33m 617[2mms[22m[39m
+ [32m✓[39m src/modules/task-master/tests/projectUpdateBroadcast.test.tsx [2m([22m[2m2 tests[22m[2m)[22m[32m 167[2mms[22m[39m
+ [32m✓[39m src/shared/tests/backgroundWorkSessions.test.tsx [2m([22m[2m3 tests[22m[2m)[22m[32m 52[2mms[22m[39m
+ [32m✓[39m src/modules/chat/tests/useScheduledMessagesSessionSwitch.test.tsx [2m([22m[2m2 tests[22m[2m)[22m[32m 97[2mms[22m[39m
+ [32m✓[39m src/modules/chat/tests/streamingMarkdownComponent.test.tsx [2m([22m[2m18 tests[22m[2m)[22m[33m 10549[2mms[22m[39m
+   [33m[2m✓[22m[39m the split render matches the unsplit render: plain paragraphs [33m 1495[2mms[22m[39m
+   [33m[2m✓[22m[39m the split render matches the unsplit render: a list after prose [33m 1559[2mms[22m[39m
+   [33m[2m✓[22m[39m the split render matches the unsplit render: a fenced block [33m 1493[2mms[22m[39m
+   [33m[2m✓[22m[39m the split render matches the unsplit render: a table [33m 670[2mms[22m[39m
+   [33m[2m✓[22m[39m the split render matches the unsplit render: a blockquote [33m 513[2mms[22m[39m
+   [33m[2m✓[22m[39m the split render matches the unsplit render: a link reference [33m 525[2mms[22m[39m
+   [33m[2m✓[22m[39m the split render matches the unsplit render: nested fences [33m 840[2mms[22m[39m
+   [33m[2m✓[22m[39m the split render matches the unsplit render: a loose list [33m 854[2mms[22m[39m
+   [33m[2m✓[22m[39m the split render matches the unsplit render: a list item continuation [33m 435[2mms[22m[39m
+   [33m[2m✓[22m[39m the split render matches the unsplit render: indented code with a blank line [33m 743[2mms[22m[39m
+   [33m[2m✓[22m[39m the split render matches the unsplit render: a table then a stray row [33m 702[2mms[22m[39m
+   [33m[2m✓[22m[39m the split render matches the unsplit render: a footnote definition [33m 371[2mms[22m[39m
+ [32m✓[39m src/shared/tests/uiPreferencesContext.test.tsx [2m([22m[2m8 tests[22m[2m)[22m[32m 49[2mms[22m[39m
+ [32m✓[39m src/modules/chat/tests/tokenUsageFreshness.test.tsx [2m([22m[2m2 tests[22m[2m)[22m[32m 57[2mms[22m[39m
+ [32m✓[39m src/modules/chat/tests/promptInputSubmit.test.tsx [2m([22m[2m3 tests[22m[2m)[22m[32m 71[2mms[22m[39m
+ [32m✓[39m src/modules/chat/tests/subagentLaunchStatus.test.tsx [2m([22m[2m5 tests[22m[2m)[22m[32m 87[2mms[22m[39m
+ [32m✓[39m src/modules/code-editor/tests/codeEditorSettingsSync.test.ts [2m([22m[2m5 tests[22m[2m)[22m[32m 28[2mms[22m[39m
+ [32m✓[39m src/modules/chat/tests/useInputHistory.test.ts [2m([22m[2m8 tests[22m[2m)[22m[32m 45[2mms[22m[39m
+ [32m✓[39m src/modules/chat/tests/streamingPerSession.test.tsx [2m([22m[2m3 tests[22m[2m)[22m[32m 22[2mms[22m[39m
+ [32m✓[39m src/shared/tests/themeContext.test.tsx [2m([22m[2m11 tests[22m[2m)[22m[32m 49[2mms[22m[39m
+ [32m✓[39m src/modules/chat/tests/messageModelLabel.test.tsx [2m([22m[2m8 tests[22m[2m)[22m[33m 401[2mms[22m[39m
+ [32m✓[39m src/modules/chat/tests/permissionPromptReplay.test.tsx [2m([22m[2m2 tests[22m[2m)[22m[32m 18[2mms[22m[39m
+ [32m✓[39m src/modules/chat/tests/sessionStoreUpsert.test.tsx [2m([22m[2m1 test[22m[2m)[22m[32m 15[2mms[22m[39m
+ [32m✓[39m src/shared/tests/readApiJson.test.ts [2m([22m[2m4 tests[22m[2m)[22m[32m 6[2mms[22m[39m
+ [32m✓[39m src/modules/chat/tests/sessionMessagePagination.test.ts [2m([22m[2m13 tests[22m[2m)[22m[32m 10[2mms[22m[39m
+[90mstderr[2m | src/modules/chat/tests/markdownImage.test.tsx[2m > [22m[2ma workspace image path is fetched through the project files route and shown as a blob
+[22m[39mreact-i18next:: useTranslation: You will need to pass in an i18next instance by using initReactI18next { code: [32m'NO_I18NEXT_INSTANCE'[39m }
+
+ [32m✓[39m src/shared/tests/authToken.test.ts [2m([22m[2m12 tests[22m[2m)[22m[32m 7[2mms[22m[39m
+ [32m✓[39m src/modules/chat/tests/streamingMarkdown.test.ts [2m([22m[2m18 tests[22m[2m)[22m[32m 8[2mms[22m[39m
+[90mstderr[2m | src/modules/chat/tests/markdownImages.test.tsx[2m > [22m[2ma media route image is fetched with the auth header and shown from the blob
+[22m[39mreact-i18next:: useTranslation: You will need to pass in an i18next instance by using initReactI18next { code: [32m'NO_I18NEXT_INSTANCE'[39m }
+
+ [32m✓[39m src/modules/chat/tests/markdownImage.test.tsx [2m([22m[2m6 tests[22m[2m)[22m[33m 591[2mms[22m[39m
+   [33m[2m✓[22m[39m a workspace image path is fetched through the project files route and shown as a blob [33m 396[2mms[22m[39m
+[90mstderr[2m | src/modules/chat/tests/messageStreamEnd.test.tsx[2m > [22m[2ma reply keeps its DOM when it stops streaming
+[22m[39mreact-i18next:: useTranslation: You will need to pass in an i18next instance by using initReactI18next { code: [32m'NO_I18NEXT_INSTANCE'[39m }
+
+ [32m✓[39m src/modules/chat/tests/markdownImages.test.tsx [2m([22m[2m3 tests[22m[2m)[22m[33m 476[2mms[22m[39m
+   [33m[2m✓[22m[39m a media route image is fetched with the auth header and shown from the blob [33m 404[2mms[22m[39m
+ [32m✓[39m src/modules/chat/tests/messageStreamEnd.test.tsx [2m([22m[2m2 tests[22m[2m)[22m[32m 198[2mms[22m[39m
+ [32m✓[39m src/shared/tests/useProjectSlashCommands.test.tsx [2m([22m[2m5 tests[22m[2m)[22m[33m 348[2mms[22m[39m
+[90mstderr[2m | src/modules/chat/tests/slashCommandTabCompletion.test.ts[2m > [22m[2mslash command menu keyboard selection[2m > [22m[2mcompletes the command name on Tab instead of executing it
+[22m[39mreact-i18next:: useTranslation: You will need to pass in an i18next instance by using initReactI18next { code: [32m'NO_I18NEXT_INSTANCE'[39m }
+
+ [32m✓[39m src/modules/chat/tests/activityIndicatorVisibility.test.ts [2m([22m[2m6 tests[22m[2m)[22m[32m 6[2mms[22m[39m
+[90mstderr[2m | src/modules/chat/tests/antigravityToolNames.test.tsx[2m > [22m[2ma task check reads Task on its row and on its result block
+[22m[39mreact-i18next:: useTranslation: You will need to pass in an i18next instance by using initReactI18next { code: [32m'NO_I18NEXT_INSTANCE'[39m }
+
+ [32m✓[39m src/modules/chat/tests/antigravityToolNames.test.tsx [2m([22m[2m3 tests[22m[2m)[22m[32m 124[2mms[22m[39m
+ [32m✓[39m src/modules/chat/tests/tokenBudgetSessionScope.test.tsx [2m([22m[2m2 tests[22m[2m)[22m[32m 20[2mms[22m[39m
+ [32m✓[39m src/modules/chat/tests/useChatMessages.test.ts [2m([22m[2m7 tests[22m[2m)[22m[32m 8[2mms[22m[39m
+ [32m✓[39m src/modules/chat/tests/slashCommandTabCompletion.test.ts [2m([22m[2m2 tests[22m[2m)[22m[33m 620[2mms[22m[39m
+   [33m[2m✓[22m[39m slash command menu keyboard selection[2m > [22mcompletes the command name on Tab instead of executing it [33m 308[2mms[22m[39m
+   [33m[2m✓[22m[39m slash command menu keyboard selection[2m > [22mstill executes the highlighted command on Enter [33m 310[2mms[22m[39m
+ [32m✓[39m src/shared/tests/uiPreferences.test.ts [2m([22m[2m9 tests[22m[2m)[22m[32m 8[2mms[22m[39m
+ [32m✓[39m src/modules/auth/tests/authErrorMessages.test.tsx [2m([22m[2m5 tests[22m[2m)[22m[33m 469[2mms[22m[39m
+ [32m✓[39m src/modules/auth/tests/authTokenRefreshRemount.test.tsx [2m([22m[2m5 tests[22m[2m)[22m[33m 486[2mms[22m[39m
+ [32m✓[39m src/shared/tests/useSelectedProvider.test.tsx [2m([22m[2m6 tests[22m[2m)[22m[32m 32[2mms[22m[39m
+ [32m✓[39m src/modules/chat/tests/transcriptStreamingRerenders.test.tsx [2m([22m[2m1 test[22m[2m)[22m[32m 283[2mms[22m[39m
+ [32m✓[39m src/modules/chat/tests/activityIndicatorBackground.test.tsx [2m([22m[2m3 tests[22m[2m)[22m[32m 149[2mms[22m[39m
+ [32m✓[39m src/modules/chat/tests/antigravityToolConfigs.test.ts [2m([22m[2m16 tests[22m[2m)[22m[32m 6[2mms[22m[39m
+ [32m✓[39m src/shared/tests/voiceStreamConfig.test.ts [2m([22m[2m8 tests[22m[2m)[22m[32m 7[2mms[22m[39m
+ [32m✓[39m src/modules/chat/tests/diffStats.test.ts [2m([22m[2m10 tests[22m[2m)[22m[32m 8[2mms[22m[39m
+ [32m✓[39m src/shared/tests/voiceConfig.test.ts [2m([22m[2m10 tests[22m[2m)[22m[32m 7[2mms[22m[39m
+ [32m✓[39m src/modules/file-tree/tests/revealDirectory.test.ts [2m([22m[2m7 tests[22m[2m)[22m[32m 5[2mms[22m[39m
+ [32m✓[39m src/modules/git-panel/tests/commitGraph.test.ts [2m([22m[2m5 tests[22m[2m)[22m[32m 6[2mms[22m[39m
+ [32m✓[39m src/modules/chat/tests/pcmAlign.test.ts [2m([22m[2m5 tests[22m[2m)[22m[32m 5[2mms[22m[39m
+ [32m✓[39m src/shared/tests/selectedProvider.test.ts [2m([22m[2m5 tests[22m[2m)[22m[32m 6[2mms[22m[39m
+ [32m✓[39m src/modules/code-editor/tests/editorLineNavigation.test.tsx [2m([22m[2m5 tests[22m[2m)[22m[32m 96[2mms[22m[39m
+ [32m✓[39m src/modules/chat/tests/toolConfigs.test.ts [2m([22m[2m5 tests[22m[2m)[22m[32m 5[2mms[22m[39m
+ [32m✓[39m src/shared/tests/voiceApi.test.ts [2m([22m[2m2 tests[22m[2m)[22m[32m 5[2mms[22m[39m
+ [32m✓[39m src/modules/chat/tests/sessionMessageReconciliation.test.ts [2m([22m[2m5 tests[22m[2m)[22m[32m 5[2mms[22m[39m
+ [32m✓[39m src/modules/chat/tests/liveSubagentGrouping.test.ts [2m([22m[2m4 tests[22m[2m)[22m[32m 6[2mms[22m[39m
+ [32m✓[39m src/modules/chat/tests/modelLabel.test.ts [2m([22m[2m10 tests[22m[2m)[22m[32m 5[2mms[22m[39m
+ [32m✓[39m src/shared/tests/chatSpacing.test.ts [2m([22m[2m8 tests[22m[2m)[22m[32m 5[2mms[22m[39m
+ [32m✓[39m src/modules/chat/tests/compactCommand.test.ts [2m([22m[2m5 tests[22m[2m)[22m[32m 4[2mms[22m[39m
+ [32m✓[39m src/modules/chat/tests/toolGrouping.test.ts [2m([22m[2m18 tests[22m[2m)[22m[32m 7[2mms[22m[39m
+ [32m✓[39m src/modules/chat/tests/clearCommand.test.ts [2m([22m[2m6 tests[22m[2m)[22m[32m 4[2mms[22m[39m
+ [32m✓[39m src/modules/chat/tests/syntaxHighlightTheme.test.ts [2m([22m[2m5 tests[22m[2m)[22m[32m 7[2mms[22m[39m
+ [32m✓[39m src/modules/sidebar/tests/tabOverflow.test.ts [2m([22m[2m6 tests[22m[2m)[22m[32m 5[2mms[22m[39m
+ [32m✓[39m src/modules/provider-auth/tests/useProviderAuthStatusSubscriptionOverride.test.ts [2m([22m[2m2 tests[22m[2m)[22m[32m 30[2mms[22m[39m
+ [32m✓[39m src/modules/project-workspace/tests/projectSelectionMetadata.test.ts [2m([22m[2m3 tests[22m[2m)[22m[32m 4[2mms[22m[39m
+ [32m✓[39m src/shared/tests/pageTitle.test.ts [2m([22m[2m5 tests[22m[2m)[22m[32m 4[2mms[22m[39m
+ [32m✓[39m src/modules/git-panel/tests/pickDefaultCompareBase.test.ts [2m([22m[2m5 tests[22m[2m)[22m[32m 3[2mms[22m[39m
+ [32m✓[39m src/modules/sidebar/tests/sidebarFavoritesFilter.test.ts [2m([22m[2m5 tests[22m[2m)[22m[32m 5[2mms[22m[39m
+ [32m✓[39m src/modules/chat/tests/voicesApi.test.ts [2m([22m[2m6 tests[22m[2m)[22m[32m 3[2mms[22m[39m
+ [32m✓[39m src/shared/tests/useSidebarWidth.test.ts [2m([22m[2m3 tests[22m[2m)[22m[32m 3[2mms[22m[39m
+ [32m✓[39m src/shared/tests/readApiErrorMessage.test.ts [2m([22m[2m4 tests[22m[2m)[22m[32m 4[2mms[22m[39m
+ [32m✓[39m src/modules/onboarding/tests/onboardingErrorMessages.test.tsx [2m([22m[2m1 test[22m[2m)[22m[32m 134[2mms[22m[39m
+ [32m✓[39m src/modules/chat/tests/chatFormatting.test.ts [2m([22m[2m4 tests[22m[2m)[22m[32m 2[2mms[22m[39m
+ [32m✓[39m src/modules/chat/tests/chatPermissions.test.ts [2m([22m[2m4 tests[22m[2m)[22m[32m 3[2mms[22m[39m
+[90mstderr[2m | src/modules/file-tree/tests/revealDirectoryWiring.test.tsx[2m > [22m[2ma relative directory reference expands that folder in the tree
+[22m[39mreact-i18next:: useTranslation: You will need to pass in an i18next instance by using initReactI18next { code: [32m'NO_I18NEXT_INSTANCE'[39m }
+
+ [32m✓[39m src/modules/file-tree/tests/revealDirectoryWiring.test.tsx [2m([22m[2m2 tests[22m[2m)[22m[32m 96[2mms[22m[39m
+[90mstderr[2m | src/modules/chat/tests/fileReferenceLinks.test.tsx[2m > [22m[2mwhitespace around a reference taken from the link text is dropped
+[22m[39mreact-i18next:: useTranslation: You will need to pass in an i18next instance by using initReactI18next { code: [32m'NO_I18NEXT_INSTANCE'[39m }
+
+ [32m✓[39m src/modules/chat/tests/fileReferenceLinks.test.tsx [2m([22m[2m4 tests[22m[2m)[22m[32m 93[2mms[22m[39m
+
+[31m⎯⎯⎯⎯⎯⎯⎯[39m[1m[41m Failed Tests 1 [49m[22m[31m⎯⎯⎯⎯⎯⎯⎯[39m
+
+[41m[1m FAIL [22m[49m src/modules/chat/tests/customModelEffort.test.tsx[2m > [22mthe model library declares effort levels for a new custom model
+[31m[1mAssertionError[22m: Expected values to be strictly deep-equal:
++ actual - expected
+
+  {
+    input: {
++     contextWindow: undefined,
+      effort: {
+        values: [
+          'low',
+          'max'
+        ]
+[39m
+
+[32m- Expected[39m
+[31m+ Received[39m
+
+[33m@@ -1,7 +1,8 @@[39m
+[2m  {[22m
+[2m    "input": {[22m
+[31m+     "contextWindow": undefined,[39m
+[2m      "effort": {[22m
+[2m        "values": [[22m
+[2m          "low",[22m
+[2m          "max",[22m
+[2m        ],[22m
+
+[36m [2m❯[22m src/modules/chat/tests/customModelEffort.test.tsx:[2m135:10[22m[39m
+    [90m133| [39m
+    [90m134| [39m  [35mawait[39m [34mwaitFor[39m(() [33m=>[39m assert[33m.[39m[34mequal[39m(created[33m.[39mlength[33m,[39m [34m1[39m))[33m;[39m
+    [90m135| [39m  assert[33m.[39m[34mdeepEqual[39m(created[[34m0[39m][33m,[39m {
+    [90m   | [39m         [31m^[39m
+    [90m136| [39m    provider[33m:[39m [32m'claude'[39m[33m,[39m
+    [90m137| [39m    input[33m:[39m {
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯[22m[39m
+
+
+[2m Test Files [22m [1m[31m1 failed[39m[22m[2m | [22m[1m[32m127 passed[39m[22m[90m (128)[39m
+[2m      Tests [22m [1m[31m1 failed[39m[22m[2m | [22m[1m[32m851 passed[39m[22m[90m (852)[39m
+[2m   Start at [22m 02:33:59
+[2m   Duration [22m 36.11s[2m (transform 36.97s, setup 31.39s, collect 243.39s, tests 58.17s, environment 101.29s, prepare 17.52s)[22m
+

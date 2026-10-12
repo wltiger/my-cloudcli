@@ -9,6 +9,31 @@ Remote/branch setup (`main` mirrors `upstream/main`, `dev` is where all fork wor
 - `git status` on `dev` is clean — commit or stash anything in progress first.
 - `git config rerere.enabled` is `true` (`git config rerere.enabled true` if not — it auto-replays conflict resolutions this repo has already recorded, so repeated conflicts in the same customized files get easier over time, not harder).
 
+## 0. Check the merge base before anything else
+
+```
+git merge-base dev upstream/main
+git describe --tags --exact-match <the commit it prints>   # or: git tag --points-at <commit>
+```
+
+**The merge base must be a tag you have already synced.** If it is older than the last release in `docs/fork-customizations.md`, the fork's history has lost its merge information: the *content* of the intermediate releases is present on `dev` (a previous sync brought it in), but the ancestry was never recorded — usually because a sync committed its resolved tree as a plain commit instead of a merge, so `upstream/main` never became an ancestor. Every consequence of this is bad and none of it is loud:
+
+- step 1's preview reports conflicts for files that were reconciled releases ago, so the list is *larger* than the work actually is — this repo has seen 224 reported conflicts for what turned out to be 40 real ones;
+- the intermediate release's own commits stay "unmerged" forever, so `git log` and `git cherry` both lie about what has landed;
+- the next sync re-resolves work that was already done, and can silently revert a customization while doing it.
+
+Fix it with a **record-only merge** before syncing. It rewrites nothing and changes no file — it only teaches git the ancestry that should already have been there:
+
+```
+git merge -s ours --no-commit <upstream-commit-for-the-last-synced-tag>
+git commit    # message: "Record-only: mark upstream vX.Y.Z as merged"
+git diff HEAD^ HEAD --stat    # must be EMPTY — an empty diff is the proof it recorded only ancestry
+```
+
+Do this on the working branch (`dev`, or the scratch branch you are about to create), **not** on `main`. Then re-run step 1 and confirm the conflict count dropped to the real number before touching any file. If the preview was already correct, this step is a no-op and costs one command.
+
+A merge commit whose tree differs from its first parent is the signature of doing this wrong — a previous run committed resolved files as a plain commit. `git show --stat <that merge>` should list only files if it was a real merge; a record-only merge lists none.
+
 ## 1. Preview the merge (always do this first)
 
 ```

@@ -9,6 +9,31 @@
 - `dev` 分支 `git status` 是干净的——手头有没提交的改动先 commit 或者 stash。
 - 确认 `git config rerere.enabled` 是 `true`（不是的话跑 `git config rerere.enabled true`）——它会自动重放这个仓库之前已经解决过的冲突，同一批自定义文件反复冲突只会越来越省事，不会越来越麻烦。
 
+## 0. 动手之前先查 merge base
+
+```
+git merge-base dev upstream/main
+git describe --tags --exact-match <上面打印出来的那个 commit>   # 或：git tag --points-at <commit>
+```
+
+**merge base 必须是你已经同步过的那个 tag。** 如果它比 `docs/fork-customizations.md` 里记的上一个版本还旧，说明 fork 的历史**把 merge 信息丢了**：中间那些版本的**内容**确实在 `dev` 上（上一次同步搬进来了），但祖先关系从没记下来——通常是某次同步把解完冲突的树当成普通 commit 提交了，而不是 merge，于是 `upstream/main` 从来就不是它的祖先。这件事的每一个后果都很糟，而且**没有一个会报错**：
+
+- 第 1 步的预演会把几个版本前就已经和解过的文件全报成冲突，清单**比真实工作量**大得多——这个仓库见过"报了 224 个冲突、实际只有 40 个"；
+- 中间版本自己的那些 commit 会永远显示为"未合并"，`git log` 和 `git cherry` 对此**都在说谎**；
+- 下一次同步会重做已经做过的工作，而且在这个过程中可能**悄悄回退掉某个定制**。
+
+修法是在同步之前做一次 **record-only merge**。它不改写任何东西、不改动任何文件——只是把本该存在的祖先关系告诉 git：
+
+```
+git merge -s ours --no-commit <上次同步那个 tag 对应的 upstream commit>
+git commit    # 提交信息："Record-only: mark upstream vX.Y.Z as merged"
+git diff HEAD^ HEAD --stat    # 必须是空的——空 diff 就是"只记了祖先"的证据
+```
+
+在**工作分支**上做（`dev`，或者你马上要建的那个 scratch 分支），**不要**在 `main` 上做。做完再跑一遍第 1 步，确认冲突数降到真实数字，然后才去碰任何文件。如果预演本来就是对的，这一步就是个 no-op，成本一条命令。
+
+**"merge commit 的树和第一个父提交不一样"就是做错了的指纹**——上一次是用普通 commit 提交的解冲突结果。`git show --stat <那个 merge>` 如果是真 merge 就只列文件；record-only merge 一个都不列。
+
 ## 1. 预演一遍合并（每次都要做，第一步）
 
 ```
