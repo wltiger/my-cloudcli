@@ -1,4 +1,0 @@
-
-> @cloudcli-ai/cloudcli@1.37.4 typecheck
-> tsc --noEmit -p tsconfig.json && tsc --noEmit -p server/tsconfig.json
-

@@ -1,1 +1,0 @@
-const t=Date.now(); const fs=await import('fs/promises'); const s=await fs.readFile(process.env.USERPROFILE+'/.claude.json','utf8'); JSON.parse(s); console.log('read+parse ms', Date.now()-t, 'bytes', s.length);
