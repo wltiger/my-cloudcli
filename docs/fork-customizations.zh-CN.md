@@ -10,7 +10,7 @@
 
 ## 1. 移动端紧凑侧边栏
 
-**涉及文件：** `src/shared/utils.ts`、`src/components/sidebar/view/subcomponents/SidebarFooter.tsx`、`SidebarHeader.tsx`、`SidebarContent.tsx`
+**涉及文件：** `src/shared/utils.ts`、`src/modules/sidebar/SidebarFooter.tsx`、`SidebarHeader.tsx`、`SidebarContent.tsx`
 
 **为什么改：** 隐藏移动端的 Report Issue/Discord 链接，标题改为点击直接打开 Settings，给项目列表腾空间。
 
@@ -46,7 +46,7 @@
 
 ## 4. 模型名智能提炼 + 选择器加宽
 
-**涉及文件：** `src/components/chat/view/subcomponents/ComposerModelMenu.tsx`、`chat/utils/modelLabel.ts`（含测试）
+**涉及文件：** `src/modules/chat/composer/ComposerModelMenu.tsx`、`src/modules/chat/utils/modelLabel.ts`（含测试 `src/modules/chat/tests/modelLabel.test.ts`）
 
 **为什么改：** 通过 Claude Code CLI 直接设置的模型（不是通过 CloudCLI 自己的切换器）会显示原始的、有时被截断的内部模型 ID，看不出是什么模型。
 
@@ -208,7 +208,7 @@
 
 ## 22. Compact：让会话上下文的压缩看得见（Claude 自 v1.37.4 起走官方、入口、OpenCode）
 
-**涉及文件：** `server/shared/types.ts`、`server/modules/providers/list/claude/claude-sessions.provider.ts`（自 v1.37.4 起：**这里只是因为上游重写了同一文件而冲突**——fork 在这个文件里的 compaction 分支已退役，见上面的更新说明；+ 测试 `server/modules/providers/tests/claude-sessions.test.ts`）、`server/modules/providers/services/provider-capabilities.service.ts`（+ 测试 `server/modules/providers/tests/provider-capabilities.service.test.ts`）、`server/modules/providers/list/opencode/opencode-runtime.provider.js`（+ 测试 `server/modules/providers/list/opencode/opencode-runtime.provider.test.js`）、`server/modules/providers/list/opencode/opencode-sessions.provider.ts`（+ 测试 `server/modules/providers/tests/opencode-sessions.test.ts`）、`src/stores/useSessionStore.ts`、`src/components/chat/types/types.ts`、`src/components/chat/hooks/useChatMessages.ts`、`src/components/chat/hooks/useChatProviderState.ts`、`src/components/chat/hooks/useChatComposerState.ts`、`src/components/chat/hooks/useSlashCommands.ts`、`src/components/chat/utils/compactCommand.ts`（+ 测试 `src/components/chat/utils/compactCommand.test.ts`）、`src/components/chat/view/ChatInterface.tsx`、`src/components/chat/view/subcomponents/MessageComponent.tsx`、`src/components/chat/view/subcomponents/CommandResultModal.tsx`、`src/i18n/locales/{en,zh-CN}/chat.json`
+**涉及文件：** `server/shared/types.ts`、`server/modules/providers/list/claude/claude-sessions.provider.ts`（自 v1.37.4 起：**这里只是因为上游重写了同一文件而冲突**——fork 在这个文件里的 compaction 分支已退役，见上面的更新说明；+ 测试 `server/modules/providers/tests/claude-sessions.test.ts`）、`server/modules/providers/services/provider-capabilities.service.ts`（+ 测试 `server/modules/providers/tests/provider-capabilities.service.test.ts`）、`server/modules/providers/list/opencode/opencode-runtime.provider.js`（+ 测试 `server/modules/providers/list/opencode/opencode-runtime.provider.test.js`）、`server/modules/providers/list/opencode/opencode-sessions.provider.ts`（+ 测试 `server/modules/providers/tests/opencode-sessions.test.ts`）、`src/modules/chat/hooks/useSessionStore.ts`、`src/shared/types.ts`（原来那个独立的 `src/components/chat/types/types.ts` 已在 v1.37.3 并入这里）、`src/modules/chat/hooks/useChatMessages.ts`、`src/modules/chat/hooks/useChatProviderState.ts`、`src/modules/chat/hooks/useChatComposerState.ts`、`src/modules/chat/hooks/useSlashCommands.ts`、`src/modules/chat/utils/compactCommand.ts`（+ 测试 `src/modules/chat/tests/compactCommand.test.ts`）、`src/modules/chat/ChatInterface.tsx`、`src/modules/chat/transcript/MessageComponent.tsx`、`src/modules/chat/modals/CommandResultModal.tsx`、`src/modules/i18n/locales/{en,zh-CN}/chat.json`
 
 **为什么改：** 在输入框里敲 `/compact` 其实早就能送到 provider 并真的完成压缩——问题在于 Claude session 的 normalizer 把所有 `type: "system"` 事件都悄悄丢掉了，所以压缩结果一直看不见，`/compact` 看起来就像坏的。这个能力缺口是官方自己的，但补齐它用的是本 fork 自己出的设计方案（issue [#18](https://github.com/wltiger/my-cloudcli/issues/18)），所以记在这里，不能假设以后同步官方时会自动补上。工单 [#19](https://github.com/wltiger/my-cloudcli/issues/19)（这条记录的第一部分）让 Claude Agent SDK 发出的压缩边界变得可见：给 `normalizeMessage` 加一个分支，识别 `type: "system", subtype: "compact_boundary"`，产出一个新的 `compact_boundary` 规范化消息种类，带上触发方式（`/compact` 手动触发是 `manual`，provider 自己触发是 `auto`）和压缩前后的上下文 token 数。这个事件在线上有两种不同的字段形状，得在同一个分支里都认出来：SDK 实时查询流用的是下划线命名（`compact_metadata.pre_tokens`），落盘的 JSONL 会话记录用的是驼峰命名（`compactMetadata.preTokens`）——同一个分支两种都读，这样刷新页面后标记还在。前端把它渲染成**chrome**（术语见 `CONTEXT.md` 的 glossary），直接复用现有任务通知行（`MessageComponent.tsx` 里的 `isTaskNotification` 分支）一样的视觉分量，没有另起一套样式。
 
