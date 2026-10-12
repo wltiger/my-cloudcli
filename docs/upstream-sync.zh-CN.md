@@ -125,12 +125,34 @@ git push origin dev
 **临时分支的同步**，验证通过、审核过之后：
 ```
 git checkout main && git merge upstream/main   # fast-forward，第 3 步延后到这里做
-git checkout dev && git merge sync/vX.Y.Z      # fast-forward，因为 dev 一直没动过
-git branch -d sync/vX.Y.Z
+git checkout dev && git merge sync/vX.Y.Z      # 因为 dev 一直没动过，通常是 fast-forward
 git push origin main
 git push origin dev
 ```
 每次 push 还是要单独确认，跟平时一样。
+
+**`dev` 不一定会 fast-forward，这没关系。** 如果临时分支开出来之后 `dev` 上又落了东西，`git merge sync/vX.Y.Z` 就会产生一个真正的 merge commit。两种结果都对——只是别在跑之前就断言会是哪一种（`git merge-base --is-ancestor dev sync/vX.Y.Z` 能告诉你，但前提是这条命令真的跑成功了；在 Git Bash 里一条失败的 `git rev-parse --short dev sync/v1.37.4` 会**悄悄**回答成另一个问题——见 `.claude/CLAUDE.md` 的 shell gotchas 那节）。
+
+### 分支收拾：只留最近一条 `sync/`
+
+**刚落地的那条 `sync/vX.Y.Z` 留着，更早的删掉。** 最近这条才有用——一周以后要回头看某个定制项当初是怎么解的，翻的就是它。更早的已经被 `dev` 完全覆盖，留着只是在 `git branch` 里添乱。
+
+删更早的 `sync/` 分支之前先打个 tag 兜底（tag 很便宜而且是永久的，分支不是）：
+
+```
+git tag archive/sync-vX.Y.Z sync/vX.Y.Z
+git branch -d sync/vX.Y.Z
+```
+
+删之前先确认它确实可以删——它身上不该有 `dev` 没有的东西：
+
+```
+git diff dev sync/vX.Y.Z --stat    # 应该全是删除行（dev 更多），没有新增
+```
+
+如果出现**新增**行，说明那分支上还有 `dev` 从没拿到的工作：停下来看一眼，别删。另外，对于"内容是被拷贝过去、而不是 merge 过去"的分支，`git branch -d` 还会警告 "not yet merged to HEAD"——那个警告说的是**祖先关系**，不是内容，真正的判据是上面那次树的比较。
+
+`sync/v1.37.3` 就是这里的反面教材：它那 4 个 commit 是把 v1.37.3 的内容**拷贝**到 `dev` 上的普通 commit，从来不是 merge，所以 git 永远报"未合并"，尽管每一个文件其实早就在了。这种事怎么发生、祖先关系怎么补，见第 0 节。
 
 ## 同步完之后：回头看一遍 fork-customizations.md
 

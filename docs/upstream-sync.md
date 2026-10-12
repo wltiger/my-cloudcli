@@ -126,11 +126,33 @@ git push origin dev
 ```
 git checkout main && git merge upstream/main   # fast-forward, deferred from step 3
 git checkout dev && git merge sync/vX.Y.Z      # fast-forward, since dev never moved
-git branch -d sync/vX.Y.Z
 git push origin main
 git push origin dev
 ```
 Each push is still its own confirmation, same as any other push.
+
+**`dev` may not fast-forward, and that is fine.** If something landed on `dev` after the scratch branch was cut, `git merge sync/vX.Y.Z` makes a real merge commit instead. Both outcomes are correct — just don't report which one it will be until you have run it (`git merge-base --is-ancestor dev sync/vX.Y.Z` tells you, but only if the command actually succeeds; a failed `git rev-parse --short dev sync/v1.37.4` in Git Bash will answer a different question silently — see `.claude/CLAUDE.md`'s shell-gotchas section).
+
+### Branch bookkeeping: keep only the latest `sync/` branch
+
+**Keep the `sync/vX.Y.Z` branch you just landed. Delete the older ones.** The most recent one is the useful one — it's where you look when a customization's resolution needs re-reading a week later. Anything older is superseded by `dev` and only adds noise to `git branch`.
+
+Before deleting an older `sync/` branch, tag it as a safety net (the tag is cheap and permanent; the branch is not):
+
+```
+git tag archive/sync-vX.Y.Z sync/vX.Y.Z
+git branch -d sync/vX.Y.Z
+```
+
+Confirm it is safe to delete first — the branch should carry nothing `dev` lacks:
+
+```
+git diff dev sync/vX.Y.Z --stat    # every line should be a deletion (dev has MORE), no additions
+```
+
+A branch that shows *additions* still holds work `dev` never got: stop and look at it rather than deleting. Note that `git branch -d` will also warn "not yet merged to HEAD" for a branch whose work was carried over by copy rather than by merge — that warning is about ancestry, not content, so the tree comparison above is the real check.
+
+`sync/v1.37.3`'s history is the cautionary case here: its four commits were plain commits that copied v1.37.3's content onto `dev`, never a merge, so git reported them "unmerged" forever even though every file was already present. See step 0 for how that happens and how to repair the ancestry.
 
 ## After a sync: review `fork-customizations.md`
 

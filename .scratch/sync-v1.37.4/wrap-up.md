@@ -1,43 +1,41 @@
-# 收工：sync-v1.37.4
+# 收工：sync-v1.37.4（续）
 
-结论：**可收工**（附 3 条待你人工验证）　起点：`c6053841`　日期：2026-10-12
+结论：**可收工**　起点：`fb4615a4`　日期：2026-10-12
 
 ## 大纲
 
-**目标：把上游 v1.37.4 合进 fork，保住两条核心诉求（后台任务不被杀 / compaction 只显示一行）。**
+**目标：对已完成的 v1.37.4 合并做独立终审，确认可落地，然后落地并推送。**
 
 | # | 做了什么 | 落点 |
 |---|---|---|
-| 1 | 查清拓扑：v1.37.3 内容已在 dev 但 **merge 信息缺失**（merge-base 停在 v1.37.2） | `c6053841` record-only merge |
-| 2 | 用 record-only merge 补上 v1.37.3 的祖先关系（树不变，只修拓扑） | `c6053841` |
-| 3 | 五轮方案评审（4 家 × 4 轮 + 终审），方案从 v1 迭代到 v6 | `.scratch/sync-v1.37.4/06~08` |
-| 4 | 执行合并：40 个冲突文件全部解完 | `945f36f2` |
-| 5 | 修复实施者引入/方案遗留的 hold 守卫缺陷（`finally` 缺 `backgroundWorkPending`） | 同上（`claude-runtime.provider.js`） |
-| 6 | 代码 review 3 家 → 修 → 复核通过 | `.scratch/sync-v1.37.4/09` |
-| 7 | antigravity 专项审计（你提的盲区）：**零 must-fix** | `.scratch/sync-v1.37.4/` 对话记录 |
-| 8 | 数据库迁移实测（真实库副本）：7 行数据全部保值 | 同上 |
-| 9 | 更新 fork 定制清单 11 个条目 + ADR 0012 状态注记 | `f3b486df` |
-| 10 | 文档 review 3 家 → 修 16 处（含 7 条归属/前提错误） | `.scratch/sync-v1.37.4/10` |
-| 11 | 补上游新增的 `docs/README.id.md`（`git add -u` 漏掉的新文件） | `1c13a8f0` |
+| 1 | 外派 `agy-co46` 做终审；首次跑挂（我 prompt 没给写文件手段），用户续跑完成 | `.scratch/sync-v1.37.4/11-terminal-review.md` |
+| 2 | 独立复核终审报告：抽查 10 项，逐条对 Windows 基线 25 个 fail | 对话 |
+| 3 | 修终审报的唯一实错：zh-CN 条目 1/4/22 的 `涉及文件` 行旧路径 | `c861aa2d` |
+| 4 | `dev` 合并 `sync/v1.37.4`（实际为快进，非预告的真 merge） | `c861aa2d` |
+| 5 | 删 `sync/v1.37.3`、`sync/v1.37.3-split`，各留 `archive/*` tag | 已删 |
+| 6 | 把「只留最近一条 `sync/`」的分支收拾约定写进同步指南（英中） | 本次提交 |
 
 **跑题**：无。
 
 ## 漏项 / 暂缓
 
-基准 = 你的原始诉求。
+基准 = 用户本次诉求：派 agy-co46 终审 + 核查 1.37.4 的 merge 信息是否正常。
 
 | 诉求 | 状态 | 证据 |
 |---|---|---|
-| 上游 v1.37.4 合进 fork | ✅ | `945f36f2`，40 冲突全解 |
-| **后台任务中发消息不被杀** | ✅ 代码已实现 | `finally` 三信号守卫 + `backgroundWorkPending`；`claude-runtime-hold` 6/6、`claude-background-work` 38/38 |
-| **compaction 只显示一行** | ✅ 代码已实现 | D3 三文件（后端 + `useChatMessages.ts` + `MessageComponent.tsx`） |
-| 优先用上游方案 | ✅ | D1 tracker 取上游、D2 effort 列取上游、D3 Claude 取上游 |
-| fork 改进保留 | ✅ | claim 保留、`buildCustomModelEffort` 保留、dispatcher 门保留 |
-| 不影响上游 / 避开干扰 | ✅ | 四条红线全落实（tree 已核） |
-| **实际运行验证** | ⚠️ **你人工在做** | 代码已提交，工作区干净 |
-| 数据库能否直接升级 | ✅ | 副本实测：迁移成功、数据无损 |
+| agy-co46 终审全量检查 | ✅ | `11-terminal-review.md`（10.9KB，四块：上游对齐 / 核心诉求 / 数据迁移 / 文档） |
+| **1.37.4 merge 信息正常** | ✅ | `945f36f2` 双 parent（`c6053841` + `7c3049fe`）；`merge-base sync/v1.37.4 upstream/main = 7c3049fe`；`sync..upstream/main` 为空 |
+| 结论可否合 dev | ✅ **可以**，零 must-fix | 我抽查 10 项全对，含逐条对基线 |
+| 修 zh-CN 旧路径 | ✅ | `c861aa2d` |
+| 合并到 dev | ✅ | `dev = c861aa2d`，`git diff dev sync/v1.37.4` 为空 |
+| 保留 v1.37.4 / 删旧版本分支 | ✅ | 见「清理」 |
+| 清外派 session | ✅ | 2 个已删，复查"没找到会话文件" |
+| push dev | ✅ | 见「提交状态」 |
 
-**delta 里的 TODO/FIXME**：无。
+**我先前说错、本次纠正的两处**（写进记录，避免以后再犯）：
+
+1. `dev` 领先 `origin/dev` 是 **80** 个 commit，不是 6 —— 我早先把 `sync/v1.37.3` 的 4 个 commit 当成了全部差额。
+2. 落地是 **fast-forward**，不是真 merge —— 我凭一条报错的命令（`git rev-parse --short dev sync/v1.37.4` 在 Git Bash 下 `fatal: Needed a single revision`）就断言"dev 领先、不能快进"。实际 `6ef663ba` 本就是 `sync/v1.37.4` 的祖先。
 
 ## 文档同步
 
@@ -45,52 +43,54 @@
 
 | 文档 | 状态 |
 |---|---|
-| `.claude/CLAUDE.md`「Syncing with upstream」 | ✅ 已指向 `upstream-sync.md` / `fork-customizations.md`，无需改 |
-| `docs/fork-customizations.md` + `.zh-CN.md` | ✅ 本次已更新 11 条（本次改动的主体） |
-| `docs/adr/0012-...md` | ✅ 加了状态注记（退出条件半满足） |
-| `docs/upstream-sync.md` | ❌ **缺 record-only 流程**（本次会话开头做的关键一步，文档里 0 命中） |
+| `docs/upstream-sync.md` | ✅ 本次新增「分支收拾」节 + `dev` 可能不快进的说明 |
+| `docs/upstream-sync.zh-CN.md` | ✅ 同上（中文版） |
+| `.claude/CLAUDE.md` | ✅ `## Dispatched agents` 节完好，未受影响 |
+| `.scratch/sync-v1.37.4/11-terminal-review.md` | ✅ 新增（agy 写） |
+| `.scratch/sync-v1.37.4/11-terminal-review-brief.md` | ✅ 新增（我写的任务书） |
 
 ### 其他文档
 
 | 文档 | 状态 |
 |---|---|
-| `docs/README.*.md`（含新增 id） | ✅ 上游带的，已提交 |
-| `.scratch/sync-v1.37.4/*` | ✅ 本次全部记录（00~10） |
+| `docs/fork-customizations.zh-CN.md` | ✅ 本次修 3 行（`c861aa2d`） |
 
 ## 提交状态
 
-- **未提交**：无（`git status` 只剩 4 个会话前就存在的未跟踪项）
-- **未 push**：`sync/v1.37.4` 无上游跟踪，未 push
+- **未提交**：无（5 个未跟踪项，均为会话前既有，见下）
+- **未 push**：`dev` 领先 `origin/dev` 80 个 commit → 本次推送
 - **stash**：无
-- **worktree**：无（只有主工作区）
-- **本轮新建分支**：无（直接在 `sync/v1.37.4` 上做）
+- **worktree**：只剩主工作区（`worktree-agent-*` 是遗留分支，无对应目录）
+- **本轮新建分支**：无
+
+未跟踪项（**都不是本轮产物**）：`.scratch/26100401-agy-external-delete-sync/`、`.scratch/26101001-opencode-external-delete-sync/`、`.scratch/sync-v1.37.4/11-*.md` ×2、`docs/browser-use.md`。
 
 ## 清理
 
 | 资源 | 去向 |
 |---|---|
-| `.scratch/diff-zh.txt`（agent 临时产物） | ✅ 已删 |
-| `tsconfig.tsbuildinfo`（审计时 `tsc -b` 生成） | ✅ 已删 |
-| `d:/tmp/migtest/`（迁移实测的库副本） | 留（证据，体积小） |
-| 端口 3001（PID 23876） | **留** —— 你正在测的应用 |
-| 派出的 CLI 会话（5 个 STEM） | 留（证据；你说了要清理时再清） |
-| 后台任务 / Monitor / Cron | 无残留 |
-| `.scratch/` 记录文件 | 留 |
+| 外派 CLI 会话 ×2（agy-co46、cbc-hy4 test-timing） | ✅ 已删（用户指定） |
+| 其余 6 个 STEM 的会话 | 早为"没找到会话文件"，无需动 |
+| `sync/v1.37.3`、`sync/v1.37.3-split` | ✅ 已删，留 tag `archive/sync-v1.37.3`、`archive/sync-v1.37.3-split` |
+| `sync/v1.37.4` | **留**（用户指定：保留最近一次同步分支） |
+| `/tmp/up-bw.test.ts` | ✅ 已删（比对测试时建的） |
+| `d:/tmp/migtest/` | 留（迁移实测证据） |
+| 端口 3001（PID 23876） | 留 —— 用户正在测的应用 |
+| Cron / Monitor / 后台任务 | 无 |
+| `.scratch/` 记录 | 留 |
 
 ## 踩坑
 
-用户过目后**只采纳第 4 条**（其余为一次性、默认就会的，不记）。
+用户决定：**本轮不记教训**。
 
-| 现象 | 以后怎么做 | 去处 | 状态 |
-|---|---|---|---|
-| **派出的 agent 失败/空返回时我擅自改派**（`cbc-hy4` 空跑后直接换成 `cbc-glm53`，用户纠正） | 报告 + 问用户，不擅自换标签/模型/渠道；空文件也可能是"还在跑"（cbc 会派 subagent 并等它，外壳退了会话没结束） | 目标仓 `.claude/CLAUDE.md` 新增 `## Dispatched agents` 节 | ✅ 已写 |
-| cbc runner 退 0 无输出 | 先看是否仍在运行（在等 subagent），确认真结束后再 `check`；不要当失败重派 | dispatch-agent 教训箱 | ✅ 已记 |
+识别到但未记录的三条（供参考）：
 
-**未采纳**（用户判断为一次性或默认就会）：把方案笔记当代码事实、`git add -u` 漏新文件、英中双语单边改、review 要盯归属判断、哨兵事实要标注推断/实测。
+1. 派 agent 却没给它交付手段（prompt 写了"唯一允许写的文件"，但 agy runner 没有写文件原语）。
+2. 凭一条报错命令的输出下拓扑结论。
+3. 把自己写在 commit message 里的数字当独立证据引用。
 
 ## 下一步
 
-1. **人工验证**（你在做）：D3 压缩单行、D1 后台不杀、G4 per-task UI、D2 effort fieldset、数据库迁移
-2. ~~补 `docs/upstream-sync.md` 的 record-only 一节~~ → ✅ 已完成（第 0 节，英中）
-3. ~~把踩坑写进 `CLAUDE.md`~~ → ✅ 已完成（第 4 条，`## Dispatched agents` 节）
-4. `sync/v1.37.4` → `main` → `dev` 的合并与 push —— 等你验完
+1. ✅ push `dev` → `origin`（本次执行）
+2. ⚠️ 主干外遗留分支未处理，需要时另开：`chore/upgrade-deps-2026-09`、`feat/agy-external-delete-sync`、2 个 `worktree-agent-*`、远端 `origin/sync/v1.37.3`
+3. 下一版本同步（v1.37.5）时按新约定：保留 `sync/v1.37.5`，删 `sync/v1.37.4`（删前打 `archive/` tag）
