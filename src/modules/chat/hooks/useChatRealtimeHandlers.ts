@@ -2,6 +2,7 @@ import { useEffect, useRef } from 'react';
 import type { Dispatch, MutableRefObject, SetStateAction } from 'react';
 
 import type { ServerEvent,MarkSessionBackgroundWork,MarkSessionIdle,MarkSessionProcessing,PendingPermissionRequest,ProjectSession,LLMProvider,NormalizedMessage,GetSessionActivity,MarkSessionBackground } from '@/shared/types';
+import { notifyBackgroundWorkRefused } from '@/modules/chat/utils/backgroundWorkRefusal';
 import { showCompletionTitleIndicator } from '@/modules/chat/utils/pageTitleNotification';
 import { playChatCompletionSound, playNotificationSound } from '@/shared/utils';
 import type { SessionStore } from '@/modules/chat/hooks/useSessionStore';
@@ -240,6 +241,13 @@ export function useChatRealtimeHandlers({
       /* -------------------------------------------------------------- */
       /*  Provider NormalizedMessage handling                            */
       /* -------------------------------------------------------------- */
+
+      // The server refused a send that could not join the background work it
+      // would have had to stop. The error row below still shows why; this also
+      // gives the typed message back to the composer.
+      if (msg.kind === 'error' && msg.code === 'background_work_not_kept' && msg.sessionId) {
+        notifyBackgroundWorkRefused(msg.sessionId);
+      }
 
       // --- Streaming: buffer per session for performance ---
       // Viewed or not, a session's text reaches the store the same way: its

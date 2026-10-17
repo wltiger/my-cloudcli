@@ -157,7 +157,11 @@ async function handleChatSend(
     return;
   }
 
-  await dispatchRun(ws, userId, resolved.sessionId, resolved.session, data, dependencies);
+  // Top level of the message, not in `options`: `options` is what a queued draft
+  // stores, and a queued send must never stop background work on its own.
+  await dispatchRun(ws, userId, resolved.sessionId, resolved.session, data, dependencies, {
+    interruptBackground: data.interruptBackground === true,
+  });
 }
 
 type ResolvedSendTarget = {

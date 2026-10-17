@@ -135,8 +135,8 @@ const RESULT_USAGE = {
 test('a model\'s declared context window is the budget total', () => {
   // The server-level value is deliberately set: the declaration outranks it.
   withServerContextWindow('180000', () => {
-    assert.equal(extractTokenBudget(ASSISTANT_USAGE, 262_144)?.total, 262_144);
-    assert.equal(extractCumulativeTokenBudget(RESULT_USAGE, 262_144)?.total, 262_144);
+    assert.equal(extractTokenBudget(ASSISTANT_USAGE, { declared: 262_144 })?.total, 262_144);
+    assert.equal(extractCumulativeTokenBudget(RESULT_USAGE, { declared: 262_144 })?.total, 262_144);
   });
 });
 

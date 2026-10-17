@@ -123,14 +123,11 @@ test('a queued message stays pending while its session is busy', async () => {
   });
 });
 
-// Upstream holds a queued message back while background work runs, because its
-// new turn would stop that work. This fork pushes the turn into the held
-// process instead (the gate reads turn-in-flight only), so the message goes now.
-test("a queued message is not held back by background work its session's last turn left running", async () => {
+test('a queued message waits for background work its session\'s last turn left running', async () => {
   await withIsolatedDatabase(async (userId) => {
     sessionDraftsDb.saveDraft(userId, SESSION_ID, {
       text: '',
-      queuedMessage: { content: 'send during the background job' },
+      queuedMessage: { content: 'send after the background job' },
     });
     // Turn A ended, so its run is completed, but it backgrounded a command
     // that is still running under A's CLI process.
@@ -144,12 +141,22 @@ test("a queued message is not held back by background work its session's last tu
     runA!.writer.sendComplete({ exitCode: 0 });
     assert.equal(chatRunRegistry.isProcessing(SESSION_ID), false);
 
+    let backgroundWork = true;
     const runs: RunCall[] = [];
-    const runtime = createRuntime(runs, 'ok', [], (sessionId) => sessionId === SESSION_ID);
+    const runtime = createRuntime(runs, 'ok', [], (sessionId) => sessionId === SESSION_ID && backgroundWork);
 
+    // Starting B now would replace that process and stop the command.
+    assert.equal(await dispatchQueuedMessages(runtime), 0);
+    assert.equal(runs.length, 0);
+    assert.deepEqual(sessionDraftsDb.getDrafts(userId)[0]?.queuedMessage, {
+      content: 'send after the background job',
+    });
+
+    // Once the work has reported back, B goes on the next pass.
+    backgroundWork = false;
     assert.equal(await dispatchQueuedMessages(runtime), 1);
     assert.equal(runs.length, 1);
-    assert.equal(runs[0].command, 'send during the background job');
+    assert.equal(runs[0].command, 'send after the background job');
     assert.equal(sessionDraftsDb.getDrafts(userId).length, 0);
   });
 });

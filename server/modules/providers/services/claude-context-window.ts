@@ -10,8 +10,9 @@ const DEFAULT_CONTEXT_WINDOW_TOKENS = 160_000;
 
 /**
  * The context window one Claude session's usage readout should show, in raw
- * tokens: the model's own declaration first, then the operator's server-level
- * `CONTEXT_WINDOW` variable, then the 160K default.
+ * tokens: the model's own declaration first, then the window the SDK reported
+ * for the session, then the operator's server-level `CONTEXT_WINDOW` variable,
+ * then the 160K default.
  *
  * Every read point goes through this one function — the runtime's live turn
  * budget (`claude-runtime.provider.js`), the token-usage aggregation
@@ -19,19 +20,28 @@ const DEFAULT_CONTEXT_WINDOW_TOKENS = 160_000;
  * (`claude-sessions.provider.ts`) — so re-reading a session can never make the
  * number jump between the declared value and the server-level one.
  *
- * `configuredContextWindow` is a parameter rather than a direct environment
- * read so the token-usage service can keep injecting it the way it already
- * does; callers with nothing to inject let it default.
+ * `configured` is a parameter rather than a direct environment read so the
+ * token-usage service can keep injecting it the way it already does; callers
+ * with nothing to inject let it default. Named fields, not positions, so a
+ * swapped number cannot pass silently.
  */
-export function resolveContextWindowTotal(
-  declaredContextWindow: number | null | undefined,
-  configuredContextWindow: string | undefined = process.env.CONTEXT_WINDOW,
-): number {
-  if (typeof declaredContextWindow === 'number' && Number.isFinite(declaredContextWindow) && declaredContextWindow > 0) {
-    return declaredContextWindow;
+export function resolveContextWindowTotal({
+  declared,
+  reported,
+  configured = process.env.CONTEXT_WINDOW,
+}: {
+  declared?: number | null;
+  reported?: number | null;
+  configured?: string | undefined;
+}): number {
+  if (typeof declared === 'number' && Number.isFinite(declared) && declared > 0) {
+    return declared;
+  }
+  if (typeof reported === 'number' && Number.isFinite(reported) && reported > 0) {
+    return reported;
   }
 
-  const parsed = Number.parseInt(configuredContextWindow ?? '', 10);
+  const parsed = Number.parseInt(configured ?? '', 10);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_CONTEXT_WINDOW_TOKENS;
 }
 

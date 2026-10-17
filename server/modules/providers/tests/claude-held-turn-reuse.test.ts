@@ -61,6 +61,8 @@ type FakeQuery = {
   prompts: AnyRecord[];
   promptStreamClosed: boolean;
   interruptCount: number;
+  stoppedTasks: string[];
+  stopTask(taskId: string): Promise<void>;
   emit(event: AnyRecord): Promise<void>;
   interrupt(): Promise<void>;
   [Symbol.asyncIterator](): AsyncGenerator<AnyRecord>;
@@ -84,6 +86,10 @@ function createFakeQuery({ prompt, options }: { prompt: AsyncIterable<AnyRecord>
     prompts: [],
     promptStreamClosed: false,
     interruptCount: 0,
+    stoppedTasks: [],
+    async stopTask(taskId) {
+      instance.stoppedTasks.push(taskId);
+    },
     async emit(event) {
       events.push(event);
       resume();
@@ -353,6 +359,88 @@ test('Claude held-process reuse across turns', async (t) => {
 
       assert.equal(queries.length, 2, 'changed settings need their own query');
       assert.equal(live.promptStreamClosed, true, 'the previous hold is released');
+
+      await queries[1]?.emit({ type: 'result', session_id: 'provider-1' });
+      await Promise.all([firstTurn, secondTurn]);
+    });
+  });
+
+  await t.test('a send that cannot keep a process running background work is refused, and the process is left alone', async () => {
+    await withIsolatedDatabase(async () => {
+      sessionsDb.createAppSession('app-refused', 'claude', '/workspace/demo');
+
+      const first = new FakeConnection();
+      const firstRun = startRun('app-refused', first);
+      const firstTurn = queryClaudeSDK('first question', { ...BASE_OPTIONS, sessionId: 'app-refused' }, firstRun.writer, createContext());
+      await waitUntil(() => queries.length === 1, 'the first query to start');
+
+      const live = queries[0];
+      assert.ok(live);
+      await live.emit(BACKGROUND_BASH_STARTED);
+      await live.emit({ type: 'result', session_id: 'provider-1' });
+
+      const second = new FakeConnection();
+      const secondRun = startRun('app-refused', second);
+      await queryClaudeSDK(
+        'second question',
+        { ...BASE_OPTIONS, sessionId: 'app-refused', model: 'opus' },
+        secondRun.writer,
+        createContext(),
+      );
+      await flush();
+
+      assert.equal(queries.length, 1, 'the refused send starts no process of its own');
+      assert.equal(live.promptStreamClosed, false, 'and the held process is not released');
+      const refusal = second.frames.find((frame) => frame.code === 'background_work_not_kept');
+      assert.equal(refusal?.kind, 'error', 'the client is told why');
+      // The chat handler completes a refused run, as it does any run that ends without a result.
+      secondRun.writer.sendComplete({ exitCode: 1 });
+
+      // The work reports back, so the same send now supersedes the hold as before.
+      await live.emit(BACKGROUND_BASH_COMPLETED);
+      const third = new FakeConnection();
+      const thirdRun = startRun('app-refused', third);
+      const thirdTurn = queryClaudeSDK(
+        'third question',
+        { ...BASE_OPTIONS, sessionId: 'app-refused', model: 'opus' },
+        thirdRun.writer,
+        createContext(),
+      );
+      await waitUntil(() => queries.length === 2, 'the superseding query to start');
+      assert.equal(live.promptStreamClosed, true, 'the previous hold is released once nothing is outstanding');
+
+      await queries[1]?.emit({ type: 'result', session_id: 'provider-1' });
+      await Promise.all([firstTurn, thirdTurn]);
+    });
+  });
+
+  await t.test('interrupt and send stops the outstanding task and releases the held process, even when the settings match', async () => {
+    await withIsolatedDatabase(async () => {
+      sessionsDb.createAppSession('app-interrupt', 'claude', '/workspace/demo');
+
+      const first = new FakeConnection();
+      const firstRun = startRun('app-interrupt', first);
+      const firstTurn = queryClaudeSDK('first question', { ...BASE_OPTIONS, sessionId: 'app-interrupt' }, firstRun.writer, createContext());
+      await waitUntil(() => queries.length === 1, 'the first query to start');
+
+      const live = queries[0];
+      assert.ok(live);
+      await live.emit(BACKGROUND_BASH_STARTED);
+      await live.emit({ type: 'result', session_id: 'provider-1' });
+
+      const second = new FakeConnection();
+      const secondRun = startRun('app-interrupt', second);
+      const secondTurn = queryClaudeSDK(
+        'second question',
+        { ...BASE_OPTIONS, sessionId: 'app-interrupt', interruptBackground: true },
+        secondRun.writer,
+        createContext(),
+      );
+      await waitUntil(() => queries.length === 2, 'the interrupting query to start');
+
+      assert.deepEqual(live.stoppedTasks, ['bash-1'], 'the outstanding task is stopped');
+      assert.equal(live.promptStreamClosed, true, 'and the held process is released');
+      assert.equal(second.frames.find((frame) => frame.code === 'background_work_not_kept'), undefined, 'the interrupt is never refused');
 
       await queries[1]?.emit({ type: 'result', session_id: 'provider-1' });
       await Promise.all([firstTurn, secondTurn]);

@@ -6,17 +6,20 @@ import { useChatWidthClasses } from '@/shared/hooks/useChatTypography';
 type QueuedMessageCardProps = {
   content: string;
   attachmentCount?: number;
+  waitingForBackgroundWork?: boolean;
   onEdit: () => void;
   onDelete: () => void;
 };
 
 /**
  * Rendered by chat's ChatComposer to show the message queued for a busy
- * session, with edit and delete actions before it is auto-sent.
+ * session, with edit and delete actions before it is auto-sent. While the
+ * session's background work is running, it also says the send waits for that.
  */
 export default function QueuedMessageCard({
   content,
   attachmentCount = 0,
+  waitingForBackgroundWork = false,
   onEdit,
   onDelete,
 }: QueuedMessageCardProps) {
@@ -34,6 +37,11 @@ export default function QueuedMessageCard({
             <span className="normal-case text-muted-foreground/60">
               · {t('input.queue.willSend', { defaultValue: 'Will send when this finishes' })}
             </span>
+            {waitingForBackgroundWork && (
+              <span className="normal-case text-muted-foreground/60">
+                · {t('input.queue.waitingForBackgroundWork', { defaultValue: 'Waiting for background work to finish' })}
+              </span>
+            )}
           </div>
           <p className="mt-0.5 line-clamp-2 break-words text-sm text-foreground/90">{content}</p>
           {attachmentCount > 0 && (

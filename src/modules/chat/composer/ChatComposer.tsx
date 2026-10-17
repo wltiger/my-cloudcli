@@ -15,7 +15,7 @@ import { PaperclipIcon, MessageSquareIcon, XIcon, Loader2, ArrowUpIcon, PencilIc
 import { useVoiceInput } from '@/modules/chat/hooks/useVoiceInput';
 import { useVoiceAvailable } from '@/modules/chat/hooks/useVoiceAvailable';
 import { useChatWidthClasses } from '@/shared/hooks/useChatTypography';
-import type { QueuedDraft, ScheduledMessage, SlashCommand,SessionActivity,PendingPermissionRequest,PermissionMode,ProviderModelOption } from '@/shared/types';
+import type { BackgroundSendChoice, BackgroundSendPrompt, QueuedDraft, ScheduledMessage, SlashCommand,SessionActivity,PendingPermissionRequest,PermissionMode,ProviderModelOption } from '@/shared/types';
 import {
   PromptInput,
   PromptInputHeader,
@@ -34,6 +34,7 @@ import VoiceInputButton from '@/modules/chat/composer/VoiceInputButton';
 import PermissionRequestsBanner from '@/modules/chat/composer/PermissionRequestsBanner';
 import TokenUsageSummary from '@/modules/chat/composer/TokenUsageSummary';
 import QueuedMessageCard from '@/modules/chat/composer/QueuedMessageCard';
+import BackgroundSendDialog from '@/modules/chat/composer/BackgroundSendDialog';
 import { ScheduleMessagePopover } from '@/modules/chat/composer/ScheduleMessagePopover';
 import { ScheduledMessageList } from '@/modules/chat/composer/ScheduledMessageList';
 import ComposerModelMenu from '@/modules/chat/composer/ComposerModelMenu';
@@ -80,6 +81,8 @@ type ChatComposerProps = {
   onSubmit: (event: FormEvent<HTMLFormElement> | MouseEvent<HTMLButtonElement> | TouchEvent<HTMLButtonElement>) => void;
   isDragActive: boolean;
   queuedDraft: QueuedDraft | null;
+  backgroundSendPrompt: BackgroundSendPrompt | null;
+  onResolveBackgroundSendPrompt: (choice: BackgroundSendChoice) => void;
   /** Set while the composer is replacing an already-sent message. */
   isEditingSentMessage: boolean;
   /**
@@ -167,6 +170,8 @@ export default function ChatComposer({
   onSubmit,
   isDragActive,
   queuedDraft,
+  backgroundSendPrompt,
+  onResolveBackgroundSendPrompt,
   isEditingSentMessage,
   editRestoresFiles,
   onCancelEditMessage,
@@ -352,12 +357,18 @@ export default function ChatComposer({
         </div>
       )}
 
+      <BackgroundSendDialog
+        prompt={backgroundSendPrompt}
+        onResolve={onResolveBackgroundSendPrompt}
+      />
+
       {queuedDraft && (
         <QueuedMessageCard
           content={queuedDraft.content}
           attachmentCount={
             queuedDraft.uploadedAttachments?.length ?? queuedDraft.attachments.length
           }
+          waitingForBackgroundWork={backgroundWorkOutstanding}
           onEdit={onEditQueuedDraft}
           onDelete={onDeleteQueuedDraft}
         />
