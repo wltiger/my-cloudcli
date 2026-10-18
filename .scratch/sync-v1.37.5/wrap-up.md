@@ -47,7 +47,7 @@
 ## 清理
 - 删：`.scratch/sync-v1.37.5/base-block.ts`（测试草稿，未跟踪）
 - 删：`.scratch/sync-v1.37.5/new.ts`（与已跟踪的 `scheduled-messages.test.ts` 内容一致）
-- 无：系统 temp（本轮没建）；后台进程（3001 是你的实例 PID 60804，不动；5173 没起过）；后台任务；Cron（无）；调试打印 / TODO / FIXME（diff 新增行 0 处）；派出的 agent 与 CLI 会话（对话里没有 dispatch.mjs 调用）
+- 无：系统 temp（本轮没建）；后台进程（3001 是你的实例 PID 60804，不动；5173 没起过）；后台任务；Cron（无）；调试打印 / TODO / FIXME（diff 新增行 0 处）；派出的 agent 与 CLI 会话（本轮没有；收工后另外删了上一轮遗留的 26 个 STEM、35 个会话）
 - 留：`.scratch/sync-v1.37.5/` 的 plan.md、日志（审阅证据）
 
 ## 踩坑
@@ -65,15 +65,15 @@
 - ✅ 清理：删 `base-block.ts`、`new.ts`
 - ✅ 补文档：memory 正文两条和 MEMORY.md 索引两行已改（仓外，不入库）。bg 那条改为「有后台任务时拒绝、不再强杀」，失败基线那条去掉「~11」
 - ✅ 提交：本文件（信息见 git log）
-- ✅ 合并（仅本地）：dev 快进到 `sync/v1.37.5`，main 快进到 `upstream/main`。推送未做
-- 分支：`sync/v1.37.5` 保留（最新的 sync 分支）；`sync/v1.37.4` 打 `archive/sync-v1.37.4` tag 后删
+- ✅ 合并（仅本地）：dev 快进到 `sync/v1.37.5`，main 快进到 `upstream/main`。已推送：origin/main（0ce5630f）、origin/dev（d34b7762）
+- 分支：`sync/v1.37.5` 保留（最新的 sync 分支）；`sync/v1.37.4` 也保留（`archive/sync-v1.37.4` tag 已打；误删后已恢复）
 
 ## 下一步
 - ❌ upstream-pr 分诊 → `/upstream-pr`，只分诊不提交。候选：v1.37.5 每回合无条件 `releaseHeldSession`，和 fork 的 held process 复用冲突（fork 侧已改，上游要不要知道需要判断）。OpenCode 缺列是 fork 侧，不报
 - ✅ memory 两条已改（见执行结果）
 - ⚠️ 定时消息是否等后台任务 → 你定（现状：不等）
 - ⚠️ 冒烟结果 → 你回报
-- ⚠️ 推送 origin/dev、origin/main → 你单独确认（合并已做）
+- ✅ 推送 origin/dev、origin/main：已完成
 - ⚠️ dev 上复跑两个失败测试 → 需要你同意切分支
 - ⚠️ codex 增量 `npm install` → 你同意后做（可能改 lock）
 - ⚠️ 「中断并发送」改名 → `/to-backlog`，spec review 时定
