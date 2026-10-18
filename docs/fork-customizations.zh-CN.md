@@ -502,7 +502,7 @@ Stop 是能看见的那一半。`chat.abort` 现在接受「run 已结束、但�
 
 ## 34. 依赖版本领先官方（2026-09-24 审计后升级）
 
-**涉及文件：** `package.json`、`package-lock.json`（都是官方自有——五个版本行就是全部冲突面）、`server/modules/providers/list/claude/claude-runtime.provider.js`（`mapCliOptionsToSDK` 里任务追踪的 `allowedTools` 块）。
+**涉及文件：** `package.json`、`package-lock.json`（都是官方自有——`@anthropic-ai/claude-agent-sdk`、`express`、`react-router-dom`、`dompurify`、`tsx` 这五个包的版本行就是全部冲突面）、`server/modules/providers/list/claude/claude-runtime.provider.js`（`mapCliOptionsToSDK` 里任务追踪的 `allowedTools` 块）。
 
 **为什么改：** 2026-09-24 本 fork 做了一次全面依赖审计——SDK 跨 116 个版本精读 changelog，其余快扫——升级了审计发现真正收益的五个包。五个包官方现在（对照 `upstream/main` 的 `6c51fcaa`，2026-09-21）仍钉在旧版本上，所以这是 fork 刻意领先，不是追赶：
 
@@ -512,7 +512,7 @@ Stop 是能看见的那一半。`chat.abort` 现在接受「run 已结束、但�
 
 验证：typecheck、后端测试（失败集与升级前基线完全一致——那组 Windows 路径/隔离类的稳定失败早于本次升级）、前端测试 486/486、lint、一次真实 SDK 冒烟会话。
 
-**同步官方时怎么办：** 这是版本提升，不是行为分叉——冲突面是 `package.json` 的五个版本行和 `package-lock.json`。如果官方后来把某个包提到了不低于我们的版本，取官方的行；如果官方还在旧版本上，保留 fork 的行——把冲突解成官方的旧版本等于**降级**。lockfile 冲突时用 `npm install` 重新生成，不要手工合。`claude-runtime.provider.js` 里的 `allowedTools` 块是唯一真正的行为偏离：保留它；如果官方出了同样的显式工具命名（取官方的、删掉这个块），或 SDK/CLI 把工具还给默认工具面（这个块就失效了，可以删），才不需要。
+**同步官方时怎么办：** 这是版本提升，不是行为分叉——冲突面是 `package.json` 里这五个包的版本行（`@anthropic-ai/claude-agent-sdk`、`express`、`react-router-dom`、`dompurify`、`tsx`）和 `package-lock.json`。如果官方后来把某个包提到了不低于我们的版本，取官方的行；如果官方还在旧版本上，保留 fork 的行——把冲突解成官方的旧版本等于**降级**。lockfile 冲突时用 `npm install` 重新生成，不要手工合。`claude-runtime.provider.js` 里的 `allowedTools` 块是唯一真正的行为偏离：保留它；如果官方出了同样的显式工具命名（取官方的、删掉这个块），或 SDK/CLI 把工具还给默认工具面（这个块就失效了，可以删），才不需要。
 
 ## 35. Antigravity 工具显示对齐、通知、媒体与 subagent 容器
 

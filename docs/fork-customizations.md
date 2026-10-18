@@ -504,7 +504,7 @@ Since 1.2.13 a live `system_message` step is a **marker with no text** — the e
 
 ## 34. Dependencies pinned ahead of upstream (2026-09-24 audit)
 
-**Files:** `package.json`, `package-lock.json` (both upstream-owned — the five spec lines are the whole fork surface), `server/modules/providers/list/claude/claude-runtime.provider.js` (the task-tracking `allowedTools` block in `mapCliOptionsToSDK`).
+**Files:** `package.json`, `package-lock.json` (both upstream-owned — the five spec lines for `@anthropic-ai/claude-agent-sdk`, `express`, `react-router-dom`, `dompurify` and `tsx` are the whole fork surface), `server/modules/providers/list/claude/claude-runtime.provider.js` (the task-tracking `allowedTools` block in `mapCliOptionsToSDK`).
 
 **Why:** On 2026-09-24 the fork ran a full dependency audit — the SDK changelog deep-read across the 116-release gap, the rest quick-scanned — and upgraded the five packages where the audit found real benefit. Upstream still declares the old spec for all five (checked against `upstream/main` at `6c51fcaa`, 2026-09-21), so this is the fork deliberately running ahead, not catching up:
 
@@ -514,7 +514,7 @@ Since 1.2.13 a live `system_message` step is a **marker with no text** — the e
 
 Verified: typecheck, backend tests (failure set identical to the pre-upgrade baseline — the stable set of Windows path/isolation failures predates the upgrade), client tests 486/486, lint, and a live SDK smoke session.
 
-**On upstream conflict:** Version bumps, not a behavior fork — the conflict surface is `package.json`'s five spec lines and `package-lock.json`. If upstream has since moved a package to an equal-or-higher spec, take upstream's line; if upstream is still on the old spec, keep the fork's line — a resolution that silently takes upstream's old spec is a **downgrade**. On a lockfile conflict regenerate with `npm install` rather than hand-merging. The `allowedTools` block in `claude-runtime.provider.js` is the one real behavior divergence: keep it; it becomes unnecessary if upstream ships the same explicit tool naming (take theirs and drop the block) or the SDK/CLI restores the tools to the default surface (the block is then inert and can go).
+**On upstream conflict:** Version bumps, not a behavior fork — the conflict surface is `package.json`'s spec lines for `@anthropic-ai/claude-agent-sdk`, `express`, `react-router-dom`, `dompurify` and `tsx`, plus `package-lock.json`. If upstream has since moved a package to an equal-or-higher spec, take upstream's line; if upstream is still on the old spec, keep the fork's line — a resolution that silently takes upstream's old spec is a **downgrade**. On a lockfile conflict regenerate with `npm install` rather than hand-merging. The `allowedTools` block in `claude-runtime.provider.js` is the one real behavior divergence: keep it; it becomes unnecessary if upstream ships the same explicit tool naming (take theirs and drop the block) or the SDK/CLI restores the tools to the default surface (the block is then inert and can go).
 
 ## 35. Antigravity tool display parity, notices, media and subagent containers
 

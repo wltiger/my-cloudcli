@@ -13,6 +13,7 @@ Entries are numbered locally and kept forever, including the ones that never shi
 | [PR03](PR03-markdown-table-horizontal-scroll.md) ([中文](PR03-markdown-table-horizontal-scroll.zh-CN.md)) | Wide markdown tables compress instead of scrolling | PR | Won't submit — upstream just restyled these lines; the width bounds are untested tuning | — |
 | [PR04](PR04-browser-runtime-install-directory.md) ([中文](PR04-browser-runtime-install-directory.zh-CN.md)) | Browser runtime installs where it is never resolved | — | Won't submit — already reported upstream (#995, #1000, #917) | — |
 | [PR05](PR05-page-title-frozen-on-conversations-tab.md) ([中文](PR05-page-title-frozen-on-conversations-tab.zh-CN.md)) | Page title stops updating on the Conversations / Archive sidebar tabs | Issue | Won't submit — cosmetic, zero fork cost, needs an upstream design decision. **Duplicate check not run** | — |
+| [PR06](PR06-held-process-released-every-turn.md) ([中文](PR06-held-process-released-every-turn.zh-CN.md)) | Each new turn releases the held Claude process, so background work cannot survive a follow-up turn | Issue | Won't submit — the fix needs upstream to reverse a deliberate design. **Duplicate check not run** | — |
 
 ## If you revive one of these
 
