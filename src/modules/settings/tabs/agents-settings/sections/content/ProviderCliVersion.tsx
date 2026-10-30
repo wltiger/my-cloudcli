@@ -99,7 +99,9 @@ export default function ProviderCliVersion({ agent, installedVersion, textClass,
   }
 
   let detail: string | null = null;
-  if (status?.updateUnavailableReason === 'bundled') {
+  // Antigravity updates itself in the background and has no updater here, so the
+  // server files it under 'bundled' — which would claim it ships with CloudCLI.
+  if (status?.updateUnavailableReason === 'bundled' && agent !== 'antigravity') {
     detail = t('agents.cli.bundled');
   } else if (status?.updateUnavailableReason === 'platform') {
     detail = t('agents.cli.platform');

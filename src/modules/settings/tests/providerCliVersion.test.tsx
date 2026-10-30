@@ -173,6 +173,22 @@ describe('ProviderCliVersion', () => {
     await waitFor(() => expect(screen.queryByTestId('provider-cli-version')).toBeNull());
   });
 
+  it('shows the Antigravity version without claiming it ships with CloudCLI', async () => {
+    responses.status = [claudeStatus({
+      provider: 'antigravity',
+      installedVersion: '1.4.11',
+      latestVersion: null,
+      updateAvailable: false,
+      updateCommand: null,
+      updateUnavailableReason: 'bundled',
+    })];
+    render(<ProviderCliVersion agent="antigravity" installedVersion="1.4.11" textClass="" subtextClass="" />);
+
+    expect(await screen.findByText('Installed: v1.4.11')).toBeTruthy();
+    expect(screen.queryByText('Ships with CloudCLI and is updated together with it.')).toBeNull();
+    expect(screen.queryByRole('button')).toBeNull();
+  });
+
   it('disables the button and shows what runs while the update is in progress', async () => {
     responses.status = [claudeStatus()];
     let finish: (response: Response) => void = () => {};
