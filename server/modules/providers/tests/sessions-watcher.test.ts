@@ -16,14 +16,15 @@ import path from 'node:path';
 import test from 'node:test';
 
 import Database from 'better-sqlite3';
+import chokidar from 'chokidar';
 
 import { closeConnection, initializeDatabase, sessionsDb } from '@/modules/database/index.js';
 import {
   closeSessionsWatcher,
+  createWatcherIgnoredMatcher,
   getProviderWatchPaths,
   isWatcherTargetFile,
   onUpdate,
-  WATCHER_IGNORED_PATTERNS,
 } from '@/modules/providers/services/sessions-watcher.service.js';
 
 const patchHomeDir = (nextHomeDir: string) => {
@@ -32,20 +33,6 @@ const patchHomeDir = (nextHomeDir: string) => {
   return () => {
     (os as any).homedir = original;
   };
-};
-
-/**
- * Chokidar 4's own matching rules, reproduced: a string matcher is an equality
- * test and a RegExp is tested against the path after it is normalized to
- * forward slashes (`createPattern`/`normalizePath` in `chokidar/esm/index.js`).
- * Asserting against the real semantics is the point — a glob string here would
- * silently never match.
- */
-const isIgnored = (filePath: string): boolean => {
-  const normalized = filePath.replace(/\\/g, '/');
-  return WATCHER_IGNORED_PATTERNS.some((pattern) => (
-    pattern instanceof RegExp ? pattern.test(normalized) : pattern === normalized
-  ));
 };
 
 test('antigravity watches the conversation tree and the title files, and only when they already exist', () => {
@@ -98,11 +85,13 @@ test('only the top-level transcript is an antigravity synchronization trigger', 
 });
 
 test('the chunk mirrors are ignored before chokidar ever reports them', () => {
-  const logsDir = '/home/u/.gemini/antigravity-cli/brain/conv-a/.system_generated/logs';
+  const brainDir = path.join('/home/u', '.gemini', 'antigravity-cli', 'brain');
+  const isIgnored = createWatcherIgnoredMatcher(brainDir);
+  const logsDir = path.join(brainDir, 'conv-a', '.system_generated', 'logs');
 
-  assert.equal(isIgnored(`${logsDir}/chunks/transcript/00000000.jsonl`), true);
-  assert.equal(isIgnored(`${logsDir}/chunks/transcript_full/00000000.jsonl`), true);
-  assert.equal(isIgnored(`${logsDir}/transcript.jsonl`), false);
+  assert.equal(isIgnored(path.join(logsDir, 'chunks', 'transcript', '00000000.jsonl')), true);
+  assert.equal(isIgnored(path.join(logsDir, 'chunks', 'transcript_full', '00000000.jsonl')), true);
+  assert.equal(isIgnored(path.join(logsDir, 'transcript.jsonl')), false);
 });
 
 test('a transcript event indexes the conversation while a chunk event does nothing', { concurrency: false }, async () => {
@@ -168,5 +157,72 @@ test('a transcript event indexes the conversation while a chunk event does nothi
       process.env.DATABASE_PATH = previousDatabasePath;
     }
     await fs.rm(tempRoot, { recursive: true, force: true });
+  }
+});
+
+test('the ignored matcher skips build output, VCS data, subagents and tool results', () => {
+  const root = path.join(os.tmpdir(), 'watch-root');
+  const isIgnored = createWatcherIgnoredMatcher(root);
+
+  assert.equal(isIgnored(path.join(root, '-home-me-app', 'abc.jsonl')), false);
+  assert.equal(isIgnored(path.join(root, '-home-me-app', 'abc', 'subagents', 'agent-1.jsonl')), true);
+  assert.equal(isIgnored(path.join(root, '-home-me-app', 'abc', 'tool-results', 'out.txt')), true);
+  assert.equal(isIgnored(path.join(root, 'pkg', 'node_modules', 'dep', 'index.js')), true);
+  assert.equal(isIgnored(path.join(root, 'repo', '.git', 'HEAD')), true);
+  assert.equal(isIgnored(path.join(root, '-home-me-app', 'abc.jsonl.tmp')), true);
+  assert.equal(isIgnored(path.join(root, '-home-me-app', '.DS_Store')), true);
+});
+
+test('the ignored matcher never looks above its own root', () => {
+  // A home directory under /build or /dist must not hide a whole provider.
+  const root = path.join(os.tmpdir(), 'build', 'home', '.claude', 'projects');
+  const isIgnored = createWatcherIgnoredMatcher(root);
+
+  assert.equal(isIgnored(root), false);
+  assert.equal(isIgnored(path.join(root, '-home-me-app', 'abc.jsonl')), false);
+  // Paths outside the root are never judged, whatever their names.
+  assert.equal(isIgnored(path.join(root, '..', 'node_modules', 'x.js')), false);
+});
+
+test('a child whose name starts with two dots is still inside the root', () => {
+  const root = path.join(os.tmpdir(), 'watch-root');
+  const isIgnored = createWatcherIgnoredMatcher(root);
+
+  assert.equal(isIgnored(path.join(root, '..archive', 'node_modules', 'x.js')), true);
+  assert.equal(isIgnored(path.join(root, '..archive', 'abc.jsonl')), false);
+});
+
+test('chokidar reports only session files through the matcher (#1156)', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'sessions-watcher-'));
+  const files = [
+    path.join('-home-me-app', 'abc.jsonl'),
+    path.join('-home-me-app', 'abc', 'subagents', 'agent-1.jsonl'),
+    path.join('-home-me-app', 'abc', 'tool-results', 'out.txt'),
+    path.join('pkg', 'node_modules', 'dep', 'index.js'),
+  ];
+  for (const file of files) {
+    await fs.mkdir(path.dirname(path.join(root, file)), { recursive: true });
+    await fs.writeFile(path.join(root, file), '{}\n');
+  }
+
+  const watcher = chokidar.watch(root, {
+    ignored: createWatcherIgnoredMatcher(root),
+    ignoreInitial: false,
+    persistent: true,
+  });
+  const added: string[] = [];
+  watcher.on('add', (filePath: string) => {
+    added.push(path.relative(root, filePath));
+  });
+
+  try {
+    await new Promise<void>((resolve, reject) => {
+      watcher.once('ready', () => resolve());
+      watcher.once('error', reject);
+    });
+    assert.deepEqual(added, [path.join('-home-me-app', 'abc.jsonl')]);
+  } finally {
+    await watcher.close();
+    await fs.rm(root, { recursive: true, force: true });
   }
 });

@@ -9,7 +9,7 @@ import {
   refreshAntigravityModelIds,
 } from '@/modules/providers/list/antigravity/antigravity-models.provider.js';
 import type { IProviderAuth } from '@/shared/interfaces.js';
-import type { ProviderAuthStatus } from '@/shared/types.js';
+import type { CliVersionProbe, ProviderAuthStatus } from '@/shared/types.js';
 
 // cross-spawn resolves .cmd shims/PATHEXT on Windows and delegates to
 // child_process.spawn everywhere else.
@@ -60,7 +60,7 @@ export const AGY_NOT_SIGNED_IN = 'Not signed in. Run `agy` in a terminal and sig
 const readAgyVersionOutput = (): string | null => {
   try {
     const result = spawnFunction.sync('agy', ['--version'], {
-      stdio: 'ignore',
+      stdio: ['ignore', 'pipe', 'ignore'],
       timeout: 5000,
       encoding: 'utf8',
     });
@@ -187,12 +187,21 @@ const readAgySignInState = async (): Promise<{ signedIn: boolean; error: string 
 };
 
 export class AntigravityProviderAuth implements IProviderAuth {
-  async getStatus(): Promise<ProviderAuthStatus> {
+  checkInstalled(): CliVersionProbe {
     const rawVersion = readAgyVersionOutput();
     if (rawVersion === null) {
+      return { installed: false, exitCode: null, version: null };
+    }
+    return { installed: true, exitCode: 0, version: parseAgyVersion(rawVersion) };
+  }
+
+  async getStatus(): Promise<ProviderAuthStatus> {
+    const { installed, version } = this.checkInstalled();
+    if (!installed) {
       return {
         installed: false,
         provider: 'antigravity',
+        installedVersion: null,
         authenticated: false,
         email: null,
         method: null,
@@ -200,7 +209,6 @@ export class AntigravityProviderAuth implements IProviderAuth {
       };
     }
 
-    const version = parseAgyVersion(rawVersion);
     // No version gate: `agy` shipped 50 releases between 1.0.0 and 1.2.6, so
     // pinning one would break a CLI the user keeps current — it runs and fails
     // loudly instead. A major-version jump is the one thing worth warning about,
@@ -217,6 +225,7 @@ export class AntigravityProviderAuth implements IProviderAuth {
     return {
       installed: true,
       provider: 'antigravity',
+      installedVersion: version,
       authenticated: signIn.signedIn,
       email: null,
       // Sign-in only ever happens inside the CLI itself, so `cli` names the one

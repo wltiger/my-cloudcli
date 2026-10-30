@@ -74,31 +74,64 @@ export function getProviderWatchPaths(): ProviderWatchPath[] {
   ];
 }
 
-/** @internal Exported for the watcher tests. */
-export const WATCHER_IGNORED_PATTERNS = [
-  '**/node_modules/**',
-  '**/.git/**',
-  '**/dist/**',
-  '**/build/**',
-  '**/subagents/**',
-  '**/tool-results/**',
-  // Antigravity mirrors both transcripts into 100 KiB chunks under
-  // `…/logs/chunks/transcript{,_full}/NNNNNNNN.jsonl`. They are `.jsonl`, they
-  // are rewritten on every append, and they carry nothing the top-level
-  // transcript does not — the top-level file is byte-exactly their
-  // concatenation — so a busy conversation would otherwise fire an event per
-  // chunk per step.
-  //
-  // A RegExp rather than a glob string on purpose: chokidar 4 matches a string
-  // matcher by equality, not as a pattern (`createPattern` in its index.js), so
-  // the `**/…` entries around this one never match anything. Regexes and
-  // functions are the two forms it still evaluates, and it normalizes paths to
-  // forward slashes before testing, which is why this needs no `\\` branch.
-  /\/logs\/chunks\//,
-  '**/*.tmp',
-  '**/*.swp',
-  '**/.DS_Store',
-];
+/**
+ * What the watcher never descends into or reports. These used to be glob
+ * strings, which chokidar v4 no longer understands: it takes a path, a RegExp
+ * or a function, so the globs matched nothing and every file under every
+ * provider root was watched and, with polling, stat()ed every interval (#1156).
+ */
+const IGNORED_DIRECTORY_NAMES = new Set([
+  'node_modules',
+  '.git',
+  'dist',
+  'build',
+  // Claude writes a subagent's transcript and large tool outputs here. The
+  // synchronizer skips them already (#880); ignoring them here keeps the
+  // watcher from walking them at all.
+  'subagents',
+  'tool-results',
+]);
+const IGNORED_FILE_NAMES = new Set(['.DS_Store']);
+const IGNORED_FILE_SUFFIXES = ['.tmp', '.swp'];
+
+/**
+ * Builds chokidar's `ignored` matcher for one watch root.
+ *
+ * Only the part of the path below `rootPath` is checked, so a home directory
+ * that happens to sit under `/build` or `/dist` cannot hide a whole provider.
+ *
+ * Exported for the providers module's tests, which run it against chokidar on
+ * a real directory tree.
+ */
+export function createWatcherIgnoredMatcher(rootPath: string): (filePath: string) => boolean {
+  return (filePath: string) => {
+    const relativePath = path.relative(rootPath, filePath);
+    // Outside the root is `..` as a whole component, or an absolute result
+    // (another drive on Windows). A child called `..archive` is still inside.
+    const isOutsideRoot = relativePath === '..'
+      || relativePath.startsWith(`..${path.sep}`)
+      || path.isAbsolute(relativePath);
+    if (!relativePath || isOutsideRoot) {
+      return false;
+    }
+
+    const segments = relativePath.split(path.sep);
+    const baseName = segments[segments.length - 1];
+    if (IGNORED_FILE_NAMES.has(baseName) || IGNORED_FILE_SUFFIXES.some((suffix) => baseName.endsWith(suffix))) {
+      return true;
+    }
+
+    // Antigravity mirrors both transcripts into 100 KiB chunks under
+    // `…/logs/chunks/transcript{,_full}/NNNNNNNN.jsonl`. They are `.jsonl`, they
+    // are rewritten on every append, and they carry nothing the top-level
+    // transcript does not — the top-level file is byte-exactly their
+    // concatenation — so a busy conversation would otherwise fire an event per
+    // chunk per step.
+    return segments.some((segment, index) => (
+      IGNORED_DIRECTORY_NAMES.has(segment) || (segment === 'logs' && segments[index + 1] === 'chunks')
+    ));
+  };
+}
 
 const PROJECTS_UPDATE_DEBOUNCE_MS = 500;
 const PROJECTS_UPDATE_MAX_WAIT_MS = 2_000;
@@ -301,11 +334,15 @@ export async function initializeSessionsWatcher(): Promise<void> {
       }
 
       const watcher = chokidar.watch(rootPath, {
-        ignored: WATCHER_IGNORED_PATTERNS,
+        ignored: createWatcherIgnoredMatcher(rootPath),
         persistent: true,
         ignoreInitial: true,
         followSymlinks: false,
         depth: 6,
+        // Polling reaches filesystems that native events cannot: WSL's /mnt/c,
+        // network shares, some container mounts. Where native events do work,
+        // chokidar's own CHOKIDAR_USEPOLLING=false overrides this and a finished
+        // turn reaches the sidebar at once instead of up to 6 s later.
         usePolling: true,
         interval: 6_000,
         binaryInterval: 6_000,

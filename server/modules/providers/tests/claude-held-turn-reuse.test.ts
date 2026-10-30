@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
-import type { AnyRecord, ProviderModelsDefinition } from '@/shared/types.js';
+import type { AnyRecord, ProviderModelsDefinition, ProviderRuntimeContext } from '@/shared/types.js';
 
 // Everything below is imported dynamically inside the test, after the module
 // mocks are installed: the websocket and database barrels transitively pull in
@@ -130,14 +130,14 @@ function createFakeQuery({ prompt, options }: { prompt: AsyncIterable<AnyRecord>
 
 const backgroundNotifications: AnyRecord[] = [];
 
-function createContext(models: ProviderModelsDefinition = MODELS): AnyRecord {
+function createContext(models: ProviderModelsDefinition = MODELS): ProviderRuntimeContext {
   return {
-    resolveProviderSessionId: () => undefined,
+    resolveProviderSessionId: () => null,
     resolveResumeModel: async (_sessionId: string | undefined, model: string | undefined) => model,
     getProviderModels: async () => models,
-    normalizeMessage: (message: AnyRecord, sessionId: string) =>
-      (message.type === 'assistant'
-        ? [{ kind: 'text', role: 'assistant', provider: 'claude', sessionId, content: 'reply' }]
+    normalizeMessage: (message, sessionId) =>
+      ((message as AnyRecord).type === 'assistant'
+        ? [{ kind: 'text', role: 'assistant', provider: 'claude', sessionId, content: 'reply' }] as never
         : []),
     isProviderInstalled: async () => true,
   };

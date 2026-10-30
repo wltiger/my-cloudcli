@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
-import type { AnyRecord, ProviderModelsDefinition } from '@/shared/types.js';
+import type { AnyRecord, ProviderModelsDefinition, ProviderRuntimeContext } from '@/shared/types.js';
 
 // Integration cover for the three mechanisms that have to agree before a
 // subagent investigation can outlive the turn that started it:
@@ -146,17 +146,18 @@ function createFakeQuery({ prompt, options }: { prompt: AsyncIterable<AnyRecord>
 
 const backgroundNotifications: AnyRecord[] = [];
 
-function createContext(): AnyRecord {
+function createContext(): ProviderRuntimeContext {
   return {
-    resolveProviderSessionId: () => undefined,
+    resolveProviderSessionId: () => null,
     resolveResumeModel: async (_sessionId: string | undefined, model: string | undefined) => model,
     getProviderModels: async () => MODELS,
-    normalizeMessage: (message: AnyRecord, sessionId: string) => {
+    normalizeMessage: (rawMessage, sessionId) => {
+      const message = rawMessage as AnyRecord;
       if (message.type === 'assistant') {
-        return [{ kind: 'text', role: 'assistant', provider: 'claude', sessionId, content: 'reply' }];
+        return [{ kind: 'text', role: 'assistant', provider: 'claude', sessionId, content: 'reply' }] as never;
       }
       if (message.type === 'system' && message.subtype === 'task_progress') {
-        return [{ kind: 'status', text: 'task_progress', provider: 'claude', sessionId }];
+        return [{ kind: 'status', text: 'task_progress', provider: 'claude', sessionId }] as never;
       }
       return [];
     },

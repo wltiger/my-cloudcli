@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
-import type { AnyRecord, ProviderModelsDefinition } from '@/shared/types.js';
+import type { AnyRecord, ProviderModelsDefinition, ProviderRuntimeContext } from '@/shared/types.js';
 
 // The runtime is imported dynamically inside the test, after the module mocks
 // are installed: a static import here would cache the real Claude Agent SDK
@@ -173,9 +173,9 @@ function createFakeQuery({ prompt, options }: { prompt: AsyncIterable<AnyRecord>
   return instance;
 }
 
-function createContext(models: ProviderModelsDefinition = MODELS): AnyRecord {
+function createContext(models: ProviderModelsDefinition = MODELS): ProviderRuntimeContext {
   return {
-    resolveProviderSessionId: () => undefined,
+    resolveProviderSessionId: () => null,
     resolveResumeModel: async (_sessionId: string | undefined, model: string | undefined) => model,
     getProviderModels: async () => models,
     normalizeMessage: () => [],

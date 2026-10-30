@@ -6,7 +6,7 @@ import {
   queryClaudeSDK,
   startsBackgroundWork,
 } from '@/modules/providers/list/claude/claude-runtime.provider.js';
-import type { AnyRecord, ProviderModelsDefinition } from '@/shared/types.js';
+import type { AnyRecord, ProviderModelsDefinition, ProviderRuntimeContext } from '@/shared/types.js';
 
 // Only turns that start work outliving the turn hold their CLI process open. A
 // turn scored `false` here has its stdin released the moment `result` arrives,
@@ -339,10 +339,10 @@ function createFakeQuery({ prompt, options }: { prompt: AsyncIterable<AnyRecord>
   return instance;
 }
 
-function createContext(): AnyRecord {
+function createContext(): ProviderRuntimeContext {
   return {
-    createQuery: createFakeQuery,
-    resolveProviderSessionId: () => undefined,
+    createQuery: createFakeQuery as ProviderRuntimeContext['createQuery'],
+    resolveProviderSessionId: () => null,
     resolveResumeModel: async (_sessionId: string | undefined, model: string | undefined) => model,
     getProviderModels: async () => MODELS,
     normalizeMessage: () => [],

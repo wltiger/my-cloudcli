@@ -56,7 +56,7 @@ let queuedMessages: Record<string, any>[] = [];
 
 const createFakeContext = (
   modelsDefinition: ProviderModelsDefinition,
-  resolveProviderSessionId: (sessionId?: string) => string | undefined = () => undefined,
+  resolveProviderSessionId: (sessionId?: string) => string | null = () => null,
 ) => ({
   resolveProviderSessionId,
   resolveResumeModel: async (_sessionId: string | undefined, model: string | undefined) => model,
