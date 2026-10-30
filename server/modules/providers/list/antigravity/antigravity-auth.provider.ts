@@ -2,18 +2,13 @@ import { readFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 
-import crossSpawn from 'cross-spawn';
-
 import {
   readFreshAntigravityModelIds,
   refreshAntigravityModelIds,
 } from '@/modules/providers/list/antigravity/antigravity-models.provider.js';
 import type { IProviderAuth } from '@/shared/interfaces.js';
 import type { CliVersionProbe, ProviderAuthStatus } from '@/shared/types.js';
-
-// cross-spawn resolves .cmd shims/PATHEXT on Windows and delegates to
-// child_process.spawn everywhere else.
-const spawnFunction = crossSpawn;
+import { probeCliVersion } from '@/shared/utils.js';
 
 /** `agy` keeps its own state under `~/.gemini/antigravity-cli/`, next to the Gemini CLI's. */
 const AGY_APP_DATA_DIR = path.join(os.homedir(), '.gemini', 'antigravity-cli');
@@ -49,34 +44,6 @@ const AGY_CLI_NOT_INSTALLED = 'Antigravity CLI is not installed';
 // inside the interactive CLI — so every signed-out message has to say where to
 // go instead of promising a button.
 export const AGY_NOT_SIGNED_IN = 'Not signed in. Run `agy` in a terminal and sign in there.';
-
-/**
- * Reads `agy --version`, returning the raw stdout.
- *
- * `null` means the CLI is not reachable. An empty string means it ran and
- * printed nothing parseable, which is still "installed" — the same
- * probe-and-fall-back shape the other four providers use.
- */
-const readAgyVersionOutput = (): string | null => {
-  try {
-    const result = spawnFunction.sync('agy', ['--version'], {
-      stdio: ['ignore', 'pipe', 'ignore'],
-      timeout: 5000,
-      encoding: 'utf8',
-    });
-    if (result.error || result.status !== 0) {
-      return null;
-    }
-    return typeof result.stdout === 'string' ? result.stdout : '';
-  } catch {
-    return null;
-  }
-};
-
-const parseAgyVersion = (rawVersion: string): string | null => {
-  const match = /(\d+)\.(\d+)\.(\d+)/.exec(rawVersion);
-  return match ? `${match[1]}.${match[2]}.${match[3]}` : null;
-};
 
 /** Reads a small text file, returning null for anything unreadable. */
 const readTextFile = async (filePath: string): Promise<string | null> => {
@@ -188,11 +155,7 @@ const readAgySignInState = async (): Promise<{ signedIn: boolean; error: string 
 
 export class AntigravityProviderAuth implements IProviderAuth {
   checkInstalled(): CliVersionProbe {
-    const rawVersion = readAgyVersionOutput();
-    if (rawVersion === null) {
-      return { installed: false, exitCode: null, version: null };
-    }
-    return { installed: true, exitCode: 0, version: parseAgyVersion(rawVersion) };
+    return probeCliVersion('agy');
   }
 
   async getStatus(): Promise<ProviderAuthStatus> {

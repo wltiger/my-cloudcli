@@ -142,3 +142,15 @@ test('scripted spawn error reports not authenticated without crashing', { concur
   assert.equal(status.method, null);
   assert.ok(typeof status.error === 'string' && status.error.length > 0, 'must report a non-empty error message');
 });
+
+test('the version `agy --version` prints is reported as the installed version', { concurrency: false }, async (t) => {
+  script = { kind: 'ids', ids: ['gemini-3.8-flash-high'] };
+  const { auth, models } = await loadModules(t);
+  await models.refreshAntigravityModelIds();
+
+  const provider = new auth.AntigravityProviderAuth();
+
+  // `spawnMock.sync` answers every `--version` with `agy 1.2.8`.
+  assert.deepEqual(provider.checkInstalled(), { installed: true, exitCode: 0, version: '1.2.8' });
+  assert.equal((await provider.getStatus()).installedVersion, '1.2.8');
+});
