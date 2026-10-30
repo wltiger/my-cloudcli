@@ -15,7 +15,7 @@ const DEFAULT_CONTEXT_WINDOW_TOKENS = 160_000;
  * then the 160K default.
  *
  * Every read point goes through this one function — the runtime's live turn
- * budget (`claude-runtime.provider.js`), the token-usage aggregation
+ * budget (`claude-runtime.provider.ts`), the token-usage aggregation
  * (`provider-token-usage.service.ts`) and the session-history read
  * (`claude-sessions.provider.ts`) — so re-reading a session can never make the
  * number jump between the declared value and the server-level one.
@@ -47,7 +47,7 @@ export function resolveContextWindowTotal({
 
 /**
  * Declared window for the selected model, read out of a catalog the caller
- * already holds. Used by `claude-runtime.provider.js`, which loads the provider
+ * already holds. Used by `claude-runtime.provider.ts`, which loads the provider
  * catalog once per turn — the same lookup shape `resolveClaudeEffort` and
  * `resolveClaudeCustomModelEnv` use. Returns null for every built-in model and
  * every custom model that declares nothing.

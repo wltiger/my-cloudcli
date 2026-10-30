@@ -145,7 +145,7 @@ function describeToolRules(settings: HotTurnSettings): string {
  * spawned, so a follow-up that changed only what can be renegotiated in flight
  * can be recognised.
  *
- * Used by `claude-runtime.provider.js`: it stamps every run's fingerprint onto
+ * Used by `claude-runtime.provider.ts`: it stamps every run's fingerprint onto
  * the handle it parks, and compares the next turn's against it before pushing a
  * prompt into a process built for the previous turn's settings.
  *
@@ -200,7 +200,7 @@ export function buildTurnSettingsFingerprint(sdkOptions: AnyRecord = {}): string
  * True for a turn that re-runs the conversation from an earlier point — an Edit
  * of any message, not just the first.
  *
- * Used by `claude-runtime.provider.js` to refuse reuse outright rather than to
+ * Used by `claude-runtime.provider.ts` to refuse reuse outright rather than to
  * compare fingerprints: a live process is always positioned at the end of its
  * own transcript and cannot rewind in flight, so no held process is ever right
  * for such a turn — not even one whose own turn carried the same anchor.
@@ -212,7 +212,7 @@ export function carriesResumeAnchor(options: AnyRecord = {}): boolean {
 /**
  * Reads the hot-reloadable half of a turn's mapped SDK options.
  *
- * Used by `claude-runtime.provider.js` for both sides of the reuse decision:
+ * Used by `claude-runtime.provider.ts` for both sides of the reuse decision:
  * the run's own starting state, and what a follow-up turn asks the live process
  * to adopt.
  */
@@ -232,7 +232,7 @@ export function readHotTurnSettings(sdkOptions: AnyRecord = {}): HotTurnSettings
  * Builds the live settings a run's tool-use gate reads, starting from the
  * settings its query was constructed with.
  *
- * Used by `claude-runtime.provider.js`: one per run, read by `canUseTool` and
+ * Used by `claude-runtime.provider.ts`: one per run, read by `canUseTool` and
  * written only when a follow-up turn is accepted into the held process.
  */
 export function createLiveTurnSettings(initial: HotTurnSettings): LiveTurnSettings {
@@ -300,7 +300,7 @@ export function createLiveTurnSettings(initial: HotTurnSettings): LiveTurnSettin
 /**
  * Publishes a parked run as available for a compatible follow-up turn.
  *
- * Used by `claude-runtime.provider.js` from its `result` handler, every time a
+ * Used by `claude-runtime.provider.ts` from its `result` handler, every time a
  * turn ends with background work still outstanding and the process held open.
  */
 export function registerHeldTurn(sessionKey: string, handle: HeldTurnHandle | null): void {
@@ -314,7 +314,7 @@ export function registerHeldTurn(sessionKey: string, handle: HeldTurnHandle | nu
 /**
  * Drops a handle once its process is released; a no-op for a superseded one.
  *
- * Used by `claude-runtime.provider.js` from the single closer it hands to
+ * Used by `claude-runtime.provider.ts` from the single closer it hands to
  * `activeSessions`, so every way a run's stdin can close — an ordinary turn, an
  * abort, the idle ceiling, a superseding run — also unpublishes its handle.
  */
@@ -337,7 +337,7 @@ export function forgetHeldTurn(sessionKey: string, handle: HeldTurnHandle | null
 /**
  * Takes the session's held run when `fingerprint` matches its settings.
  *
- * Used by `claude-runtime.provider.js` at the head of every turn, before it
+ * Used by `claude-runtime.provider.ts` at the head of every turn, before it
  * would otherwise release the previous hold and build a query of its own.
  *
  * Claiming removes the handle so two follow-ups cannot both push into the same

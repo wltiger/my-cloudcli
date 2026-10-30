@@ -17,7 +17,7 @@ export type ClaudeCustomModelEnv = {
  * pattern the runtime already uses to resolve per-model effort. Returns null
  * when the model asks for nothing — every built-in model, and every custom
  * model with neither an endpoint nor a declared window — leaving the SDK's
- * environment untouched. Used by `claude-runtime.provider.js`.
+ * environment untouched. Used by `claude-runtime.provider.ts`.
  */
 export function resolveClaudeCustomModelEnv(
   model: string | undefined,

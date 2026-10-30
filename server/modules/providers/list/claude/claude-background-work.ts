@@ -25,7 +25,7 @@ type ClaudeBackgroundWorkSnapshot = {
 /**
  * Builds the background-work snapshot source for a single Claude run.
  *
- * Used by `claude-runtime.provider.js` as the third signal next to the task
+ * Used by `claude-runtime.provider.ts` as the third signal next to the task
  * tracker and `startsBackgroundWork`: one snapshot source per run, consulted
  * wherever that run decides between closing the CLI's stdin and holding it
  * open. Its unique job is the work neither of those can see — a cron set up in
