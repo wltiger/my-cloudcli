@@ -125,8 +125,8 @@ Size expectation, from measuring the four existing providers: **cursor totals 1,
 Interface: `IProviderRuntime` (`server/shared/interfaces.ts:31-40`) — `run(command, options, writer, context)`
 and `abort(sessionId)`; optional `permissions` gateway.
 No shared base class exists. Start from `cursor-runtime.provider.js` (387 lines — the thinnest spawn +
-stdout-stream implementation) and borrow abort/process-tree teardown from
-`opencode-runtime.provider.js` (`killOpenCodeProcessTree`, `:186`).
+stdout-stream implementation) and borrow abort/process-tree teardown from the old
+`opencode-runtime.provider.js` (`killOpenCodeProcessTree`, `:186`; deleted at v1.37.7, read it at commit `a18a4701`).
 
 ### Invocation
 
