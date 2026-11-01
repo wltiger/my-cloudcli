@@ -478,12 +478,16 @@ async function handleChatAbort(
     chatRunRegistry.setBackgroundWorkOutstanding(sessionId, false);
   }
 
-  // A no-op when only background work was outstanding: that turn's terminal
-  // `complete` was sent long ago, and a second one would be dropped anyway.
-  chatRunRegistry.completeRun(sessionId, {
-    exitCode: success ? 0 : 1,
-    aborted: true,
-  });
+  // Scoped to the run that was stopped: a stop can take a round trip, and a
+  // new run of the session may have started by the time it returns. Skipped
+  // when only background work was outstanding: that turn's terminal
+  // `complete` was sent long ago.
+  if (run) {
+    chatRunRegistry.completeRunIfCurrent(run, {
+      exitCode: success ? 0 : 1,
+      aborted: true,
+    });
+  }
 }
 
 /**
@@ -694,7 +698,7 @@ export async function runDetachedChatTurn(
     // run's own dispatch settles later through completeRunIfCurrent, which is
     // scoped to that run and cannot touch the one started here.
     const aborted = await dependencies.runtime.abort(activeRun.provider, input.sessionId);
-    chatRunRegistry.completeRun(input.sessionId, {
+    chatRunRegistry.completeRunIfCurrent(activeRun, {
       exitCode: aborted ? 0 : 1,
       aborted: true,
     });

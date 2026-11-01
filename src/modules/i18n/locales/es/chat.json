@@ -113,6 +113,12 @@
     "ruleUnknown": "Antigravity no informó de la acción completa, así que debe permitirse en el IDE de Antigravity.",
     "grantFailed": "No se pudo conceder el permiso."
   },
+  "agentPrompts": {
+    "needsInput": "{{agent}} necesita tu respuesta",
+    "dismiss": "Descartar",
+    "alwaysAllow": "Permitir siempre",
+    "alwaysAllowCovers": "«Permitir siempre» cubre"
+  },
   "permissions": {
     "grant": "Conceder permiso para {{tool}}",
     "added": "Permiso añadido",

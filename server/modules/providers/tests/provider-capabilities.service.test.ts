@@ -22,8 +22,9 @@ test('Codex withholds Compact support (ADR 0004)', () => {
   assert.equal(capabilities.supportsCompact, false);
 });
 
-test('OpenCode reports Compact support via the side channel (#21)', () => {
-  assert.equal(providerCapabilitiesService.getProviderCapabilities('opencode').supportsCompact, true);
+// Retired at the v1.37.7 sync along with OpenCode's old runtime, until its v2.
+test('OpenCode withholds Compact support since the v1.37.7 SDK runtime', () => {
+  assert.equal(providerCapabilitiesService.getProviderCapabilities('opencode').supportsCompact, false);
 });
 
 test('Cursor withholds Compact support for now', () => {
@@ -39,8 +40,8 @@ test('the full capability list carries supportsCompact for every provider', () =
 });
 
 // Seam: this is what the per-message Fork entry gates on. Codex must withhold
-// it per ADR 0008 (docs/adr/0008-no-codex-rewind-or-fork.md); OpenCode forks
-// through the same side channel Compact uses (#23).
+// it per ADR 0008 (docs/adr/0008-no-codex-rewind-or-fork.md); OpenCode's own
+// Fork was retired at the v1.37.7 sync, until its v2.
 test('Claude reports Fork support', () => {
   assert.equal(providerCapabilitiesService.getProviderCapabilities('claude').supportsFork, true);
 });
@@ -53,8 +54,8 @@ test('Cursor withholds Fork support for now', () => {
   assert.equal(providerCapabilitiesService.getProviderCapabilities('cursor').supportsFork, false);
 });
 
-test('OpenCode reports Fork support via the side channel (#23)', () => {
-  assert.equal(providerCapabilitiesService.getProviderCapabilities('opencode').supportsFork, true);
+test('OpenCode withholds Fork support since the v1.37.7 SDK runtime', () => {
+  assert.equal(providerCapabilitiesService.getProviderCapabilities('opencode').supportsFork, false);
 });
 
 test('the full capability list carries supportsFork for every provider', () => {
@@ -96,9 +97,10 @@ test('the full capability list carries supportsClear for every provider', () => 
 // provider, never offered as a choice. It is a flag of its own rather than an
 // assumption folded into supportsMessageEditing, because the notice above the
 // composer has to say which of the two it is before the reader commits.
-test('only OpenCode rolls files back when a message is edited', () => {
-  assert.equal(providerCapabilitiesService.getProviderCapabilities('opencode').rewindRestoresFiles, true);
-  assert.equal(providerCapabilitiesService.getProviderCapabilities('claude').rewindRestoresFiles, false);
+test('no provider rolls files back when a message is edited', () => {
+  for (const capability of providerCapabilitiesService.listAllProviderCapabilities()) {
+    assert.equal(capability.rewindRestoresFiles, false, capability.provider);
+  }
 });
 
 // Antigravity is the fifth provider, and every count above is hardcoded on

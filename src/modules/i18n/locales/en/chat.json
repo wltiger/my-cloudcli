@@ -121,6 +121,12 @@
     "ruleUnknown": "Antigravity did not report the whole action, so it has to be allowed in the Antigravity IDE.",
     "grantFailed": "The permission could not be granted."
   },
+  "agentPrompts": {
+    "needsInput": "{{agent}} needs your input",
+    "dismiss": "Dismiss",
+    "alwaysAllow": "Always allow",
+    "alwaysAllowCovers": "Always allow covers"
+  },
   "permissions": {
     "grant": "Grant permission for {{tool}}",
     "added": "Permission added",

@@ -17,11 +17,21 @@ const NO_QUESTIONS: Question[] = [];
 const OTHER_FIELD_MAX_HEIGHT_PX = 120;
 
 /**
+ * Whether a request wants its answers as one list of picked labels per
+ * question (OpenCode's question tool) instead of Claude's answer strings keyed
+ * by question text. Such a request is also dismissed rather than skipped.
+ */
+const wantsLabelLists = (context: unknown): boolean =>
+  Boolean(context && typeof context === 'object'
+    && (context as Record<string, unknown>).answerFormat === 'label-lists');
+
+/**
  * Registered by chat's PermissionRequestsBanner as the permission panel for
  * AskUserQuestion requests, so the user answers the model's questions inline.
  */
 export const AskUserQuestionPanel: React.FC<PermissionPanelProps> = ({
   request,
+  agentLabel,
   onDecision,
   sessionTitle,
 }) => {
@@ -32,6 +42,7 @@ export const AskUserQuestionPanel: React.FC<PermissionPanelProps> = ({
   // larger set — it has the room, and every inline level stays below it so
   // inline can never end up bigger than fullscreen.
   const fontClasses = useChatFontClasses();
+  const answersAsLabelLists = wantsLabelLists(request.context);
 
   const [currentStep, setCurrentStep] = useState(0);
   const [selections, setSelections] = useState<Map<number, Set<string>>>(() => new Map());
@@ -117,17 +128,36 @@ export const AskUserQuestionPanel: React.FC<PermissionPanelProps> = ({
     return answers;
   }, [questions, selections, otherActive, otherTexts]);
 
+  // Picked labels in option order, then the typed answer, for each question.
+  const buildLabelLists = useCallback(() => questions.map((q, idx) => {
+    const selected = selections.get(idx) || new Set<string>();
+    const labels = q.options.map((option) => option.label).filter((label) => selected.has(label));
+    const otherText = (otherTexts.get(idx) || '').trim();
+    if (q.custom !== false && otherActive.get(idx) && otherText) labels.push(otherText);
+    return labels;
+  }), [questions, selections, otherActive, otherTexts]);
+
   // Answering ends the panel's job, so drop out of fullscreen to reveal the
   // chat stream (and whatever the agent replies next).
   const handleSubmit = useCallback(() => {
     setIsFullscreen(false);
+    if (answersAsLabelLists) {
+      onDecision(request.requestId, { allow: true, updatedInput: { answers: buildLabelLists() } });
+      return;
+    }
     onDecision(request.requestId, { allow: true, updatedInput: { ...input, answers: buildAnswers() } });
-  }, [onDecision, request.requestId, input, buildAnswers]);
+  }, [onDecision, request.requestId, input, buildAnswers, buildLabelLists, answersAsLabelLists]);
 
+  // Claude carries on without answers; a dismissed OpenCode question is
+  // rejected, which ends that turn as OpenCode's own Dismiss does.
   const handleSkip = useCallback(() => {
     setIsFullscreen(false);
+    if (answersAsLabelLists) {
+      onDecision(request.requestId, { allow: false });
+      return;
+    }
     onDecision(request.requestId, { allow: true, updatedInput: { ...input, answers: {} } });
-  }, [onDecision, request.requestId, input]);
+  }, [onDecision, request.requestId, input, answersAsLabelLists]);
 
   // Keyboard handler for number keys and navigation
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
@@ -148,7 +178,7 @@ export const AskUserQuestionPanel: React.FC<PermissionPanelProps> = ({
     }
 
     // 0 for "Other"
-    if (e.key === '0') {
+    if (e.key === '0' && q.custom !== false) {
       e.preventDefault();
       toggleOther(currentStep, multi);
       return;
@@ -201,7 +231,9 @@ export const AskUserQuestionPanel: React.FC<PermissionPanelProps> = ({
           isFullscreen ? 'text-[13px]' : 'text-[11px]'
         }`}
       >
-        {isSingle ? t('chat:misc.skipOne') : t('chat:misc.skipAll')}
+        {answersAsLabelLists
+          ? t('chat:agentPrompts.dismiss', { defaultValue: 'Dismiss' })
+          : isSingle ? t('chat:misc.skipOne') : t('chat:misc.skipAll')}
         <span className="ml-1 text-[9px] text-gray-300 dark:text-gray-600">Esc</span>
       </button>
 
@@ -277,7 +309,10 @@ export const AskUserQuestionPanel: React.FC<PermissionPanelProps> = ({
 
             <div className="flex min-w-0 flex-1 items-center gap-2">
               <span className="text-[10px] font-medium uppercase tracking-wide text-gray-400 dark:text-gray-500">
-                Claude needs your input
+                {t('chat:agentPrompts.needsInput', {
+                  agent: agentLabel || 'Claude',
+                  defaultValue: '{{agent}} needs your input',
+                })}
               </span>
               {q.header && (
                 <span className="inline-flex items-center rounded border border-blue-100 bg-blue-50 px-1.5 py-px text-[9px] font-semibold uppercase tracking-wider text-blue-600 dark:border-blue-800/50 dark:bg-blue-900/30 dark:text-blue-400">
@@ -393,45 +428,47 @@ export const AskUserQuestionPanel: React.FC<PermissionPanelProps> = ({
               );
             })}
 
-            {/* "Other" option */}
-            <button
-              type="button"
-              onClick={() => toggleOther(currentStep, multi)}
-              className={`group flex w-full items-center gap-2.5 rounded-lg border px-3 py-2 text-left transition-all duration-150 ${
-                isOtherOn
-                  ? 'border-blue-300 bg-blue-50/80 ring-1 ring-blue-200/50 dark:border-blue-600 dark:bg-blue-900/25 dark:ring-blue-700/30'
-                  : 'border-dashed border-gray-200 hover:border-gray-300 hover:bg-gray-50/60 dark:border-gray-700/60 dark:hover:border-gray-600 dark:hover:bg-gray-700/40'
-              }`}
-            >
-              <kbd className={`flex h-5 w-5 flex-shrink-0 items-center justify-center rounded font-mono text-[10px] transition-all duration-150 ${
-                isOtherOn
-                  ? 'bg-blue-500 font-semibold text-white dark:bg-blue-500'
-                  : 'border border-gray-200 bg-gray-100 text-gray-400 group-hover:border-gray-300 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-500 dark:group-hover:border-gray-600'
-              }`}>
-                0
-              </kbd>
-              <span className={`leading-tight transition-colors ${
-                isFullscreen ? 'text-[18px]' : 'text-[13px]'
-              } ${
-                isOtherOn
-                  ? 'font-medium text-gray-900 dark:text-gray-100'
-                  : 'text-gray-500 dark:text-gray-400'
-              }`}>
-                Other...
-              </span>
-              {isOtherOn && (
-                <svg className="ml-auto h-4 w-4 flex-shrink-0 text-blue-500 dark:text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2.5}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
-                </svg>
-              )}
-            </button>
+            {/* "Other" option, unless the question offers its options only */}
+            {q.custom !== false && (
+              <button
+                type="button"
+                onClick={() => toggleOther(currentStep, multi)}
+                className={`group flex w-full items-center gap-2.5 rounded-lg border px-3 py-2 text-left transition-all duration-150 ${
+                  isOtherOn
+                    ? 'border-blue-300 bg-blue-50/80 ring-1 ring-blue-200/50 dark:border-blue-600 dark:bg-blue-900/25 dark:ring-blue-700/30'
+                    : 'border-dashed border-gray-200 hover:border-gray-300 hover:bg-gray-50/60 dark:border-gray-700/60 dark:hover:border-gray-600 dark:hover:bg-gray-700/40'
+                }`}
+              >
+                <kbd className={`flex h-5 w-5 flex-shrink-0 items-center justify-center rounded font-mono text-[10px] transition-all duration-150 ${
+                  isOtherOn
+                    ? 'bg-blue-500 font-semibold text-white dark:bg-blue-500'
+                    : 'border border-gray-200 bg-gray-100 text-gray-400 group-hover:border-gray-300 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-500 dark:group-hover:border-gray-600'
+                }`}>
+                  0
+                </kbd>
+                <span className={`leading-tight transition-colors ${
+                  isFullscreen ? 'text-[18px]' : 'text-[13px]'
+                } ${
+                  isOtherOn
+                    ? 'font-medium text-gray-900 dark:text-gray-100'
+                    : 'text-gray-500 dark:text-gray-400'
+                }`}>
+                  Other...
+                </span>
+                {isOtherOn && (
+                  <svg className="ml-auto h-4 w-4 flex-shrink-0 text-blue-500 dark:text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2.5}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
+                  </svg>
+                )}
+              </button>
+            )}
 
             {/* Other text field — inline, multi-line. Grows with the answer
                 (fitOtherField) and scrolls past the cap. No hint chip over
                 the text: it used to cover the tail of a long single-line
                 entry, and with a multi-line field Enter is no longer the
                 submit key anyway. */}
-            {isOtherOn && (
+            {q.custom !== false && isOtherOn && (
               <div className="pl-[30px] pr-0.5">
                 <textarea
                   ref={otherInputRef}
@@ -473,7 +510,10 @@ export const AskUserQuestionPanel: React.FC<PermissionPanelProps> = ({
     <FullscreenSurface
       open
       onClose={() => setIsFullscreen(false)}
-      title={sessionTitle || 'Claude needs your input'}
+      title={sessionTitle || t('chat:agentPrompts.needsInput', {
+        agent: agentLabel || 'Claude',
+        defaultValue: '{{agent}} needs your input',
+      })}
       closeLabel="Exit fullscreen"
       footer={footer}
     >

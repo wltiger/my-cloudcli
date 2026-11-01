@@ -323,6 +323,7 @@ export default function ChatComposer({
         <div className={`mx-auto mb-3 ${widthClasses.column}`}>
           <PermissionRequestsBanner
             pendingPermissionRequests={pendingPermissionRequests}
+            providerLabel={providerLabel}
             handlePermissionDecision={handlePermissionDecision}
             handleGrantToolPermission={handleGrantToolPermission}
             sessionTitle={sessionTitle}

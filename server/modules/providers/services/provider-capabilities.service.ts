@@ -60,17 +60,16 @@ type ProviderCapabilities = {
 /**
  * The capability matrix mirrors what each runtime actually implements today:
  * - permission modes match the option sets accepted by each CLI/SDK.
- * - only the Claude SDK integration surfaces interactive permission requests.
+ * - the Claude and OpenCode SDK integrations surface interactive permission
+ *   requests (and the agent's questions); Cursor and Codex run without them.
  * - Cursor has no token usage endpoint support (its store.db has no usage rows).
- * - Claude and OpenCode support Compact; see ADR 0004 for why Codex does not,
- *   and issue #21 for OpenCode's side-channel implementation. Cursor is
- *   unsupported — not investigated.
- * - Claude and OpenCode support Fork; see ADR 0008 for why Codex never will,
- *   and issue #23 for OpenCode's own, which forks through the same side channel
- *   Compact uses. Cursor is unsupported — not investigated.
- * - Only OpenCode's edit restores tracked files with the conversation, because
- *   a revert is the only shape its API has; Claude's `resumeSessionAt` and
- *   Codex's `thread/fork` leave the working tree alone.
+ * - Claude supports Compact; see ADR 0004 for why Codex does not. OpenCode's
+ *   Compact, Fork and Edit were retired at the v1.37.7 sync (upstream's SDK
+ *   runtime replaced the runtime they were built on) until its v2 rework.
+ *   Cursor is unsupported — not investigated.
+ * - Claude supports Fork; see ADR 0008 for why Codex never will.
+ * - No provider's edit restores tracked files today: Claude's
+ *   `resumeSessionAt` and Codex's `thread/fork` leave the working tree alone.
  * - Clear reaches no provider API at all (ADR 0005), so the flag records which
  *   providers it was verified on — Claude and OpenCode (#24) — rather than what
  *   a runtime can do. Codex and Cursor are simply unverified.
@@ -143,33 +142,27 @@ const PROVIDER_CAPABILITIES: Record<LLMProvider, ProviderCapabilities> = {
   },
   opencode: {
     provider: 'opencode',
-    // Mapped by the runtime onto OpenCode's controls: `--agent plan` (plan),
-    // `--auto` (bypassPermissions) and the OPENCODE_PERMISSION env var
-    // (acceptEdits). See resolveOpenCodePermissionOptions in the OpenCode runtime adapter.
+    // Mapped by the runtime onto OpenCode's controls: the `plan` agent (plan),
+    // and its answers to OpenCode's permission requests — every request
+    // approved once (bypassPermissions), file edits approved once
+    // (acceptEdits), or the chat asked (default). See
+    // resolveAutomaticPermissionReply in the OpenCode runtime adapter.
     permissionModes: ['default', 'acceptEdits', 'bypassPermissions', 'plan'],
     defaultPermissionMode: 'default',
     supportsImages: true,
     supportsFiles: true,
     supportsAbort: true,
-    supportsPermissionRequests: false,
+    supportsPermissionRequests: true,
     supportsTokenUsage: true,
     supportsEffort: true,
-    // Passed on as OpenCode's `--variant`. `thinking` (MiniMax's on/off
+    // Passed on as OpenCode's model `variant`. `thinking` (MiniMax's on/off
     // variant, paired with `none`) is not a strength, so it sorts last.
     effortLevels: ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'thinking'],
-    supportsCompact: true,
-    supportsFork: true,
+    supportsCompact: false,
+    supportsFork: false,
     supportsClear: true,
-    rewindRestoresFiles: true,
-    // True by a different mechanism, and this flag must not be read as the one
-    // Claude's entry describes: OpenCode cannot resume a transcript partway at
-    // all. Editing a message rewinds the conversation on OpenCode's own side
-    // first (`POST /session/{id}/revert`) and the run that follows is an
-    // ordinary resume — different internally, the same outcome for the reader.
-    // Unlike the other two, that rewind also restores tracked files —
-    // `rewindRestoresFiles` above is what the notice over the composer reads to
-    // say so before the reader sends.
-    supportsMessageEditing: true,
+    rewindRestoresFiles: false,
+    supportsMessageEditing: false,
     supportsSessionForking: false,
   },
   antigravity: {

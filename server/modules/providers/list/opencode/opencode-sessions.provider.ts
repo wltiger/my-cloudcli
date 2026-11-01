@@ -2,7 +2,6 @@ import fsSync from 'node:fs';
 
 import Database from 'better-sqlite3';
 
-import { sessionsDb } from '@/modules/database/index.js';
 import { isOpenCodeSessionActive } from '@/modules/providers/list/opencode/opencode-runtime.provider.js';
 import { parseFilesInputTag, parseImagesInputTag } from '@/shared/image-attachments.js';
 import type { IProviderSessions } from '@/shared/interfaces.js';
@@ -10,13 +9,11 @@ import type {
   AnyRecord,
   FetchHistoryOptions,
   FetchHistoryResult,
-  ForkSessionOptions,
   NormalizedMessage,
   SubagentActivity,
   SubagentInfo,
 } from '@/shared/types.js';
 import {
-  AppError,
   createNormalizedMessage,
   generateMessageId,
   getOpenCodeDatabasePath,
@@ -28,10 +25,6 @@ import {
   truncateSubagentActivity,
   unwrapJsonStringLiteral,
 } from '@/shared/utils.js';
-
-import { buildOpenCodeAnchorIndex, readOpenCodeMessageIndex } from './opencode-anchors.js';
-import { buildOpenCodeRewindAnchorIndex, filterOpenCodeRevertedRows } from './opencode-rewind.js';
-import { forkOpenCodeSession, revertOpenCodeSession } from './opencode-serve.js';
 
 const PROVIDER = 'opencode';
 
@@ -65,80 +58,6 @@ const openOpenCodeDatabase = (): Database.Database | null => {
   }
 
   return new Database(dbPath, { readonly: true, fileMustExist: true });
-};
-
-/**
- * The message id this session was reverted at, or null when it is not
- * reverted.
- *
- * An edit on OpenCode is a server-side revert, and OpenCode records it as one
- * column on the session row rather than by removing anything: every message it
- * reverted stays in `message`/`part` and its own read API still returns them
- * all (measured against 1.18.18). The column holds `{messageID, snapshot,
- * diff}`. A database whose `session` table has no such column reverts nothing,
- * so the read is guarded the same way the token counters are.
- */
-const readOpenCodeRevertedMessageId = (
-  db: Database.Database,
-  sessionId: string,
-): string | null => {
-  const columns = db.prepare('PRAGMA table_info(session)').all() as { name: string }[];
-  if (!columns.some((column) => column.name === 'revert')) {
-    return null;
-  }
-  const row = db.prepare('SELECT revert FROM session WHERE id = ?').get(sessionId) as
-    | { revert: string | null }
-    | undefined;
-  return readOptionalString(readJsonRecord(row?.revert)?.messageID) ?? null;
-};
-
-/**
- * Every message of one session with its parts, in the order the Anchor rules
- * and the revert filter are written to read them.
- */
-const OPENCODE_HISTORY_ROWS_SQL = `
-  SELECT
-    m.id AS message_id,
-    m.time_created AS message_time_created,
-    m.data AS message_data,
-    p.id AS part_id,
-    p.time_created AS part_time_created,
-    p.data AS part_data
-  FROM message m
-  LEFT JOIN part p
-    ON p.session_id = m.session_id
-   AND p.message_id = m.id
-  WHERE m.session_id = ?
-  ORDER BY
-    COALESCE(m.time_created, 0),
-    m.id,
-    COALESCE(p.time_created, 0),
-    p.id
-`;
-
-/**
- * The rows of one session as the conversation currently stands, on a database
- * handle of this call's own.
- *
- * `fetchHistory` opens its own instead, because it needs the same connection
- * for the token totals afterwards. What the edit path needs is only the rows —
- * and it needs them past the same revert filter, so an Anchor resolves against
- * exactly the conversation whose message controls the reader pressed.
- */
-const readOpenCodeActiveRows = (providerSessionId: string): OpenCodeHistoryRow[] => {
-  const db = openOpenCodeDatabase();
-  if (!db) {
-    return [];
-  }
-
-  try {
-    return filterOpenCodeRevertedRows(
-      db.prepare(OPENCODE_HISTORY_ROWS_SQL).all(providerSessionId) as OpenCodeHistoryRow[],
-      readOpenCodeRevertedMessageId(db, providerSessionId),
-    );
-  } finally {
-    db.close();
-  }
 };
 
 const formatToolContent = (value: unknown): string => {
@@ -206,6 +125,57 @@ const isUserTextEcho = (raw: AnyRecord): boolean => {
     || hasUserRole(raw.message)
     || hasUserRole(raw.part);
 };
+
+/** OpenCode's ask-the-user tool. */
+const QUESTION_TOOL_NAME = 'question';
+
+/**
+ * Rewrites a `question` call onto the AskUserQuestion card the chat already
+ * renders for Claude's and Codex's questions: OpenCode's `multiple` becomes
+ * `multiSelect`, and the labels the user picked, which OpenCode keeps in
+ * `metadata.answers` as one list per question, are folded into the input
+ * keyed by question text, the shape the card reads.
+ */
+const toAskUserQuestionCall = (toolMessage: NormalizedMessage, toolState: AnyRecord): void => {
+  const input = readObjectRecord(toolState.input) ?? readObjectRecord(toolMessage.toolInput);
+  if (!input || !Array.isArray(input.questions)) {
+    return;
+  }
+
+  const answerLists = readObjectRecord(toolState.metadata)?.answers;
+  const answers: Record<string, string> = {};
+  const questions = input.questions.map((entry: unknown, index: number) => {
+    const question = readObjectRecord(entry);
+    if (!question) {
+      return entry;
+    }
+
+    const text = readOptionalString(question.question);
+    const picked = Array.isArray(answerLists) && Array.isArray(answerLists[index])
+      ? (answerLists[index] as unknown[]).filter((label): label is string => typeof label === 'string' && label.trim().length > 0)
+      : [];
+    if (text && picked.length > 0) {
+      answers[text] = picked.join(', ');
+    }
+
+    const { multiple, ...rest } = question;
+    return { ...rest, multiSelect: multiple === true };
+  });
+
+  toolMessage.toolName = 'AskUserQuestion';
+  toolMessage.toolInput = Object.keys(answers).length > 0
+    ? { ...input, questions, answers }
+    : { ...input, questions };
+};
+
+/**
+ * Whether an assistant message's error only records that its turn was stopped.
+ * Stopping a turn aborts the OpenCode session, which stores this error on the
+ * message it interrupted; the live chat never shows it as a failure, so the
+ * history does not either.
+ */
+const isStoppedTurnError = (error: unknown): boolean =>
+  readOptionalString(readObjectRecord(error)?.name) === 'MessageAbortedError';
 
 const buildTokenUsage = (totals: OpenCodeTokenTotals | undefined): AnyRecord | undefined => {
   if (!totals) {
@@ -462,7 +432,10 @@ const openOpenCodeDatabaseForLiveEvent = (): Database.Database | null => {
 
 export class OpenCodeSessionsProvider implements IProviderSessions {
   /**
-   * Normalizes live `opencode run --format json` events into frontend messages.
+   * Normalizes live OpenCode events into frontend messages. The OpenCode
+   * runtime forwards each finished part in the shape `opencode run --format json`
+   * printed (`{ type, timestamp, sessionID, part }`), so sessions recorded
+   * before the SDK runtime and live turns go through the same mapping.
    */
   normalizeMessage(rawMessage: unknown, sessionId: string | null): NormalizedMessage[] {
     const raw = readObjectRecord(rawMessage);
@@ -562,9 +535,13 @@ export class OpenCodeSessionsProvider implements IProviderSessions {
         };
       }
 
+      if (toolName === QUESTION_TOOL_NAME) {
+        toAskUserQuestionCall(toolMessage, toolState);
+      }
+
       if (toolName === SUBAGENT_TOOL_NAME) {
-        // `opencode run` reports a task only once it has finished, so its
-        // child session is complete in the database by now.
+        // A task is forwarded only once it has finished, so its child session
+        // is complete in the database by now.
         const db = openOpenCodeDatabaseForLiveEvent();
         try {
           attachOpenCodeSubagent(toolMessage, toolState, db, true);
@@ -617,16 +594,27 @@ export class OpenCodeSessionsProvider implements IProviderSessions {
     }
 
     try {
-      const rows = db.prepare(OPENCODE_HISTORY_ROWS_SQL).all(providerSessionId) as OpenCodeHistoryRow[];
+      const rows = db.prepare(`
+        SELECT
+          m.id AS message_id,
+          m.time_created AS message_time_created,
+          m.data AS message_data,
+          p.id AS part_id,
+          p.time_created AS part_time_created,
+          p.data AS part_data
+        FROM message m
+        LEFT JOIN part p
+          ON p.session_id = m.session_id
+         AND p.message_id = m.id
+        WHERE m.session_id = ?
+        ORDER BY
+          COALESCE(m.time_created, 0),
+          m.id,
+          COALESCE(p.time_created, 0),
+          p.id
+      `).all(providerSessionId) as OpenCodeHistoryRow[];
 
-      // An edit leaves everything it reverted in OpenCode's own database, so a
-      // straight read goes on rendering it. Filtered before anything else looks
-      // at the rows, so anchors and pagination all count the same conversation.
-      const activeRows = filterOpenCodeRevertedRows(
-        rows,
-        readOpenCodeRevertedMessageId(db, providerSessionId),
-      );
-      const normalized = this.normalizeHistoryRows(activeRows, sessionId, db);
+      const normalized = this.normalizeHistoryRows(rows, sessionId, db);
       const tokenUsage = aggregateOpenCodeSessionTokenUsage(db, providerSessionId);
 
       const normalizedOffset = Math.max(0, offset);
@@ -656,33 +644,11 @@ export class OpenCodeSessionsProvider implements IProviderSessions {
     sessionId: string,
     db: Database.Database,
   ): NormalizedMessage[] {
-    // Anchors are read off the raw rows rather than the normalized messages: an
-    // anchor names an OpenCode message, and one message becomes several
-    // messages here, each under an id of CloudCLI's own making.
-    const anchors = buildOpenCodeAnchorIndex(rows);
-    const editAnchors = buildOpenCodeRewindAnchorIndex(rows);
     const normalized: NormalizedMessage[] = [];
     const emittedMessageErrors = new Set<string>();
     const runIsLive = isOpenCodeSessionActive(sessionId);
 
     for (const row of rows) {
-      // Every message this row produces is forkable at the same anchor, and
-      // editable at the other one — two rules, two rows, both opaque here.
-      const anchor = anchors.get(row.message_id);
-      const editAnchor = editAnchors.get(row.message_id);
-      const push = (message: NormalizedMessage) => {
-        if (anchor) {
-          message.anchor = anchor;
-        }
-        if (editAnchor) {
-          // Replacing a message is a revert to it — `revert` is inclusive of
-          // the message it names — so Edit addresses it under the one rule
-          // that was measured against a real server rather than a second one
-          // derived from it.
-          message.transcriptAnchorId = editAnchor;
-        }
-        normalized.push(message);
-      };
       const timestamp = normalizeProviderTimestamp(row.part_time_created ?? row.message_time_created);
       const baseId = `${row.message_id}_${row.part_id ?? normalized.length}`;
       const messageInfo = readJsonRecord(row.message_data);
@@ -695,14 +661,16 @@ export class OpenCodeSessionsProvider implements IProviderSessions {
         && !emittedMessageErrors.has(row.message_id)
       ) {
         emittedMessageErrors.add(row.message_id);
-        push(createNormalizedMessage({
-          id: `${baseId}_error`,
-          sessionId,
-          timestamp,
-          provider: PROVIDER,
-          kind: 'error',
-          content: formatToolContent(messageInfo.error),
-        }));
+        if (!isStoppedTurnError(messageInfo.error)) {
+          normalized.push(createNormalizedMessage({
+            id: `${baseId}_error`,
+            sessionId,
+            timestamp,
+            provider: PROVIDER,
+            kind: 'error',
+            content: formatToolContent(messageInfo.error),
+          }));
+        }
       }
 
       if (!row.part_id) {
@@ -730,7 +698,7 @@ export class OpenCodeSessionsProvider implements IProviderSessions {
           || parsedImages.attachments.length > 0
           || parsedFiles.attachments.length > 0
         ) {
-          push(createNormalizedMessage({
+          normalized.push(createNormalizedMessage({
             id: baseId,
             sessionId,
             timestamp,
@@ -748,7 +716,7 @@ export class OpenCodeSessionsProvider implements IProviderSessions {
       if (partType === 'reasoning') {
         const content = extractText(partData);
         if (content.trim()) {
-          push(createNormalizedMessage({
+          normalized.push(createNormalizedMessage({
             id: baseId,
             sessionId,
             timestamp,
@@ -781,13 +749,17 @@ export class OpenCodeSessionsProvider implements IProviderSessions {
           };
         }
 
+        if (toolMessage.toolName === QUESTION_TOOL_NAME) {
+          toAskUserQuestionCall(toolMessage, state);
+        }
+
         attachOpenCodeSubagent(toolMessage, state, db, runIsLive);
-        push(toolMessage);
+        normalized.push(toolMessage);
         continue;
       }
 
       if (partType === 'step-finish') {
-        push(createNormalizedMessage({
+        normalized.push(createNormalizedMessage({
           id: baseId,
           sessionId,
           timestamp,
@@ -798,7 +770,7 @@ export class OpenCodeSessionsProvider implements IProviderSessions {
       }
 
       if (partType === 'patch' || partType === 'agent') {
-        push(createNormalizedMessage({
+        normalized.push(createNormalizedMessage({
           id: baseId,
           sessionId,
           timestamp,
@@ -809,142 +781,8 @@ export class OpenCodeSessionsProvider implements IProviderSessions {
           toolId: row.part_id,
         }));
       }
-
-      /**
-       * OpenCode persists a compaction as a `compaction` part on its own
-       * synthetic user-role message with no accompanying text part (verified
-       * against a real 1.18.18 session — see #21). Because this loop
-       * dispatches per part rather than per message, that message never also
-       * hits the `text` branch above, so no empty user bubble is emitted for
-       * it — only this boundary marker.
-       */
-      if (partType === 'compaction') {
-        push(createNormalizedMessage({
-          id: baseId,
-          sessionId,
-          timestamp,
-          provider: PROVIDER,
-          kind: 'compact_boundary',
-          // OpenCode's CompactionPart carries only `{type, auto}` — no token
-          // counts — so compactPreTokens/compactPostTokens stay undefined and
-          // the marker renders trigger-only, a shape #19 already supports.
-          compactTrigger: partData.auto === true ? 'auto' : 'manual',
-        }));
-      }
     }
 
     return normalized;
-  }
-
-  /**
-   * Copies the conversation up to `anchor`'s turn into a new session.
-   *
-   * Runs through the same short-lived headless server Compact uses, because
-   * fork lives on OpenCode's HTTP API and nowhere else. The anchor already
-   * accounts for that endpoint being **exclusive** — it names the message after
-   * the turn to keep, which is one message further on than Claude's inclusive
-   * fork lands (see `buildOpenCodeAnchorIndex`).
-   */
-  async forkSession(options: ForkSessionOptions): Promise<string> {
-    return forkOpenCodeSession(options.providerSessionId, {
-      cwd: options.projectPath,
-      anchor: options.anchor,
-      title: options.title,
-    });
-  }
-
-  /**
-   * Resolves the last message to keep when the message `anchorId` names is
-   * replaced.
-   *
-   * `anchorId` is an OpenCode message id, and its revert is **inclusive** of
-   * the message it is given, so the message the reader is replacing is the one
-   * the revert will name and everything before it is what survives. This
-   * contract asks for the other end of that pair — the last message KEPT — so
-   * the answer is the message in front of the anchor, or `null` when the anchor
-   * is the opening prompt and nothing survives at all.
-   *
-   * Whether an anchor exists is answered by the revert Anchor index rather than
-   * by the raw message list, so the rules it encodes hold here unchanged: only
-   * the reader's own messages carry one, and nothing at or before the last
-   * compaction does (ADR 0007).
-   */
-  async resolveEditAnchor(
-    sessionId: string,
-    anchorId: string,
-  ): Promise<{ found: boolean; resumeThroughId: string | null }> {
-    const providerSessionId = sessionsDb.getSessionById(sessionId)?.provider_session_id;
-    if (!providerSessionId) {
-      return { found: false, resumeThroughId: null };
-    }
-
-    const rows = readOpenCodeActiveRows(providerSessionId);
-    if (!buildOpenCodeRewindAnchorIndex(rows).has(anchorId)) {
-      return { found: false, resumeThroughId: null };
-    }
-
-    // The index above was built from these rows, so the anchor is in them.
-    const { messages } = readOpenCodeMessageIndex(rows);
-    const anchorIndex = messages.findIndex((message) => message.id === anchorId);
-
-    return {
-      found: true,
-      resumeThroughId: anchorIndex === 0 ? null : messages[anchorIndex - 1].id,
-    };
-  }
-
-  /**
-   * Rewinds the conversation so `keepThroughId` is its last message, rolling
-   * tracked files back with it.
-   *
-   * OpenCode's runtime cannot resume a transcript partway — `opencode run` only
-   * appends — so an edit is a revert on the provider's own side followed by an
-   * ordinary resume, which is the shape the chat gateway branches on. The
-   * session id does not change (a revert is one column on the session row), so
-   * nothing has to be repointed afterwards.
-   *
-   * The ±1 between the two conventions lives here and nowhere else:
-   * `keepThroughId` names the last message to KEEP, `revert` names the first
-   * message to DROP.
-   *
-   * Per ADR 0009 the revert cannot be taken back once the run that follows has
-   * started, so a revert that did not happen throws rather than reporting
-   * nothing: the gateway ends the run instead of asking OpenCode to continue a
-   * conversation that was never rewound.
-   */
-  async rewindSession(sessionId: string, keepThroughId: string | null): Promise<void> {
-    const session = sessionsDb.getSessionById(sessionId);
-    const providerSessionId = session?.provider_session_id;
-    if (!session || !providerSessionId) {
-      throw new AppError('This session has not produced a transcript yet.', {
-        code: 'EDIT_SOURCE_NOT_READY',
-        statusCode: 409,
-      });
-    }
-
-    const { messages } = readOpenCodeMessageIndex(readOpenCodeActiveRows(providerSessionId));
-    const keepThroughIndex = keepThroughId === null
-      ? -1
-      : messages.findIndex((message) => message.id === keepThroughId);
-    // A miss is -1, which is the same value "keep nothing" uses, and one past
-    // it is the opening prompt — reverting there would empty the session and
-    // roll every tracked file back with it. So a message these rows do not
-    // hold is refused rather than rounded into that.
-    if (keepThroughId !== null && keepThroughIndex < 0) {
-      throw new AppError('The message this edit resumes from is no longer in the conversation.', {
-        code: 'EDIT_ANCHOR_GONE',
-        statusCode: 409,
-      });
-    }
-
-    const revertAt = messages[keepThroughIndex + 1]?.id;
-    if (!revertAt) {
-      throw new AppError('There is nothing after that message to replace.', {
-        code: 'EDIT_ANCHOR_GONE',
-        statusCode: 409,
-      });
-    }
-
-    await revertOpenCodeSession(providerSessionId, session.project_path ?? process.cwd(), revertAt);
   }
 }
