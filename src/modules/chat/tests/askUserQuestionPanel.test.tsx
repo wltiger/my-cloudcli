@@ -146,3 +146,19 @@ test('container shortcuts still work when the field is not in play', () => {
 
   assert.equal(submit().disabled, false, 'number key selected an option');
 });
+
+test('the field keeps focus and its answer when fullscreen is toggled either way', () => {
+  const { container } = renderPanel([questionA]);
+  activateOther(container);
+  fireEvent.change(otherField(container), { target: { value: 'line one\nline two' } });
+
+  fireEvent.click(screen.getByRole('button', { name: 'Fullscreen' }));
+  const inFullscreen = document.body.querySelector('textarea') as HTMLTextAreaElement;
+  assert.equal(document.activeElement, inFullscreen, 'focused after entering fullscreen');
+  assert.equal(inFullscreen.value, 'line one\nline two');
+
+  fireEvent.click(screen.getByRole('button', { name: 'Exit fullscreen' }));
+  const inline = document.body.querySelector('textarea') as HTMLTextAreaElement;
+  assert.equal(document.activeElement, inline, 'focused after leaving fullscreen');
+  assert.equal(inline.value, 'line one\nline two');
+});

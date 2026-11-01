@@ -81,7 +81,7 @@ export const AskUserQuestionPanel: React.FC<PermissionPanelProps> = ({
     if (!field) return;
     field.focus();
     fitOtherField(field);
-  }, [otherActive, currentStep, fitOtherField]);
+  }, [otherActive, currentStep, fitOtherField, isFullscreen]);
 
   const toggleOption = useCallback((qIdx: number, label: string, multiSelect: boolean) => {
     setSelections(prev => {
