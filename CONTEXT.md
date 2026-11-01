@@ -51,7 +51,7 @@ Replacing an already-sent message so the session continues from that point, keep
 _Avoid_: Undo, revert, rewind — all three read as "put the files back", and Rewind now names something narrower (below). Also distinct from Clear, which cannot preserve the session id.
 
 **Rewind** (provider mechanism, not an operation):
-One of the ways a provider reaches an Edit: the conversation is rolled back on the provider's own side before the run that follows. Today only OpenCode works this way, because `opencode run` can only append — so an Edit there is `POST /session/{id}/revert` and then an ordinary resume, which is also why it is the one provider whose Edit restores tracked files. Claude resumes its transcript partway instead and rewinds nothing; Codex branches its thread. Which one applies is the adapter's business, never the reader's.
+One of the ways a provider reaches an Edit: the conversation is rolled back on the provider's own side before the run that follows. No provider works this way today: OpenCode did (`POST /session/{id}/revert`, then an ordinary resume — the only Edit that also restored tracked files) until its Edit was retired at the v1.37.7 sync. Claude resumes its transcript partway instead and rewinds nothing; Codex branches its thread. Which one applies is the adapter's business, never the reader's.
 _Avoid_: Using Rewind for anything a reader chooses. CloudCLI once offered a per-message Rewind control beside Edit; it was retired once Edit covered every provider. Decision records 0003, 0005, 0006 and 0007 still use that older sense and are read as history.
 
 **Fork** (session):
@@ -67,10 +67,10 @@ The transcript row an Edit or Fork is taken at, named the way its provider names
 
 **Two kinds now travel on the same message**, and they are not interchangeable:
 
-- `transcriptAnchorId` — provider-native, stamped by the provider's own session adapter. Claude's transcript-row `uuid`, Codex's enclosing `turnId`, OpenCode's message id. This is what Edit addresses, and what upstream's Fork route takes.
-- `anchor` — computed by this fork from the raw transcript rows, under a rule of its own per provider. It is what this fork's own anchor-based Fork route takes, which today means OpenCode. It is always withheld at or before the last Compact boundary; `transcriptAnchorId` follows that rule only where the provider's own adapter applies it (OpenCode does, Claude stamps every user row regardless).
+- `transcriptAnchorId` — provider-native, stamped by the provider's own session adapter. Claude's transcript-row `uuid`, Codex's enclosing `turnId`. This is what Edit addresses, and what upstream's Fork route takes.
+- `anchor` — computed by this fork from the raw transcript rows, under a rule of its own per provider. It is what this fork's own anchor-based Fork route takes; that route has no caller since OpenCode's Fork was retired at the v1.37.7 sync, because Claude forks through upstream's route. It is always withheld at or before the last Compact boundary; `transcriptAnchorId` follows that rule only where the provider's own adapter applies it (Claude stamps every user row regardless).
 
-One message can carry both at once — OpenCode's Edit anchor rides `transcriptAnchorId` while its Fork anchor rides `anchor` — so which field a message carries does **not** decide which backend performs a Fork. That is the provider's upstream fork capability (see `docs/adr/0011-opencode-forks-in-the-client-not-through-the-fork-facet.md`); Edit is the one gesture that still keys on a field, `transcriptAnchorId`, alone.
+One message can carry both at once — a Claude row does — so which field a message carries does **not** decide which backend performs a Fork. That is the provider's upstream fork capability (see `docs/adr/0011-opencode-forks-in-the-client-not-through-the-fork-facet.md`, superseded); Edit is the one gesture that still keys on a field, `transcriptAnchorId`, alone.
 _Avoid_: Checkpoint, cut point, target. Also avoid calling either field "the anchor" without saying which — the two disagree about which row they name.
 
 **Session archive** (session):

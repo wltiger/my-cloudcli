@@ -1,3 +1,7 @@
+---
+Status: superseded (v1.37.7) — OpenCode's Fork was retired when the fork took upstream's SDK runtime, so the client branch this record describes has no caller until OpenCode v2. `opencode-anchors.ts` and `forkOpenCodeSession` are gone.
+---
+
 # OpenCode forks through a branch in the client, not through upstream's fork facet
 
 Upstream's fork path cannot take OpenCode as it stands: `IProviderFork.forkSession` requires a `jsonlPath`, and `sessionsService.forkSessionById` refuses any source row without both a `provider_session_id` and a `jsonl_path` (`FORK_SOURCE_NOT_READY`). OpenCode has no such path *on purpose* — every OpenCode session lives in one shared `opencode.db`, so its synchronizer keeps `jsonl_path` null to stop "delete this session's transcript" from deleting every OpenCode conversation on the machine. Adapting OpenCode into the facet therefore means either handing it a path that is a lie or reshaping an upstream-owned contract, so the split lives in the client instead: `useSessionFork` sends a fork to upstream's `POST /sessions/:id/fork` when the provider reports it can be forked there, and to this fork's own `POST /sessions/:id/fork-at-anchor` when it cannot. The branch is keyed on **the provider's upstream fork capability, never on the provider's name** — that is the whole point, because a provider upstream covers later starts reporting the capability and the second branch simply stops being taken, with nothing to edit.

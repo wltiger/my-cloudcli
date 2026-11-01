@@ -1,5 +1,5 @@
 ---
-Status: in force (re-checked at v1.37.3) — the dedicated Rewind that first reached this path is gone, but OpenCode's Edit performs the same revert-then-send, so the commit window measured below is unchanged and is now the reason no recovery is attempted at all: `OpenCodeSessionsProvider.rewindSession` throws when the revert did not land and the gateway ends the run, rather than sending into a conversation that was never rewound.
+Status: superseded (v1.37.7) — OpenCode's Edit and `rewindSession` were retired when the fork took upstream's SDK runtime, so nothing reaches this revert path today. Kept for its measurements, for OpenCode v2.
 ---
 
 # A committed OpenCode revert is reported, not recovered
