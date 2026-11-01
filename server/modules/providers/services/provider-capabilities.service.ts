@@ -67,7 +67,9 @@ type ProviderCapabilities = {
  *   Compact, Fork and Edit were retired at the v1.37.7 sync (upstream's SDK
  *   runtime replaced the runtime they were built on) until its v2 rework.
  *   Cursor is unsupported — not investigated.
- * - Claude supports Fork; see ADR 0008 for why Codex never will.
+ * - `supportsFork` is this fork's own per-message flag, true for Claude only.
+ *   Codex reaches Fork through upstream's `supportsSessionForking` instead
+ *   (ADR 0008 is superseded).
  * - No provider's edit restores tracked files today: Claude's
  *   `resumeSessionAt` and Codex's `thread/fork` leave the working tree alone.
  * - Clear reaches no provider API at all (ADR 0005), so the flag records which

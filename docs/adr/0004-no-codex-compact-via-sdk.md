@@ -1,3 +1,7 @@
+---
+Status: in force. Its decision about Codex stands; the OpenCode side channel it mentions was retired at the v1.37.7 sync.
+---
+
 # No Codex compact - the SDK does not expose it and app-server is not worth adopting for one feature
 
 Codex can compact: the `codex app-server` JSON-RPC protocol carries `thread/compact/start` plus a compaction notification. But `@openai/codex-sdk`, which the Codex runtime drives, exposes none of it in any published version checked - 0.147.0 (installed), 0.149.0 (latest stable) and 0.150.0-alpha.6 (latest preview) all present the same four-method surface of `startThread`/`resumeThread`/`run`/`runStreamed` over `codex exec --experimental-json`, one process per turn. Reaching compaction therefore means speaking app-server, a protocol Codex itself marks `[experimental]`. Compact is not offered for Codex sessions.

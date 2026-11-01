@@ -51,7 +51,7 @@ Replacing an already-sent message so the session continues from that point, keep
 _Avoid_: Undo, revert, rewind — all three read as "put the files back", and Rewind now names something narrower (below). Also distinct from Clear, which cannot preserve the session id.
 
 **Rewind** (provider mechanism, not an operation):
-One of the ways a provider reaches an Edit: the conversation is rolled back on the provider's own side before the run that follows. No provider works this way today: OpenCode did (`POST /session/{id}/revert`, then an ordinary resume — the only Edit that also restored tracked files) until its Edit was retired at the v1.37.7 sync. Claude resumes its transcript partway instead and rewinds nothing; Codex branches its thread. Which one applies is the adapter's business, never the reader's.
+One of the ways a provider reaches an Edit: the conversation is rolled back on the provider's own side before the run that follows. Only Codex works this way today, by branching its thread. OpenCode did too (`POST /session/{id}/revert`, then an ordinary resume — the only Edit that also restored tracked files) until its Edit was retired at the v1.37.7 sync. Claude resumes its transcript partway instead and rewinds nothing. Which one applies is the adapter's business, never the reader's.
 _Avoid_: Using Rewind for anything a reader chooses. CloudCLI once offered a per-message Rewind control beside Edit; it was retired once Edit covered every provider. Decision records 0003, 0005, 0006 and 0007 still use that older sense and are read as history.
 
 **Fork** (session):
