@@ -393,6 +393,7 @@ test('Claude held-process reuse across turns', async (t) => {
       assert.equal(live.promptStreamClosed, false, 'and the held process is not released');
       const refusal = second.frames.find((frame) => frame.code === 'background_work_not_kept');
       assert.equal(refusal?.kind, 'error', 'the client is told why');
+      assert.match(String(refusal?.content), /refused a settings change/, 'and the message names the cause');
       // The chat handler completes a refused run, as it does any run that ends without a result.
       secondRun.writer.sendComplete({ exitCode: 1 });
 
@@ -411,6 +412,55 @@ test('Claude held-process reuse across turns', async (t) => {
 
       await queries[1]?.emit({ type: 'result', session_id: 'provider-1' });
       await Promise.all([firstTurn, thirdTurn]);
+    });
+  });
+
+  await t.test('a refusal names a changed spawn-time setting, or an edited message, as its cause', async () => {
+    await withIsolatedDatabase(async () => {
+      sessionsDb.createAppSession('app-cause', 'claude', '/workspace/demo');
+
+      const first = new FakeConnection();
+      const firstRun = startRun('app-cause', first);
+      const firstTurn = queryClaudeSDK('first question', { ...BASE_OPTIONS, sessionId: 'app-cause' }, firstRun.writer, createContext());
+      await waitUntil(() => queries.length === 1, 'the first query to start');
+
+      const live = queries[0];
+      assert.ok(live);
+      await live.emit(BACKGROUND_BASH_STARTED);
+      await live.emit({ type: 'result', session_id: 'provider-1' });
+
+      const second = new FakeConnection();
+      const secondRun = startRun('app-cause', second);
+      await queryClaudeSDK(
+        'second question',
+        { ...BASE_OPTIONS, sessionId: 'app-cause', cwd: '/workspace/elsewhere' },
+        secondRun.writer,
+        createContext(),
+      );
+      await flush();
+      const changedSetting = second.frames.find((frame) => frame.code === 'background_work_not_kept');
+      assert.match(String(changedSetting?.content), /settings differ from the held process \(cwd: /);
+      secondRun.writer.sendComplete({ exitCode: 1 });
+
+      const third = new FakeConnection();
+      const thirdRun = startRun('app-cause', third);
+      await queryClaudeSDK(
+        'edited question',
+        { ...BASE_OPTIONS, sessionId: 'app-cause', resumeAnchorId: 'anchor-1' },
+        thirdRun.writer,
+        createContext(),
+      );
+      await flush();
+      const edited = third.frames.find((frame) => frame.code === 'background_work_not_kept');
+      assert.match(String(edited?.content), /edited message/);
+      thirdRun.writer.sendComplete({ exitCode: 1 });
+
+      assert.equal(queries.length, 1, 'neither refusal starts a process');
+      assert.equal(live.promptStreamClosed, false, 'and the held process is left alone');
+
+      await live.emit(BACKGROUND_BASH_COMPLETED);
+      await live.emit({ type: 'result', session_id: 'provider-1' });
+      await firstTurn;
     });
   });
 

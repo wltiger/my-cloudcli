@@ -36,6 +36,7 @@ import {
   carriesResumeAnchor,
   claimHeldTurn,
   createLiveTurnSettings,
+  explainHeldTurnMiss,
   forgetHeldTurn,
   readHotTurnSettings,
   registerHeldTurn
@@ -1312,10 +1313,19 @@ async function queryClaudeSDK(
         // The held process cannot take this turn, and it still has background
         // work running. Releasing it would leave two processes writing one
         // transcript, so the send is refused and the user chooses instead.
+        // The cause is named in both the message and the log, because the
+        // refusal alone cannot tell an edit from a changed setting from a
+        // process that is gone.
+        const refusalReason = carriesResumeAnchor(options)
+          ? 'this is an edited message, which a running process cannot rewind to'
+          : reusableTurn
+            ? 'the held process closed or refused a settings change before it could take the message'
+            : explainHeldTurnMiss(sessionKey(), turnFingerprint);
+        console.warn(`[Claude SDK] Refused a send that cannot join the held process: ${refusalReason}; session ${sessionKey()}`);
         ws.send(createNormalizedMessage({
           kind: 'error',
           code: 'background_work_not_kept',
-          content: 'This session still has background work running, and this message cannot join it. Interrupt the work and send, or queue the message.',
+          content: `This session still has background work running, and this message cannot join it (${refusalReason}). Interrupt the work and send, or queue the message.`,
           sessionId: sessionKey(),
           provider: 'claude'
         }));

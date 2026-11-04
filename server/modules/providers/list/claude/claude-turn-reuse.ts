@@ -352,3 +352,30 @@ export function claimHeldTurn(sessionKey: string, fingerprint: string): HeldTurn
   heldTurns.delete(sessionKey);
   return handle;
 }
+
+/**
+ * Says why {@link claimHeldTurn} found nothing to claim for this session.
+ *
+ * Used by `claude-runtime.provider.ts` when it refuses a send, so the refusal
+ * can name its cause instead of leaving the user to guess. Call it only after a
+ * claim came back empty: a successful claim removes the handle and this would
+ * then misreport "no held process".
+ *
+ * Reports setting names with their values, except the API key, which only the
+ * name is shown for.
+ */
+export function explainHeldTurnMiss(sessionKey: string, fingerprint: string): string {
+  const handle = sessionKey ? heldTurns.get(sessionKey) : undefined;
+  if (!handle) {
+    return 'no held process is registered for this session';
+  }
+
+  const held = JSON.parse(handle.fingerprint) as AnyRecord;
+  const next = JSON.parse(fingerprint) as AnyRecord;
+  const changed = Object.keys({ ...held, ...next })
+    .filter((name) => JSON.stringify(held[name]) !== JSON.stringify(next[name]))
+    .map((name) => (name === 'apiKey'
+      ? name
+      : `${name}: ${JSON.stringify(held[name] ?? null)} -> ${JSON.stringify(next[name] ?? null)}`));
+  return `settings differ from the held process (${changed.join('; ')})`;
+}
