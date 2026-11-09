@@ -5,6 +5,7 @@ import { afterEach, beforeEach, test, vi } from 'vitest';
 
 import '@/modules/i18n';
 import { useChatComposerState } from '@/modules/chat/hooks/useChatComposerState';
+import { notifyBackgroundWorkRefused } from '@/modules/chat/utils/backgroundWorkRefusal';
 import { clearQueuedMessage } from '@/shared/chatDrafts';
 import type * as ChatDrafts from '@/shared/chatDrafts';
 import type { PermissionMode, Project, ProjectSession, SessionActivityMap } from '@/shared/types';
@@ -187,18 +188,19 @@ test('Side question in the background-work dialog sends one chat.side_question o
   const { view, of, types } = render({ isLoading: false, processingSessions: backgroundOnly });
   await act(async () => { view.result.current.setInput('hello'); });
 
-  let pending!: Promise<void>;
-  act(() => {
-    pending = view.result.current.handleSubmit({ preventDefault: () => undefined } as never);
+  // Over background work Enter sends into the held process (fork entry 29);
+  // the dialog opens only when the server refuses that send.
+  await act(async () => {
+    await view.result.current.handleSubmit({ preventDefault: () => undefined } as never);
   });
+  await act(async () => { notifyBackgroundWorkRefused('session-1'); });
   await waitFor(() => assert.ok(view.result.current.backgroundSendPrompt !== null, 'the dialog asks'));
   await act(async () => {
     view.result.current.resolveBackgroundSendPrompt('sideQuestion' as never);
-    await pending;
   });
 
   assertOneSideQuestion(of('chat.side_question'), 'hello');
-  assert.deepEqual(types(), ['chat.side_question'], 'no chat.send, abort or stop');
+  assert.deepEqual(types(), ['chat.send', 'chat.side_question'], 'the refused send, then the side question: no abort or stop');
   assert.equal(appendQueuedMessage.mock.calls.length, 0, 'nothing is queued');
   assert.equal(view.result.current.queuedDraft, null);
   assert.equal(view.result.current.input, '', 'the composer is cleared');

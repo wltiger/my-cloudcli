@@ -562,9 +562,16 @@ async function handleChatEditSend(
     // A provider that rewound itself above needs no resume option at all: the
     // run that follows is an ordinary resume of whatever the session now
     // points at.
-    rewinds
-      ? {}
-      : { resumeAnchorId: resumeThroughId ?? undefined, resumeFromScratch: resumeThroughId === null },
+    //
+    // `interruptBackground` rides along as on `chat.send`: an edit can never
+    // join a process held for background work, so its refusal's "Send anyway"
+    // re-sends it with this flag to stop that work first.
+    {
+      ...(rewinds
+        ? {}
+        : { resumeAnchorId: resumeThroughId ?? undefined, resumeFromScratch: resumeThroughId === null }),
+      interruptBackground: data.interruptBackground === true,
+    },
     async (run) => {
       // Emitted through the run's writer so it is sequenced and replayed like
       // any other event — a second tab watching this session has to truncate

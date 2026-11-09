@@ -6,7 +6,7 @@ import { afterEach, beforeEach, test, vi } from 'vitest';
 import { i18n } from '@/modules/i18n';
 import { useChatComposerState } from '@/modules/chat/hooks/useChatComposerState';
 import { readDraftText, resetChatDrafts, writeDraftText } from '@/shared/chatDrafts';
-import type { BackgroundSendChoice, ChatMessage, PermissionMode, Project, ProjectSession, SessionActivityMap } from '@/shared/types';
+import type { ChatMessage, PermissionMode, Project, ProjectSession, SessionActivityMap } from '@/shared/types';
 
 /**
  * #1587: follow-ups submitted while a turn runs used to replace each other in
@@ -276,17 +276,11 @@ test('queueing behind background work adds to a message already waiting there', 
   ]]);
   const { view } = render({ isLoading: false, processingSessions: background });
 
+  // Queued from the send menu: over background work, Enter sends into the
+  // held process instead (fork entry 29), so Queue is a menu choice.
   const queueBehindWork = async (text: string) => {
     await act(async () => { view.result.current.setInput(text); });
-    let pending!: Promise<void>;
-    act(() => {
-      pending = view.result.current.handleSubmit({ preventDefault: () => undefined } as never);
-    });
-    await waitFor(() => assert.notEqual(view.result.current.backgroundSendPrompt, null));
-    await act(async () => {
-      view.result.current.resolveBackgroundSendPrompt('queue' as BackgroundSendChoice);
-      await pending;
-    });
+    await act(async () => { await view.result.current.handleSendMenuChoice('queue'); });
   };
 
   await queueBehindWork('after the job: A');

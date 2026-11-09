@@ -110,7 +110,7 @@ type ChatComposerProps = {
   onEditQueuedDraft: () => void;
   onDeleteQueuedDraft: () => void;
   /** Handle send menu choices (queue, steer, side question, send). */
-  onSendMenuChoice?: (choice: 'queue' | 'steer' | 'sideQuestion' | 'send') => void;
+  onSendMenuChoice?: (choice: 'queue' | 'steer' | 'sideQuestion' | 'send' | 'sendKeep') => void;
   /** False until the capability matrix has loaded, or for a provider it does not list; passed through to the send menu and the background-send dialog so neither offers a side question that would be refused. */
   supportsSideQuestions?: boolean;
   /** Whether the provider can take a message into a running turn; gates the send menu's Steer row the same way `supportsSideQuestions` gates its row. */

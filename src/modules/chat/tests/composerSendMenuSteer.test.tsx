@@ -36,7 +36,7 @@ const open = () => {
 };
 
 const labels = (menu: HTMLElement) => Array.from(menu.querySelectorAll<HTMLElement>('[role^="menuitem"]'))
-  .map((row) => (row.textContent ?? '').replace(/(Queue|Steer|Side question|Stop|Send anyway).*/s, '$1'));
+  .map((row) => (row.textContent ?? '').replace(/(Queue|Steer|Side question|Stop|Send anyway|Send).*/s, '$1'));
 
 const row = (menu: HTMLElement, label: string) => {
   const found = Array.from(menu.querySelectorAll<HTMLElement>('[role^="menuitem"]'))
@@ -69,7 +69,7 @@ test('a provider that cannot steer gets no Steer row', () => {
 test('background-only work has no turn to steer, so the row is left out', () => {
   renderMenu('background');
 
-  assert.deepEqual(labels(open()), ['Queue', 'Side question', 'Send anyway']);
+  assert.deepEqual(labels(open()), ['Send', 'Queue', 'Side question', 'Send anyway']);
 });
 
 test('without input, Steer is disabled like Queue', () => {

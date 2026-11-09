@@ -29,7 +29,7 @@ import {
 } from '@/shared/chatDrafts';
 import { escapeRegExp } from '@/modules/chat/utils/chatFormatting';
 import { describeBackgroundTask, ownBackgroundTasks } from '@/modules/chat/utils/backgroundTasks';
-import { subscribeBackgroundWorkRefused } from '@/modules/chat/utils/backgroundWorkRefusal';
+import { subscribeBackgroundWorkRefused, subscribeRunSettled } from '@/modules/chat/utils/backgroundWorkRefusal';
 import { useFileMentions } from '@/modules/chat/hooks/useFileMentions';
 import { useInputHistory } from '@/modules/chat/hooks/useInputHistory';
 import { useSlashCommands } from '@/modules/chat/hooks/useSlashCommands';
@@ -113,15 +113,35 @@ type SubmitOptions = {
   skipCommandInterception?: boolean;
   /**
    * The send menu already answered the background-work question before
-   * `submitMessage` runs, so the dialog that would ask it again never opens.
+   * `submitMessage` runs: "Send anyway" stops the work first, Queue waits for
+   * it, Side question never touches it. Without one, a send over background
+   * work is an ordinary send the held process takes in, and only a refusal
+   * from the server asks (see `handleRefusedSend`).
    */
-  presetBackgroundChoice?: 'queue' | 'send';
+  presetBackgroundChoice?: 'queue' | 'send' | 'sideQuestion';
   /**
    * The send menu's Steer row: while a turn runs, send the message into it
    * (read at the agent's next tool call) instead of queueing it for after.
    * Falls through to the ordinary send when no turn is running any more.
    */
   steerIntoTurn?: boolean;
+};
+
+/**
+ * A sent message as the server received it, kept so a refusal can re-send it
+ * (the same frame, now stopping the work) or queue it without uploading its
+ * files again. `content` is what the user typed, `messageContent` what was
+ * sent (a command's expansion, for instance).
+ */
+type RefusableSend = {
+  sessionId: string;
+  frameType: 'chat.send' | 'chat.edit-send';
+  anchorId: string | null;
+  content: string;
+  messageContent: string;
+  files: File[];
+  uploadedAttachments: unknown[];
+  options: QueuedSendOptions;
 };
 
 const createFakeSubmitEvent = () => {
@@ -332,15 +352,26 @@ export function useChatComposerState({
   const inputHighlightRef = useRef<HTMLDivElement>(null);
   const textareaLineHeightRef = useRef<number | null>(null);
   const lastAutosizedInputRef = useRef<string | null>(null);
-  const lastSentForRefusalRef = useRef<{ sessionId: string; content: string; files: File[] } | null>(null);
+  // What this tab's last send carried, kept until that run settles, so a send
+  // the server refuses (background work the held process could not keep) can
+  // be answered: the refusal opens the background-work dialog, and the choice
+  // acts on this very message rather than on whatever the composer holds by
+  // then. Read through a ref by the handler below, which the listener cannot
+  // close over: it is subscribed once.
+  const lastSentForRefusalRef = useRef<RefusableSend | null>(null);
+  const handleRefusedSendRef = useRef<((sent: RefusableSend) => void) | null>(null);
   useEffect(() => subscribeBackgroundWorkRefused((sessionId) => {
     const sent = lastSentForRefusalRef.current;
     if (!sent || sent.sessionId !== sessionId) {
       return;
     }
     lastSentForRefusalRef.current = null;
-    setInput(sent.content);
-    setAttachedFiles(sent.files);
+    handleRefusedSendRef.current?.(sent);
+  }), []);
+  useEffect(() => subscribeRunSettled((sessionId) => {
+    if (lastSentForRefusalRef.current?.sessionId === sessionId) {
+      lastSentForRefusalRef.current = null;
+    }
   }), []);
   const handleSubmitRef = useRef<
     ((
@@ -1372,38 +1403,34 @@ export function useChatComposerState({
         });
       }
 
-      // Background work keeps running unless the user picks "Send anyway",
-      // which stops it first. Queueing waits until it finishes; a side question
-      // never touches it. Nothing is stopped without that choice.
+      // Over background work an ordinary send (Enter, or "Send" in the send
+      // menu) asks nothing: the server pushes it into the process holding that
+      // work, which keeps running, and refuses only when the process cannot
+      // take it — the refusal is what opens the background-work dialog (see
+      // `handleRefusedSend`). A choice made up front in the send menu acts at
+      // once: "Send anyway" stops the work first, Queue waits until it
+      // finishes, Side question never touches it.
       const backgroundActivity = processingSessionsRef.current?.get(targetSessionId);
-      let interruptBackground = false;
-      if (backgroundActivity?.background) {
-        const work = ownBackgroundTasks(backgroundActivity.tasks ?? [])
-          .map((task) => describeBackgroundTask(task, t));
-        const choice = submitOptions?.presetBackgroundChoice ?? await askBeforeSendingOverBackgroundWork(work);
-        if (choice === 'cancel') {
+      const presetChoice = backgroundActivity?.background ? submitOptions?.presetBackgroundChoice : undefined;
+      const interruptBackground = presetChoice === 'send';
+      if (presetChoice === 'sideQuestion') {
+        askSideQuestionAndClear(targetSessionId, currentInput);
+        return;
+      }
+      if (presetChoice === 'queue') {
+        if (queuedSubmission) {
+          queuedDraftSessionRef.current = sessionKey;
+          setQueuedDraft(queuedSubmission);
           return;
         }
-        if (choice === 'sideQuestion') {
-          askSideQuestionAndClear(targetSessionId, currentInput);
-          return;
-        }
-        interruptBackground = choice === 'send';
-        if (choice === 'queue') {
-          if (queuedSubmission) {
-            queuedDraftSessionRef.current = sessionKey;
-            setQueuedDraft(queuedSubmission);
-            return;
-          }
-          // Attachments were uploaded above; queue the same descriptors.
-          await queueMessage({
-            content: currentInput,
-            attachments: currentAttachments,
-            uploadedAttachments,
-            options: buildSendOptions(currentInput),
-          }, targetSessionId);
-          return;
-        }
+        // Attachments were uploaded above; queue the same descriptors.
+        await queueMessage({
+          content: currentInput,
+          attachments: currentAttachments,
+          uploadedAttachments,
+          options: buildSendOptions(currentInput),
+        }, targetSessionId);
+        return;
       }
 
       const attachmentRecords = uploadedAttachments as ChatAttachment[];
@@ -1438,7 +1465,16 @@ export function useChatComposerState({
       // session row; `options` only carries composer-level preferences.
       // Kept so a send the server refuses (background work it could not keep)
       // can be put back into the composer.
-      lastSentForRefusalRef.current = { sessionId: targetSessionId, content: currentInput, files: currentAttachments };
+      lastSentForRefusalRef.current = {
+        sessionId: targetSessionId,
+        frameType: editingAnchorId ? 'chat.edit-send' : 'chat.send',
+        anchorId: editingAnchorId ?? null,
+        content: currentInput,
+        messageContent,
+        files: currentAttachments,
+        uploadedAttachments,
+        options: sendOptions,
+      };
       sendMessage({
         // Replacing an already-sent message is its own frame: it changes the
         // shape of the conversation, so it gets validated separately and can
@@ -1538,8 +1574,11 @@ export function useChatComposerState({
   // question the menu already asked, so the dialog never opens for them; Steer
   // goes through the submit like Queue does (same upload and validation) and
   // only diverges once the message is ready to leave the composer.
+  //
+  // "Send" over background work (`sendKeep`, this fork's row) is the same
+  // ordinary send Enter makes: pushed into the process holding the work.
   const handleSendMenuChoice = useCallback(
-    async (choice: 'queue' | 'steer' | 'sideQuestion' | 'send'): Promise<void> => {
+    async (choice: 'queue' | 'steer' | 'sideQuestion' | 'send' | 'sendKeep'): Promise<void> => {
       if (choice === 'sideQuestion') {
         askSideQuestionAndClear(sessionKey, inputValueRef.current);
         return;
@@ -1548,10 +1587,80 @@ export function useChatComposerState({
         await handleSubmit(createFakeSubmitEvent(), undefined, { steerIntoTurn: true });
         return;
       }
+      if (choice === 'sendKeep') {
+        await handleSubmit(createFakeSubmitEvent());
+        return;
+      }
       await handleSubmit(createFakeSubmitEvent(), undefined, { presetBackgroundChoice: choice });
     },
     [askSideQuestionAndClear, handleSubmit, sessionKey],
   );
+
+  // A send the server refused because the process holding this session's
+  // background work could not take it. This is the one place the
+  // background-work dialog opens: the work is still running, and sending now
+  // would stop it. The choice acts on the refused message itself, not through
+  // `handleSubmit` — whose own view of the session (just marked processing by
+  // the refused send) no longer says "background work".
+  const handleRefusedSend = useCallback(async (sent: RefusableSend): Promise<void> => {
+    if (sessionKeyRef.current !== sent.sessionId) {
+      // Not the open session: the words go back into that session's own draft
+      // (its files cannot be kept there), and nothing is asked.
+      const draft = readDraftText(sent.sessionId);
+      writeDraftText(sent.sessionId, draft.trim() ? `${sent.content}\n\n${draft}` : sent.content);
+      return;
+    }
+
+    setInput(sent.content);
+    inputValueRef.current = sent.content;
+    setAttachedFiles(sent.files);
+
+    const activity = processingSessionsRef.current?.get(sent.sessionId);
+    const work = ownBackgroundTasks(activity?.tasks ?? []).map((task) => describeBackgroundTask(task, t));
+    const choice = await askBeforeSendingOverBackgroundWork(work);
+    if (choice === 'cancel') {
+      return;
+    }
+    if (choice === 'sideQuestion') {
+      askSideQuestionAndClear(sent.sessionId, sent.content);
+      return;
+    }
+    if (choice === 'queue') {
+      await queueMessage({
+        content: sent.content,
+        attachments: sent.files,
+        uploadedAttachments: sent.uploadedAttachments,
+        options: sent.options,
+      }, sent.sessionId);
+      return;
+    }
+
+    // Send anyway: the same frame again, now stopping the work first. The
+    // message is already on screen from the first attempt, so no second echo.
+    setInput('');
+    inputValueRef.current = '';
+    setAttachedFiles([]);
+    if (draftScopeRef.current) {
+      writeDraftText(draftScopeRef.current, '');
+    }
+    onSessionProcessing?.(sent.sessionId, { statusText: null, canInterrupt: true });
+    lastSentForRefusalRef.current = sent;
+    sendMessage({
+      type: sent.frameType,
+      sessionId: sent.sessionId,
+      ...(sent.anchorId ? { anchorId: sent.anchorId } : {}),
+      interruptBackground: true,
+      content: sent.messageContent,
+      options: {
+        ...sent.options,
+        attachments: sent.uploadedAttachments,
+      },
+    });
+  }, [askBeforeSendingOverBackgroundWork, askSideQuestionAndClear, onSessionProcessing, queueMessage, sendMessage, t]);
+
+  useEffect(() => {
+    handleRefusedSendRef.current = (sent) => { void handleRefusedSend(sent); };
+  }, [handleRefusedSend]);
 
   useEffect(() => {
     handleSubmitRef.current = handleSubmit;

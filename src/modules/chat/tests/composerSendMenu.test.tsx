@@ -18,7 +18,7 @@ import ComposerSendMenu from '@/modules/chat/composer/ComposerSendMenu';
  */
 
 type SendMenuState = 'responding' | 'background';
-type SendMenuChoice = 'queue' | 'steer' | 'sideQuestion' | 'stop' | 'send';
+type SendMenuChoice = 'queue' | 'steer' | 'sideQuestion' | 'stop' | 'send' | 'sendKeep';
 
 // Every test but the capability-gate ones draws the menu for a provider that
 // answers side questions; the component's default is false until the
@@ -52,7 +52,8 @@ const open = () => {
 const items = (menu: HTMLElement) => Array.from(menu.querySelectorAll<HTMLElement>('[role^="menuitem"]'));
 const labelOf = (item: HTMLElement) => {
   const text = item.textContent ?? '';
-  for (const label of ['Queue', 'Side question', 'Stop', 'Send anyway']) {
+  // `Send anyway` before `Send`, which it starts with.
+  for (const label of ['Queue', 'Side question', 'Stop', 'Send anyway', 'Send']) {
     if (text.startsWith(label)) return label;
   }
   return text;
@@ -103,11 +104,15 @@ test('while a turn is written the menu offers Queue, Side question and then Stop
   assert.match(stop.textContent ?? '', /End the response being written/);
 });
 
-test('while only background work runs the menu offers Queue, Side question and then Send anyway, Send anyway last and red', () => {
-  renderMenu('background', true);
+test('while only background work runs the menu offers Send, Queue, Side question and then Send anyway, Send anyway last and red', () => {
+  // Send (this fork's row) first and not red: the held process takes the
+  // message in and the work keeps running. Only Send anyway stops it.
+  const { onSelect } = renderMenu('background', true);
   const menu = open();
 
-  assert.deepEqual(items(menu).map(labelOf), ['Queue', 'Side question', 'Send anyway']);
+  assert.deepEqual(items(menu).map(labelOf), ['Send', 'Queue', 'Side question', 'Send anyway']);
+  assert.ok(!looksDestructive(item(menu, 'Send')));
+  assert.match(item(menu, 'Send').textContent ?? '', /Send now; the background work keeps running/);
   const sendAnyway = item(menu, 'Send anyway');
   assert.ok(looksDestructive(sendAnyway), 'Send anyway is drawn as the destructive choice');
   assert.ok(!looksDestructive(item(menu, 'Queue')));
@@ -115,6 +120,9 @@ test('while only background work runs the menu offers Queue, Side question and t
   assert.equal(separatorsBetween(menu, item(menu, 'Side question'), sendAnyway).length, 1, 'a separator sets Send anyway apart');
   assert.match(item(menu, 'Queue').textContent ?? '', /Send when the background work ends/);
   assert.match(sendAnyway.textContent ?? '', /Send now; this stops the background work/);
+
+  fireEvent.click(item(menu, 'Send'));
+  assert.deepEqual(onSelect.mock.calls.map(([choice]) => choice), ['sendKeep']);
 });
 
 test('without input, Queue and Side question are disabled while a turn is written, and Stop stays enabled', () => {
@@ -212,11 +220,11 @@ test('without side-question support, a turn being written offers only Queue and 
   assert.ok(looksDestructive(item(menu, 'Stop')), 'Stop is still last and red');
 });
 
-test('without side-question support, background work offers only Queue and Send anyway', () => {
+test('without side-question support, background work offers only Send, Queue and Send anyway', () => {
   renderMenu('background', true, false);
   const menu = open();
 
-  assert.deepEqual(items(menu).map(labelOf), ['Queue', 'Send anyway']);
+  assert.deepEqual(items(menu).map(labelOf), ['Send', 'Queue', 'Send anyway']);
   assert.ok(looksDestructive(item(menu, 'Send anyway')), 'Send anyway is still last and red');
 });
 

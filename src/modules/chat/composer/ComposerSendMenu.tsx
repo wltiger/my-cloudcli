@@ -18,7 +18,9 @@ const isApplePlatform = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.te
 const SIDE_QUESTION_SHORTCUT = isApplePlatform ? '⌥↵' : 'Alt+↵';
 
 export type ComposerSendMenuState = 'responding' | 'background';
-export type ComposerSendMenuChoice = 'queue' | 'steer' | 'sideQuestion' | 'stop' | 'send';
+// `sendKeep` is this fork's: an ordinary send over background work, which the
+// held process takes in while that work keeps running (fork entry 29).
+export type ComposerSendMenuChoice = 'queue' | 'steer' | 'sideQuestion' | 'stop' | 'send' | 'sendKeep';
 
 type ComposerSendMenuProps = {
   /** Whether a turn is still being written, or only background work runs. */
@@ -80,12 +82,10 @@ export default function ComposerSendMenu({ state, hasInput, hasText = hasInput, 
   const queueDescription = state === 'responding'
     ? t('sendMenu.queue.descriptionResponding', { defaultValue: 'Send when this turn ends' })
     : t('sendMenu.queue.descriptionBackground', { defaultValue: 'Send when the background work ends' });
-  // Enter only queues while a turn is written; during background work it
-  // opens the "send anyway?" confirm dialog instead, so Queue gets no hint
-  // there, matching that row's own description above.
-  const queueShortcut = state === 'responding'
-    ? (sendByCtrlEnter ? (isApplePlatform ? '⌘↵' : 'Ctrl+↵') : '↵')
-    : null;
+  const sendKey = sendByCtrlEnter ? (isApplePlatform ? '⌘↵' : 'Ctrl+↵') : '↵';
+  // Enter queues while a turn is written; during background work it sends
+  // (the held process takes the message in), so the hint moves to Send.
+  const queueShortcut = state === 'responding' ? sendKey : null;
   // Esc stops a running turn; background work has no key for Send anyway,
   // so the last row's hint follows the same gate as Queue's.
   const lastShortcut = state === 'responding' ? 'esc' : null;
@@ -112,6 +112,19 @@ export default function ComposerSendMenu({ state, hasInput, hasText = hasInput, 
 
       {isOpen && anchor && createPortal(
         <ComposerMenuSurface anchor={anchor} menuRef={menuRef} ariaLabel={triggerLabel}>
+          {state === 'background' && (
+            // First, and not destructive: the work keeps running. It is what
+            // Enter does here; Send anyway (last, red) is the one that stops it.
+            <ComposerMenuItem
+              disabled={!hasInput}
+              isSelected={false}
+              role="menuitem"
+              label={t('sendMenu.sendKeep.label', { defaultValue: 'Send' })}
+              description={t('sendMenu.sendKeep.description', { defaultValue: 'Send now; the background work keeps running' })}
+              trailing={<ShortcutHint>{sendKey}</ShortcutHint>}
+              onSelect={() => select('sendKeep')}
+            />
+          )}
           <ComposerMenuItem
             disabled={!hasInput}
             isSelected={false}

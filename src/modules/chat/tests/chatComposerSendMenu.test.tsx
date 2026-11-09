@@ -249,7 +249,7 @@ test('the side-question shortcut hint shows for a fine pointer with hover, not b
   assert.ok(!hint.className.includes('sm:inline-block'), `expected no width-based gate, got: ${hint.className}`);
 });
 
-test('background work, input present: the menu offers Queue, Side question, Send anyway in that order', () => {
+test('background work, input present: the menu offers Send, Queue, Side question, Send anyway in that order', () => {
   render(<UiPreferencesProvider><ChatComposer {...props({ activity: BACKGROUND, supportsSideQuestions: true })} /></UiPreferencesProvider>);
 
   const trigger = screen.getByRole('button', { name: 'Send options' });
@@ -257,10 +257,13 @@ test('background work, input present: the menu offers Queue, Side question, Send
 
   const labels = Array.from(screen.getByRole('menu').querySelectorAll<HTMLElement>('[role^="menuitem"]'))
     .map((row) => row.textContent ?? '');
-  assert.equal(labels.length, 3, `Queue, Side question, Send anyway, got: ${labels.join(' | ')}`);
-  assert.ok(labels[0]?.startsWith('Queue'), `first row is Queue, got: ${labels.join(' | ')}`);
-  assert.ok(labels[1]?.startsWith('Side question'), `second row is Side question, got: ${labels.join(' | ')}`);
-  assert.ok(labels[2]?.startsWith('Send anyway'), `third row is Send anyway, got: ${labels.join(' | ')}`);
+  // Send (this fork's row) first: the held process takes the message in and
+  // the work keeps running. Send anyway, last, is the one that stops it.
+  assert.equal(labels.length, 4, `Send, Queue, Side question, Send anyway, got: ${labels.join(' | ')}`);
+  assert.ok(labels[0]?.startsWith('Send') && !labels[0]?.startsWith('Send anyway'), `first row is Send, got: ${labels.join(' | ')}`);
+  assert.ok(labels[1]?.startsWith('Queue'), `second row is Queue, got: ${labels.join(' | ')}`);
+  assert.ok(labels[2]?.startsWith('Side question'), `third row is Side question, got: ${labels.join(' | ')}`);
+  assert.ok(labels[3]?.startsWith('Send anyway'), `fourth row is Send anyway, got: ${labels.join(' | ')}`);
 });
 
 // The capability gate has to travel: every component defaults
@@ -287,7 +290,9 @@ for (const [state, overrides] of [
     render(<UiPreferencesProvider><ChatComposer {...props({ ...overrides, supportsSideQuestions: false })} /></UiPreferencesProvider>);
     fireEvent.click(screen.getByRole('button', { name: 'Send options' }));
 
-    assert.equal(menuLabels().length, 2, `only the two session choices, got: ${menuLabels().join(' | ')}`);
+    // Background work adds this fork's Send row to the two session choices.
+    const expected = 'activity' in overrides ? 3 : 2;
+    assert.equal(menuLabels().length, expected, `only the session choices, got: ${menuLabels().join(' | ')}`);
     assert.ok(!menuLabels().some((label) => label.startsWith('Side question')));
   });
 }

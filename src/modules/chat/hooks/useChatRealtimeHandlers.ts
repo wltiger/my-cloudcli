@@ -2,7 +2,7 @@ import { useEffect, useRef } from 'react';
 import type { Dispatch, MutableRefObject, SetStateAction } from 'react';
 
 import type { ServerEvent,MarkSessionBackgroundWork,MarkSessionIdle,MarkSessionProcessing,PendingPermissionRequest,ProjectSession,LLMProvider,NormalizedMessage,GetSessionActivity,MarkSessionBackground,SideQuestionEvent,SteerOutcome } from '@/shared/types';
-import { notifyBackgroundWorkRefused } from '@/modules/chat/utils/backgroundWorkRefusal';
+import { notifyBackgroundWorkRefused, notifyRunSettled } from '@/modules/chat/utils/backgroundWorkRefusal';
 import { showCompletionTitleIndicator } from '@/modules/chat/utils/pageTitleNotification';
 import { playChatCompletionSound, playNotificationSound } from '@/shared/utils';
 import type { SessionStore } from '@/modules/chat/hooks/useSessionStore';
@@ -373,6 +373,8 @@ export function useChatRealtimeHandlers({
               sessionStore.updateStreaming(sid, buffered, provider);
               sessionStore.finalizeStreaming(sid);
             }
+            // The composer's record of what it sent can no longer be refused.
+            notifyRunSettled(sid);
           }
 
           // `complete` is the unified terminal event — every provider run ends
