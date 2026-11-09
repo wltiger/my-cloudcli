@@ -30,6 +30,7 @@ import type {
   ProviderModelsDefinition,
   ProviderSkillSource,
   QueuedChatMessage,
+  QueuedMessageWaitFor,
   SubagentActivity,
   WorkspacePathValidationResult,
 } from '@/shared/types.js';
@@ -123,8 +124,13 @@ export function readQueuedChatMessage(value: unknown): QueuedChatMessage | null 
   const options = record.options && typeof record.options === 'object' && !Array.isArray(record.options)
     ? record.options as Record<string, unknown>
     : undefined;
-  const waitFor = record.waitFor === 'turn' || record.waitFor === 'background' ? record.waitFor : undefined;
+  const waitFor = isQueuedMessageWaitFor(record.waitFor) ? record.waitFor : undefined;
   return { content, ...(options ? { options } : {}), attachments, ...(waitFor ? { waitFor } : {}) };
+}
+
+/** Whether a value is one of the `waitFor` values a queued message can carry (fork entry 31). */
+export function isQueuedMessageWaitFor(value: unknown): value is QueuedMessageWaitFor {
+  return value === 'turn' || value === 'background';
 }
 
 // ---------------------------

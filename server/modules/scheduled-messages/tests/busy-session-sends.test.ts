@@ -6,7 +6,7 @@ import test from 'node:test';
 
 import { closeConnection, initializeDatabase, scheduledMessagesDb, sessionDraftsDb, sessionsDb, userDb } from '@/modules/database/index.js';
 import { dispatchDueScheduledMessages, dispatchQueuedMessages } from '@/modules/scheduled-messages/services/scheduled-message-dispatcher.service.js';
-import { chatRunRegistry, connectedClients, runDetachedChatTurn } from '@/modules/websocket/index.js';
+import { chatRunRegistry, connectedClients } from '@/modules/websocket/index.js';
 
 /**
  * Seam: the dispatcher passes and `runDetachedChatTurn`, with a runtime that
@@ -78,22 +78,6 @@ function finishedTurn(userId: number): void {
 
 const status = (userId: number) => scheduledMessagesDb.listForSession(userId, SESSION_ID)[0]?.status;
 const queued = (userId: number) => sessionDraftsDb.getDrafts(userId)[0]?.queuedMessage as { content?: string; waitFor?: string } | null | undefined;
-
-test('runDetachedChatTurn reports a refused push, and passes interruptBackground to the runtime', async () => {
-  await withIsolatedDatabase(async (userId) => {
-    const runs: RunCall[] = [];
-    const state = { background: true, refuses: true };
-    const runtime = createRuntime(runs, state);
-
-    const refused = await runDetachedChatTurn({ sessionId: SESSION_ID, userId, content: 'hello' }, { runtime });
-    assert.equal(refused.started, true);
-    assert.equal(refused.refused, true);
-
-    const sent = await runDetachedChatTurn({ sessionId: SESSION_ID, userId, content: 'hello', interruptBackground: true }, { runtime });
-    assert.equal(sent.refused, false);
-    assert.equal(runs[1]?.options.interruptBackground, true, 'on the top level of the runtime options');
-  });
-});
 
 test('queued messages keep what they wait for, and a joined turn waits for background work if either part did', async () => {
   await withIsolatedDatabase(async (userId) => {
@@ -211,22 +195,5 @@ test('a scheduled message set to wait stays scheduled while a turn runs, and thr
     assert.equal(runs.length, 2);
     assert.equal(runs[1]?.options.interruptBackground, undefined, 'it never stops anything');
     assert.equal(status(userId), 'sent');
-  });
-});
-
-test('a run the server starts keeps every tab that watched the session\'s previous run', async () => {
-  await withIsolatedDatabase(async (userId) => {
-    const frames: Array<Record<string, unknown>> = [];
-    const tab = { readyState: 1, send: (data: string) => { frames.push(JSON.parse(data) as Record<string, unknown>); } };
-    const first = chatRunRegistry.startRun({ appSessionId: SESSION_ID, provider: 'claude', providerSessionId: null, connection: tab as never, userId });
-    first!.writer.sendComplete({ exitCode: 0 });
-
-    const detached = chatRunRegistry.startRun({ appSessionId: SESSION_ID, provider: 'claude', providerSessionId: null, connection: null, userId });
-    detached!.writer.send({ kind: 'text', role: 'assistant', content: 'the queued reply', sessionId: SESSION_ID, provider: 'claude' });
-
-    assert.ok(
-      frames.some((frame) => frame.kind === 'text' && frame.content === 'the queued reply'),
-      'the open tab sees the reply live, not only after a reload',
-    );
   });
 });

@@ -1,5 +1,5 @@
 import type { QueuedChatMessage } from '@/shared/types.js';
-import { AppError } from '@/shared/utils.js';
+import { AppError, isQueuedMessageWaitFor } from '@/shared/utils.js';
 
 type GitConfig = {
   git_name: string | null;
@@ -85,7 +85,7 @@ const readQueuedMessageInput = (value: unknown): QueuedChatMessage => {
     content,
     ...(isPlainObject(message.options) ? { options: message.options } : {}),
     attachments,
-    ...(message.waitFor === 'turn' || message.waitFor === 'background' ? { waitFor: message.waitFor } : {}),
+    ...(isQueuedMessageWaitFor(message.waitFor) ? { waitFor: message.waitFor } : {}),
   };
 };
 

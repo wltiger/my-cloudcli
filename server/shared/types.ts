@@ -1219,6 +1219,14 @@ export type QueuedChatMessage = {
   waitFor?: QueuedMessageWaitFor;
 };
 
+/**
+ * What a queued message waits for before it is sent (fork entry 31). `turn`:
+ * the turn in flight when it was queued — once that ends it is pushed into
+ * the process still held for background work. `background`: that background
+ * work as well. The User module accepts it, the Database module stores and
+ * merges it (either part waiting on `background` makes the whole wait), and
+ * the Scheduled Messages dispatcher reads it.
+ */
 export type QueuedMessageWaitFor = 'turn' | 'background';
 
 // ---------------------------

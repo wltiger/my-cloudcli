@@ -1,7 +1,13 @@
 import { scheduledMessagesDb, sessionDraftsDb } from '@/modules/database/index.js';
 import type { QueuedSessionMessageRecord, ScheduledMessageRow } from '@/modules/database/index.js';
+import {
+  keepWaitingScheduledMessages,
+  queuedMessageMustWait,
+  restoreRefusedQueuedMessage,
+  runScheduledTurn,
+} from '@/modules/scheduled-messages/services/busy-session-sends.service.js';
 import { announceScheduledMessagesChanged } from '@/modules/scheduled-messages/services/scheduled-messages.service.js';
-import { chatRunRegistry, runDetachedChatTurn } from '@/modules/websocket/index.js';
+import { runDetachedChatTurn } from '@/modules/websocket/index.js';
 import type { ProviderRuntimeGateway } from '@/modules/websocket/index.js';
 import { readQueuedChatMessage } from '@/shared/utils.js';
 
@@ -54,11 +60,8 @@ async function sendClaimedQueuedMessage(
     sessionDraftsDb.restoreQueuedMessage(candidate);
     return;
   }
-  // The process holding the session's background work could not take it (a
-  // changed setting, say). Put it back to wait for that work to end, rather
-  // than pushing it again on every poll.
-  if (result.refused) {
-    sessionDraftsDb.restoreQueuedMessage(candidate, { waitFor: 'background' });
+  // Fork entry 31: the process holding background work refused it.
+  if (restoreRefusedQueuedMessage(candidate, result)) {
     return;
   }
   sessionDraftsDb.deleteEmptyDraft(candidate.userId, candidate.sessionId);
@@ -70,21 +73,8 @@ export async function dispatchQueuedMessages(runtime: ProviderRuntimeGateway): P
   let claimed = 0;
 
   await Promise.all(candidates.map(async (candidate) => {
-    // A turn in flight always holds a queued message back. Background work a
-    // previous turn left running — a task, or a hold the tracker cannot see,
-    // like a cron — holds back only a message queued over that work on purpose
-    // (`waitFor: background`, and every row from before the field). One queued
-    // during a turn goes out once that turn ends, pushed into the process
-    // still holding the work, which keeps running (fork entry 31); if that
-    // process cannot take it, it is put back to wait for the work (above).
-    // Work with no deadline can hold a message back indefinitely, so the user
-    // can edit or delete it while it waits, or send it with "Send anyway".
-    if (chatRunRegistry.isProcessing(candidate.sessionId)) {
-      return;
-    }
-    const backgroundHeld = runtime.hasBackgroundWork(candidate.sessionId)
-      || chatRunRegistry.hasBackgroundWorkOutstanding(candidate.sessionId);
-    if (backgroundHeld && readQueuedChatMessage(candidate.queuedMessage)?.waitFor !== 'turn') {
+    // Fork entry 31: what the message waits for decides, not background work alone.
+    if (queuedMessageMustWait(candidate, runtime)) {
       return;
     }
     if (!sessionDraftsDb.claimQueuedMessage(candidate)) {
@@ -103,100 +93,26 @@ function recordFailure(row: ScheduledMessageRow, reason: string): void {
   announceScheduledMessagesChanged(row.session_id);
 }
 
-/**
- * What a scheduled message does when it comes due while its session is busy
- * (fork entry 31). `interrupt`, the default and upstream's behaviour: it goes
- * out on time, aborting a turn in flight and, when the process holding the
- * session's background work cannot take it, stopping that work. `wait`: it
- * stays scheduled until the turn has ended and, if that process could not take
- * it, until the work has ended too. Either way a message the held process can
- * take goes into it and stops nothing.
- */
-type ScheduledBusyMode = 'interrupt' | 'wait';
-
-function readBusyMode(options: Record<string, unknown>): ScheduledBusyMode {
-  return options.onBusy === 'wait' ? 'wait' : 'interrupt';
-}
-
-/**
- * `wait` messages the process holding their session's background work has
- * already refused: they are not pushed again, only sent once that work has
- * ended. In memory, so a restart costs at most one more refused push.
- */
-const waitingOutBackgroundWork = new Set<string>();
-
-function holdsBackgroundWork(sessionId: string, runtime: ProviderRuntimeGateway): boolean {
-  return runtime.hasBackgroundWork(sessionId) || chatRunRegistry.hasBackgroundWorkOutstanding(sessionId);
-}
-
-/** Whether a due `wait` message has to stay scheduled for now. */
-function mustKeepWaiting(row: ScheduledMessageRow, runtime: ProviderRuntimeGateway): boolean {
-  if (chatRunRegistry.isProcessing(row.session_id)) {
-    return true;
-  }
-  if (!waitingOutBackgroundWork.has(row.id)) {
-    return false;
-  }
-  if (holdsBackgroundWork(row.session_id, runtime)) {
-    return true;
-  }
-  waitingOutBackgroundWork.delete(row.id);
-  return false;
-}
-
 async function sendClaimedMessage(
   row: ScheduledMessageRow,
   runtime: ProviderRuntimeGateway,
 ): Promise<void> {
-  const { onBusy, ...options } = readOptions(row.options);
-  const busyMode = readBusyMode({ onBusy });
-  const send = (interruptBackground: boolean) => runDetachedChatTurn(
-    {
-      sessionId: row.session_id,
-      userId: row.user_id,
-      content: row.content,
-      options,
-      // The user picked this time on purpose; a run that happens to be going
-      // is aborted so the scheduled message lands when it was due, instead
-      // of being recorded as "not sent — session was busy". A `wait` message
-      // was only claimed with no turn in flight, so it never aborts one.
-      interruptActiveRun: busyMode === 'interrupt',
-      interruptBackground,
-    },
-    { runtime },
-  );
-
   try {
-    let result = await send(false);
-
-    if (result.refused) {
-      if (busyMode === 'wait') {
-        // Back on the banner until the work it could not join has ended.
-        waitingOutBackgroundWork.add(row.id);
-        scheduledMessagesDb.releaseClaim(row.id);
-        announceScheduledMessagesChanged(row.session_id);
-        return;
-      }
-      // On time, as upstream sends it: the held process could not take the
-      // message, so its background work is stopped and the message sent.
-      result = await send(true);
-    }
-
-    if (busyMode === 'wait' && !result.started && result.error === 'A run was already in progress for this session.') {
-      // A turn started between the check and this send: try again later.
-      scheduledMessagesDb.releaseClaim(row.id);
-      announceScheduledMessagesChanged(row.session_id);
+    // Fork entry 31: sent into the process holding background work when it
+    // can be, else as the message's `onBusy` says (`interrupt` aborts a run in
+    // progress, as upstream does, so it lands when it was due). Null: it went
+    // back to wait.
+    const result = await runScheduledTurn(row, readOptions(row.options), runtime);
+    if (!result) {
       return;
     }
 
     // Recorded rather than retried, and recorded whether the run never started
-    // (deleted session, unavailable provider) or started and then failed — or
-    // was refused again. Silently dropping a message the user scheduled is
-    // worse than telling them it did not go.
-    if (!result.started || result.error || result.refused) {
-      recordFailure(row, result.error ?? (result.refused
-        ? 'The session\'s background work could not be stopped for this message.'
-        : 'The session was unavailable when this was due.'));
+    // (deleted session, unavailable provider) or started and then failed.
+    // Silently dropping a message the user scheduled is worse than telling
+    // them it did not go.
+    if (!result.started || result.error) {
+      recordFailure(row, result.error ?? 'The session was unavailable when this was due.');
     }
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
@@ -214,16 +130,9 @@ export async function dispatchDueScheduledMessages(
   now: Date = new Date(),
 ): Promise<number> {
   // Claimed before any of them runs, so a long turn cannot let the next poll
-  // pick the same message up again. A `wait` message whose session is busy
-  // goes straight back to pending, before anyone is told of the claim.
-  const claimed = scheduledMessagesDb.claimDue(now);
-  const due = claimed.filter((row) => {
-    if (readBusyMode(readOptions(row.options)) === 'wait' && mustKeepWaiting(row, runtime)) {
-      scheduledMessagesDb.releaseClaim(row.id);
-      return false;
-    }
-    return true;
-  });
+  // pick the same message up again.
+  // Fork entry 31: a `wait` message whose session is busy goes straight back.
+  const due = keepWaitingScheduledMessages(scheduledMessagesDb.claimDue(now), runtime);
   if (due.length === 0) {
     return 0;
   }

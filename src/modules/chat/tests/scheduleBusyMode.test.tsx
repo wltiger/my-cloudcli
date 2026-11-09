@@ -49,3 +49,15 @@ test('choosing Wait schedules the message to wait for a busy session', () => {
 
   assert.equal(onSchedule.mock.calls[0]?.[1], 'wait');
 });
+
+test('a choice to wait is for one message: the next schedule starts from Send on time again', () => {
+  const onSchedule = openPopover();
+
+  fireEvent.click(row(/^Wait/));
+  fireEvent.click(screen.getAllByRole('menuitemradio').find((item) => /15/.test(item.textContent ?? ''))!);
+  fireEvent.click(screen.getByRole('button', { name: /schedule/i }));
+
+  assert.equal(row(/^Send on time/).getAttribute('aria-checked'), 'true');
+  fireEvent.click(screen.getAllByRole('menuitemradio').find((item) => /15/.test(item.textContent ?? ''))!);
+  assert.deepEqual(onSchedule.mock.calls.map((call) => call[1]), ['wait', 'interrupt']);
+});

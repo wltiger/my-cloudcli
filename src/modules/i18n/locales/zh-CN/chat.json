@@ -185,7 +185,8 @@
       "willSend": "将在当前完成后发送",
       "waitingForBackgroundWork": "等待后台工作结束",
       "edit": "编辑排队消息",
-      "delete": "删除排队消息"
+      "delete": "删除排队消息",
+      "editCannotQueue": "编辑过的消息不能排队：等后台工作结束后再发送，或者选「仍然发送」。"
     },
     "steer": {
       "label": "插话",

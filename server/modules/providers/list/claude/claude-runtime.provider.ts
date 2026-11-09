@@ -1532,14 +1532,17 @@ async function queryClaudeSDK(
         await accepted.settled;
         return;
       }
-      if (backgroundWork.outstanding(sessionKey()).length > 0 || hasHeldTurn(sessionKey())) {
+      if (backgroundWork.outstanding(sessionKey()).length > 0 || hasHeldTurn(sessionKey()) || reusableTurn) {
         // The held process cannot take this turn, and it still has background
         // work running. Releasing it would leave two processes writing one
         // transcript, so the send is refused and the user chooses instead.
         // The tracker alone is not enough to say so: a process held only for
         // a cron from an earlier turn, or for a start no Stop hook has
         // reported yet, has an empty tracker but is still registered as held,
-        // and releasing it would kill that work without asking.
+        // and releasing it would kill that work without asking. Nor is a claim
+        // that could not push (the CLI refused a settings change): the claim
+        // already took the handle off the registry, but the process it named is
+        // still holding that work.
         // The cause is named in both the message and the log, because the
         // refusal alone cannot tell an edit from a changed setting from a
         // process that is gone.

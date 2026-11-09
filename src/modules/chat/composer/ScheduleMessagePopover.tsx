@@ -58,6 +58,9 @@ export function ScheduleMessagePopover({ disabled, onSchedule }: ScheduleMessage
 
   const commit = (scheduledFor: Date) => {
     onSchedule(scheduledFor, busyMode);
+    // Each schedule starts from the default (fork entry 31): a choice to wait
+    // is made per message, never carried to the next one.
+    setBusyMode('interrupt');
     setIsOpen(false);
   };
 

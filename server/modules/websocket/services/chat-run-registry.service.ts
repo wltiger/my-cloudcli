@@ -2,6 +2,7 @@ import { sessionsDb } from '@/modules/database/index.js';
 import { broadcastBackgroundWork } from '@/modules/websocket/services/background-work-broadcast.service.js';
 import { ChatSessionWriter } from '@/modules/websocket/services/chat-session-writer.service.js';
 import { broadcastSessionUpserted } from '@/modules/websocket/services/session-upsert-broadcast.service.js';
+import { WS_OPEN_STATE } from '@/modules/websocket/services/websocket-state.service.js';
 import type {
   LLMProvider,
   NormalizedMessage,
@@ -66,6 +67,29 @@ const MAX_BUFFERED_EVENTS_PER_RUN = 5000;
  * path all consult it instead of asking each provider runtime individually.
  */
 const runs = new Map<string, ChatRun>();
+
+/**
+ * Every socket that has subscribed to a session, kept per session for as long
+ * as the socket stays open (fork entry 31). A tab attaches to a run only when
+ * it subscribes, so a run started later — a queued or scheduled message the
+ * server sends, or a turn another tab started — would otherwise reach it only
+ * after a reload. Each new run starts with this audience. Closed sockets are
+ * dropped whenever a session's watchers are read.
+ */
+const sessionWatchers = new Map<string, Set<RealtimeClientConnection>>();
+
+function watchersOf(appSessionId: string): RealtimeClientConnection[] {
+  const watchers = sessionWatchers.get(appSessionId);
+  if (!watchers) {
+    return [];
+  }
+  for (const connection of watchers) {
+    if (connection.readyState !== WS_OPEN_STATE) {
+      watchers.delete(connection);
+    }
+  }
+  return [...watchers];
+}
 
 /**
  * Sessions whose provider process is still holding work that would die with it —
@@ -270,11 +294,11 @@ export const chatRunRegistry = {
       decorateOutboundEvent: (message) => decorateAndRecordEvent(run, message),
     });
 
-    // Every tab watching this session's previous run keeps watching. A tab
-    // attaches to a run only when it subscribes, so a run nobody asked for (a
-    // queued or scheduled message the server sends) or one another tab started
-    // would otherwise reach it only after a reload — the reply already written.
-    for (const connection of existing?.writer.audience() ?? []) {
+    // Every tab watching this session watches the new run too (fork entry 31).
+    if (input.connection) {
+      chatRunRegistry.watchSession(input.appSessionId, input.connection);
+    }
+    for (const connection of watchersOf(input.appSessionId)) {
       run.writer.updateWebSocket(connection);
     }
 
@@ -357,6 +381,7 @@ export const chatRunRegistry = {
    * `lastSeq` with `chat.subscribe`.
    */
   attachConnection(appSessionId: string, connection: RealtimeClientConnection): boolean {
+    chatRunRegistry.watchSession(appSessionId, connection);
     const run = runs.get(appSessionId);
     if (!run) {
       return false;
@@ -414,8 +439,23 @@ export const chatRunRegistry = {
   /**
    * Test-only escape hatch: clears every tracked run.
    */
+  /**
+   * Records that a socket watches a session, so every later run of it reaches
+   * the socket live (fork entry 31). Called on `chat.subscribe`, whether or not
+   * a run is going.
+   */
+  watchSession(appSessionId: string, connection: RealtimeClientConnection): void {
+    let watchers = sessionWatchers.get(appSessionId);
+    if (!watchers) {
+      watchers = new Set();
+      sessionWatchers.set(appSessionId, watchers);
+    }
+    watchers.add(connection);
+  },
+
   clearAll(): void {
     runs.clear();
+    sessionWatchers.clear();
     backgroundWorkSessions.clear();
   },
 };

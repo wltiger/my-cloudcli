@@ -830,6 +830,9 @@ function handleChatSubscribe(
     // keeps producing events through the same writer (task progress, the
     // turn the CLI pushes when a task reports), so a tab opened during that
     // work attaches too; the registry keeps the run while the work lasts.
+    // Fork entry 31: remembered whether or not a run is going, so a run that
+    // starts later (a queued or scheduled message) reaches this socket live.
+    chatRunRegistry.watchSession(sessionId, ws);
     if (isProcessing || dependencies.runtime.hasBackgroundWork(sessionId)) {
       chatRunRegistry.attachConnection(sessionId, ws);
     }

@@ -568,27 +568,29 @@ test('Claude per-turn process-reuse compatibility', async (t) => {
     await releaseHeldRun(first.live, first.turn);
   });
 
-  await t.test('a refused in-flight change falls back to a new process', async () => {
+  await t.test('a refused in-flight change is refused to the user, and the held process keeps its work', async () => {
+    // The claim took the handle off the registry before the CLI refused the
+    // settings change, but the process still holds the shell: releasing it
+    // here would kill that work without asking.
     const first = await startHeldTurn('compat-refused', {
       toolsSettings: { allowedTools: [], disallowedTools: ['Bash'], skipPermissions: false },
     });
     failNextSetter = true;
-    const second = await startTurn(
+    await startRefusedTurn(
       'compat-refused',
       { toolsSettings: { allowedTools: [], disallowedTools: [], skipPermissions: true } },
       'second question',
     );
 
-    assert.equal(queries.length, 2, 'a live query that cannot adopt the new settings is not reused');
-    assert.equal(first.live.promptStreamClosed, true, 'the process that refused is let go');
-    // Releasing is not instant, and a turn this process never took must not
-    // loosen what its own outstanding work is judged by in the meantime.
+    assert.equal(queries.length, 1, 'a live query that cannot adopt the new settings is not reused, and no new one replaces it');
+    assert.equal(first.live.promptStreamClosed, false, 'the process that refused keeps running its work');
+    // A turn this process never took must not loosen what its own outstanding
+    // work is judged by.
     assert.deepEqual(await askGate(first.live, 'Bash', { command: 'ls' }), {
       behavior: 'deny',
       message: 'Tool disallowed by settings',
     });
 
-    await queries[1]?.emit(RESULT);
-    await Promise.all([first.turn, second.turn]);
+    await releaseHeldRun(first.live, first.turn);
   });
 });

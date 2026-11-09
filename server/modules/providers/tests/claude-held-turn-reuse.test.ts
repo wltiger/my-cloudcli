@@ -335,7 +335,9 @@ test('Claude held-process reuse across turns', async (t) => {
     });
   });
 
-  await t.test('a follow-up with changed settings supersedes the held process', async () => {
+  await t.test('a follow-up whose settings the held process refuses is refused, and the process keeps its work', async () => {
+    // The fake query has no `setModel`, so adopting the new model fails after
+    // the claim already took the handle: the process still holds the shell.
     await withIsolatedDatabase(async () => {
       sessionsDb.createAppSession('app-changed', 'claude', '/workspace/demo');
 
@@ -352,20 +354,23 @@ test('Claude held-process reuse across turns', async (t) => {
 
       const second = new FakeConnection();
       const secondRun = startRun('app-changed', second);
-      const secondTurn = queryClaudeSDK(
+      await queryClaudeSDK(
         'second question',
         { ...BASE_OPTIONS, sessionId: 'app-changed', model: 'opus' },
         secondRun.writer,
         createContext(),
       );
-      await waitUntil(() => queries.length === 2, 'the superseding query to start');
       await flush();
 
-      assert.equal(queries.length, 2, 'changed settings need their own query');
-      assert.equal(live.promptStreamClosed, true, 'the previous hold is released');
+      assert.equal(queries.length, 1, 'no new process replaces the held one');
+      assert.equal(live.promptStreamClosed, false, 'and the held one is not released');
+      assert.match(String(second.frames.find((frame) => frame.code === 'background_work_not_kept')?.content), /refused a settings change/);
+      secondRun.writer.sendComplete({ exitCode: 1 });
 
-      await queries[1]?.emit({ type: 'result', session_id: 'provider-1' });
-      await Promise.all([firstTurn, secondTurn]);
+      // The CLI reports the start settled in a turn of its own, which ends the hold.
+      await live.emit({ type: 'result', session_id: 'provider-1' });
+      await firstTurn;
+      assert.equal(live.promptStreamClosed, true);
     });
   });
 

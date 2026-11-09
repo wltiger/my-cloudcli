@@ -904,6 +904,7 @@ export type QueuedDraft = {
   waitFor?: QueuedMessageWaitFor;
 };
 
+/** What a queued message waits for before it is sent; see `QueuedDraft.waitFor` (fork entry 31). */
 export type QueuedMessageWaitFor = 'turn' | 'background';
 
 /**

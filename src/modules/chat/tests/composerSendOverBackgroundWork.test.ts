@@ -292,6 +292,39 @@ test('an edited message refused over background work is re-sent as the same edit
   assert.equal(resent.interruptBackground, true);
 });
 
+test('a refused edit that is cancelled is back in the composer as an edit, not as a new message', async () => {
+  const { view } = render(backgroundOnly);
+  await act(async () => {
+    view.result.current.beginEditMessage({ type: 'user', content: 'hello', transcriptAnchorId: 'anchor-7', timestamp: new Date() } as never);
+  });
+  await act(async () => { view.result.current.setInput('hello again'); });
+  await submit(view);
+  assert.equal(view.result.current.editingAnchorId, null, 'sending leaves edit mode');
+  await refuse(view);
+
+  await answer(view, 'cancel');
+
+  assert.equal(view.result.current.input, 'hello again');
+  assert.equal(view.result.current.editingAnchorId, 'anchor-7', 'still replacing the same message');
+});
+
+test('a refused edit cannot be queued: it stays in the composer as an edit and nothing is queued', async () => {
+  const { view, frames } = render(backgroundOnly);
+  await act(async () => {
+    view.result.current.beginEditMessage({ type: 'user', content: 'hello', transcriptAnchorId: 'anchor-7', timestamp: new Date() } as never);
+  });
+  await act(async () => { view.result.current.setInput('hello again'); });
+  await submit(view);
+  await refuse(view);
+
+  await answer(view, 'queue');
+
+  assert.equal(appendQueuedMessage.mock.calls.length, 0, 'a queued message would be appended, not replace the edited one');
+  assert.equal(frames().length, 1, 'only the refused edit was sent');
+  assert.equal(view.result.current.input, 'hello again');
+  assert.equal(view.result.current.editingAnchorId, 'anchor-7');
+});
+
 test('a refusal for a session the user has left puts the message into that session\'s draft and asks nothing', async () => {
   const { view } = render(backgroundOnly);
   await act(async () => { view.result.current.setInput('hello'); });

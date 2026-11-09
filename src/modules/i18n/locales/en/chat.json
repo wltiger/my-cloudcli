@@ -221,7 +221,8 @@
       "willSend": "Will send when this finishes",
       "waitingForBackgroundWork": "Waiting for background work to finish",
       "edit": "Edit queued message",
-      "delete": "Delete queued message"
+      "delete": "Delete queued message",
+      "editCannotQueue": "An edited message cannot be queued: send it once the background work has finished, or choose Send anyway."
     },
     "steer": {
       "label": "Steering",
