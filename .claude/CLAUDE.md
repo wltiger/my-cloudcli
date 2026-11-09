@@ -65,6 +65,8 @@ Before touching `node_modules`, check whether an instance is running: `Get-NetTC
 
 After any dependency change these failures come back identically and read like a regression. To attribute a new failure, diff the failure set against this baseline first — what is on the list is expected; what is not is what to investigate.
 
+**Since v1.37.8, `npm test` never finishes on Windows** unless one upstream test is skipped: `cursor: a cancelled run is reported as stopped/aborted` (`provider-abort-notifications.test.ts`) kills only the `.cmd` wrapper of its fake CLI, the `node` child keeps the run open, and the whole suite waits forever (see `docs/pull-requests/PR09`). Run the full suite as `npx tsx --experimental-test-module-mocks --tsconfig server/tsconfig.json --test --test-skip-pattern="cursor: a cancelled run" "server/**/*.test.ts" "server/**/*.test.js"`. Two v1.37.8 upstream tests join the stable Windows set (path shape, not code): `chat-side-question`'s "the provider session id and project path come from the session row" (fork #24 lower-cases the path) and `agent.routes`' "reads no model catalog for a continued session of an unregistered provider" (a POSIX path resolved to `d:\...`). Load-flaky in full runs only, each passing alone: `chat-edit-send`, `provider-cli.service`, `opencode-side-question`'s fork-registry timing test.
+
 ## Local UI testing (dev server / browser automation)
 
 The default auth DB lives at `~/.cloudcli/auth.db` and is shared with any other CloudCLI install (official npm package, other clones) on this machine — it holds the real user account and session data. **Never test against it.**

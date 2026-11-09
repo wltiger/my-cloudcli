@@ -15,6 +15,8 @@ Entries are numbered locally and kept forever, including the ones that never shi
 | [PR05](PR05-page-title-frozen-on-conversations-tab.md) ([中文](PR05-page-title-frozen-on-conversations-tab.zh-CN.md)) | Page title stops updating on the Conversations / Archive sidebar tabs | Issue | Won't submit — cosmetic, zero fork cost, needs an upstream design decision. **Duplicate check not run** | — |
 | [PR06](PR06-held-process-released-every-turn.md) ([中文](PR06-held-process-released-every-turn.zh-CN.md)) | Each new turn releases the held Claude process, so background work cannot survive a follow-up turn | Issue | Won't submit — the fix needs upstream to reverse a deliberate design. **Duplicate check not run** | — |
 | [PR07](PR07-opencode-orphan-servers-on-windows.md) ([中文](PR07-opencode-orphan-servers-on-windows.zh-CN.md)) | Orphaned `opencode serve` processes are only reaped on Linux | Issue | Won't submit — identical to upstream, costs this fork nothing, evidence not measured | — |
+| [PR08](PR08-detached-run-replies-not-live.md) ([中文](PR08-detached-run-replies-not-live.zh-CN.md)) | A reply the server sends on its own does not stream to a tab that has the session open | Issue | Won't submit — fixed here (#31), evidence not measured in a browser, fix is upstream's design call | — |
+| [PR09](PR09-cursor-cancel-test-hangs-on-windows.md) ([中文](PR09-cursor-cancel-test-hangs-on-windows.zh-CN.md)) | A cursor cancel test never finishes on Windows, so `npm test` hangs | Issue | Won't submit — worked around with a skip flag, fix is upstream's design call | — |
 
 ## If you revive one of these
 

@@ -1,0 +1,108 @@
+2ff748423a9d78081dc92df0c01fca56f9f063bd
+100644 67bd3dc7c1bf6f45586d429ecaf111fccc4b2186 1	package-lock.json
+100644 9d65d55c9fa7785543efabe0f372728dbcf70515 2	package-lock.json
+100644 3868930a171c348cedc5da895a08ea3c74817930 3	package-lock.json
+100644 81a81fa2f6d0bfbfd76bb51f5ee59cc3a053d4dc 1	package.json
+100644 5263354699ed30d5c656da81c72b716f3e4095b6 2	package.json
+100644 33cce519c097493573a8cd0513e7ea90a196f016 3	package.json
+100644 12c6320faadb9d01b2f3bbdba98f2462dba380a0 1	server/modules/providers/index.ts
+100644 a88f78978130193bd53728b804348cd9b6fe5df8 2	server/modules/providers/index.ts
+100644 3b5aa99fed5e883327d7bbbe8f019806cc101b5d 3	server/modules/providers/index.ts
+100644 4edc2d41b8132fa94a946254d6ace120aa061115 1	server/modules/providers/list/claude/claude-runtime.provider.ts
+100644 c42eb0c545d00470fa55cfe53fe171d8e9e727de 2	server/modules/providers/list/claude/claude-runtime.provider.ts
+100644 d8eb183739289112a052020219fa2242f5121fea 3	server/modules/providers/list/claude/claude-runtime.provider.ts
+100644 80d9f30df2adbb02522c89ce82a20c90681ca0ed 1	server/modules/providers/list/opencode/opencode-session-synchronizer.provider.ts
+100644 a6f67d89e6350ac4f8ae5b5cb03cf96cf673b303 2	server/modules/providers/list/opencode/opencode-session-synchronizer.provider.ts
+100644 2ce6675098b99a86839b88da353a6a850706aa50 3	server/modules/providers/list/opencode/opencode-session-synchronizer.provider.ts
+100644 58c69f531e2538f61477b1baddfff85c47b6a9e0 1	server/modules/providers/provider.routes.ts
+100644 0e2b4ad62639beac76b0580aed152eeb61f9e299 2	server/modules/providers/provider.routes.ts
+100644 c0e679e76ed653c26403e3f040f77b1b8cb8c752 3	server/modules/providers/provider.routes.ts
+100644 e49da7b94e0a2e615ece1387c270b6210fe2ab47 1	src/modules/chat/composer/BackgroundSendDialog.tsx
+100644 783a00b7380852ea2a9acc5fb8ce9efaa3c78a3f 2	src/modules/chat/composer/BackgroundSendDialog.tsx
+100644 d3db85ea21d79d3985bf45ecbe3e462096233e22 3	src/modules/chat/composer/BackgroundSendDialog.tsx
+100644 b23cda85c739e81fc64166b57ec3bac5e5d297ac 1	src/modules/chat/composer/ChatComposer.tsx
+100644 4acbb18c60f4b3c5c2bc2239b999779868559cc1 2	src/modules/chat/composer/ChatComposer.tsx
+100644 349e341c8dcfe370e11157fad97d27620d3c69dd 3	src/modules/chat/composer/ChatComposer.tsx
+100644 c3d85a085efcf49550ed36d0009b593fcee05cc5 1	src/modules/chat/hooks/useChatComposerState.ts
+100644 4a12f8ef101e20e6a535c4a042c86fb6ac8e642c 2	src/modules/chat/hooks/useChatComposerState.ts
+100644 250eecf87261175cc596c118461ab8198fba964f 3	src/modules/chat/hooks/useChatComposerState.ts
+100644 8a9b53453e2521f915937f1c948bf7887939f5fa 1	src/modules/chat/hooks/useChatProviderState.ts
+100644 e0d9b787f6e24c0760a3a33560c8103fef3b3569 2	src/modules/chat/hooks/useChatProviderState.ts
+100644 693a9cba223559662ecf98a350dcba81d44393fc 3	src/modules/chat/hooks/useChatProviderState.ts
+100644 df20c5360eefdc4b106d29e9b200394ad02c62c0 1	src/modules/chat/hooks/useChatRealtimeHandlers.ts
+100644 189cbb0c0a926b95afa6fd81ac8da1dc29d918c8 2	src/modules/chat/hooks/useChatRealtimeHandlers.ts
+100644 b1db0cc6cf05074f7bdda9c6e3fcc8f7a513fc41 3	src/modules/chat/hooks/useChatRealtimeHandlers.ts
+100644 761f43b0672db7ff682d5c7bc5c5fa1196eec68e 1	src/modules/chat/transcript/MessageComponent.tsx
+100644 1ddf35035e11ce9429322d5d09e56373a478fc79 2	src/modules/chat/transcript/MessageComponent.tsx
+100644 8f2e12222d461ce689beba5fd9bd6a3253ede91a 3	src/modules/chat/transcript/MessageComponent.tsx
+100644 b5c0042c783062fe5cf9d9ee7c91d14a97694e39 1	src/modules/file-tree/hooks/useFileTreeOperations.ts
+100644 d2bb22a202527c85c6ad2bd8a3cf10f9f2ed3736 2	src/modules/file-tree/hooks/useFileTreeOperations.ts
+100644 2554cc7741b0bd595d1ecf2058e3a9d06a97d830 3	src/modules/file-tree/hooks/useFileTreeOperations.ts
+100644 fb8e3851145412221ed7d0b808498740caf2a527 1	src/modules/i18n/locales/en/chat.json
+100644 49d73d3551018c1f3af546a54ff6c5f954d8ff1a 2	src/modules/i18n/locales/en/chat.json
+100644 162028f4d7ab0b2596a471a75d1cddd67972382c 3	src/modules/i18n/locales/en/chat.json
+100644 09a8a005b0eeb37bca666467ae684d71c836eae1 1	src/shared/types.ts
+100644 6f3a946dda6da79865a8098344d7b974a4567c28 2	src/shared/types.ts
+100644 c736d7c7bd1bfcf4a3f58f53a4e85f3a4e69063e 3	src/shared/types.ts
+
+Auto-merging package-lock.json
+CONFLICT (content): Merge conflict in package-lock.json
+Auto-merging package.json
+CONFLICT (content): Merge conflict in package.json
+Auto-merging server/modules/agent/agent.routes.ts
+Auto-merging server/modules/agent/tests/agent.routes.test.ts
+Auto-merging server/modules/browser-use/browser-use.service.ts
+Auto-merging server/modules/notifications/services/notification-orchestrator.service.js
+Auto-merging server/modules/providers/index.ts
+CONFLICT (content): Merge conflict in server/modules/providers/index.ts
+Auto-merging server/modules/providers/list/claude/claude-runtime.provider.ts
+CONFLICT (content): Merge conflict in server/modules/providers/list/claude/claude-runtime.provider.ts
+Auto-merging server/modules/providers/list/claude/claude-sessions.provider.ts
+Auto-merging server/modules/providers/list/opencode/opencode-session-synchronizer.provider.ts
+CONFLICT (content): Merge conflict in server/modules/providers/list/opencode/opencode-session-synchronizer.provider.ts
+Auto-merging server/modules/providers/provider.routes.ts
+CONFLICT (content): Merge conflict in server/modules/providers/provider.routes.ts
+Auto-merging server/modules/providers/services/provider-capabilities.service.ts
+Auto-merging server/modules/providers/services/provider-models.service.ts
+Auto-merging server/modules/providers/tests/provider-capabilities.service.test.ts
+Auto-merging server/modules/providers/tests/provider-models.service.test.ts
+Auto-merging server/modules/websocket/index.ts
+Auto-merging server/modules/websocket/services/chat-websocket.service.ts
+Auto-merging server/shared/interfaces.ts
+Auto-merging server/shared/types.ts
+Auto-merging server/shared/utils.ts
+Auto-merging src/modules/chat/ChatInterface.tsx
+Auto-merging src/modules/chat/composer/BackgroundSendDialog.tsx
+CONFLICT (content): Merge conflict in src/modules/chat/composer/BackgroundSendDialog.tsx
+Auto-merging src/modules/chat/composer/ChatComposer.tsx
+CONFLICT (content): Merge conflict in src/modules/chat/composer/ChatComposer.tsx
+Auto-merging src/modules/chat/composer/PermissionRequestsBanner.tsx
+Auto-merging src/modules/chat/hooks/useChatComposerState.ts
+CONFLICT (content): Merge conflict in src/modules/chat/hooks/useChatComposerState.ts
+Auto-merging src/modules/chat/hooks/useChatProviderState.ts
+CONFLICT (content): Merge conflict in src/modules/chat/hooks/useChatProviderState.ts
+Auto-merging src/modules/chat/hooks/useChatRealtimeHandlers.ts
+CONFLICT (content): Merge conflict in src/modules/chat/hooks/useChatRealtimeHandlers.ts
+Auto-merging src/modules/chat/hooks/useChatSessionState.ts
+Auto-merging src/modules/chat/hooks/useSessionStore.ts
+Auto-merging src/modules/chat/transcript/ChatMessagesPane.tsx
+Auto-merging src/modules/chat/transcript/Markdown.tsx
+Auto-merging src/modules/chat/transcript/MessageComponent.tsx
+CONFLICT (content): Merge conflict in src/modules/chat/transcript/MessageComponent.tsx
+Auto-merging src/modules/file-tree/hooks/useFileTreeOperations.ts
+CONFLICT (content): Merge conflict in src/modules/file-tree/hooks/useFileTreeOperations.ts
+Auto-merging src/modules/i18n/locales/de/chat.json
+Auto-merging src/modules/i18n/locales/en/chat.json
+CONFLICT (content): Merge conflict in src/modules/i18n/locales/en/chat.json
+Auto-merging src/modules/i18n/locales/en/settings.json
+Auto-merging src/modules/i18n/locales/es/settings.json
+Auto-merging src/modules/i18n/locales/fr/settings.json
+Auto-merging src/modules/i18n/locales/ko/settings.json
+Auto-merging src/modules/i18n/locales/zh-CN/settings.json
+Auto-merging src/modules/sidebar/Sidebar.tsx
+Auto-merging src/modules/sidebar/hooks/useSidebarController.ts
+Auto-merging src/shared/api.ts
+Auto-merging src/shared/constants.ts
+Auto-merging src/shared/types.ts
+CONFLICT (content): Merge conflict in src/shared/types.ts
+Auto-merging src/shared/utils.ts

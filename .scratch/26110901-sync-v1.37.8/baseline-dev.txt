@@ -1,0 +1,31 @@
+  ✖ changed tool rules are enforced on the next tool use
+✖ Claude per-turn process-reuse compatibility
+✖ a background agent output link resolves to its transcript under the Claude projects directory
+✖ a continued session runs under its own provider and project, as a chat send does
+✖ a file in another folder of the workspace can be read, but never written to
+✖ a provider that has to branch to rewind is rewound before the run, not during it
+✖ a root that does not exist does not stop later roots from matching
+✖ a symlink planted in the temp directory cannot read outside every root
+✖ an API run continues a session the caller names by either id, and refuses one that does not exist
+✖ an install from a host nothing answers on fails as PLUGIN_GIT_HOST_UNREACHABLE
+✖ buildClaudeUserContent accepts images under a symlinked cwd
+✖ buildClaudeUserContent reads image bytes into base64 blocks
+✖ changed tool rules are enforced on the next tool use
+✖ checkCredentials: ANTHROPIC_API_KEY in settings.json env alongside a valid subscription login points at settings.json
+✖ checkCredentials: ANTHROPIC_API_KEY in the process env alongside a valid subscription login reports the override
+✖ checkCredentials: ANTHROPIC_API_KEY with an expired subscription login reports no override
+✖ checkCredentials: ANTHROPIC_API_KEY with no credentials file reports no override
+✖ checkCredentials: a valid subscription login with no API key reports credentials_file and no override
+✖ checkCredentials: expired access token with a live refresh token is still authenticated
+✖ checkCredentials: expired access token with a refresh token that has no recorded expiry is authenticated
+✖ checkCredentials: expired access token with an expired refresh token reports not authenticated
+✖ checkCredentials: no CLAUDE_CODE_OAUTH_TOKEN, expired credentials file reports not authenticated
+✖ checkCredentials: no CLAUDE_CODE_OAUTH_TOKEN, valid credentials file falls back to credentials_file
+✖ createProject throws conflict when active project path already exists
+✖ failing tests:
+✖ getBranchDiffForFile synthesizes an all-additions diff for an untracked file
+✖ getStatus: passes the subscription override through to the wire shape, and omits the key when there is none
+✖ projectsDb.createProjectPath returns created for fresh paths
+✖ reading through a symlink out of the temp directory is still refused
+✖ server\modules\agent\tests\agent.routes.test.ts
+✖ the install route answers a git failure with its code and message instead of a bare 500

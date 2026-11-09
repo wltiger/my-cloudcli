@@ -1,0 +1,648 @@
+########## package.json
+143: <<<<<<< dev
+144:     "@anthropic-ai/claude-agent-sdk": "^0.3.295",
+145: =======
+146:     "@anthropic-ai/claude-agent-sdk": "^0.3.311",
+147: >>>>>>> upstream/main
+----
+########## server/modules/providers/index.ts
+21: <<<<<<< dev
+22: // watchHeldTurns: subscribed by the websocket module's background-work bridge,
+23: // which turns "the Claude runtime is holding a process for outstanding work"
+24: // into the run registry state the UI reads.
+25: export { watchHeldTurns } from './list/claude/claude-turn-reuse.js';
+26: =======
+27: // sideQuestionsService: used by the websocket module's `chat.side_question` handler and
+28: // the provider routes' side-question endpoints. State is in memory; a new
+29: // service instance starts empty, as after a CloudCLI restart.
+30: export {
+31:   createSideQuestionsService,
+32:   MAX_CONCURRENT_SIDE_QUESTIONS_PER_SESSION,
+33:   MAX_SIDE_QUESTIONS_PER_SESSION,
+34:   sideQuestionsService,
+35: } from './services/side-questions.service.js';
+36: >>>>>>> upstream/main
+----
+########## server/modules/providers/list/claude/claude-runtime.provider.ts
+1100: <<<<<<< dev
+1101:  * Parking on a queue rather than a single promise is what lets a follow-up turn
+1102:  * be pushed into a process that is still held open: without it the only way to
+1103:  * send another prompt is a new process, which kills whatever the held one was
+1104:  * still running.
+1105:  *
+1106:  * @param {Array<Object>} messages - SDKUserMessage records to send
+1107:  * @returns {{ stream: AsyncIterable, release: () => void, push: (messages: Array<Object>) => void, isOpen: () => boolean }} Stream plus its controls
+1108:  */
+1109: function createHeldPromptStream(messages: unknown[]) {
+1110:   const queue = [...messages];
+1111:   let wake: (() => void) | null = null;
+1112:   let released = false;
+1113: 
+1114:   const resume = () => {
+1115:     const pending = wake;
+1116:     wake = null;
+1117:     pending?.();
+1118:   };
+1119: 
+1120:   const stream = (async function* () {
+1121:     while (true) {
+1122:       while (queue.length > 0) {
+1123:         yield queue.shift();
+1124:       }
+1125:       if (released) {
+1126:         return;
+1127:       }
+1128:       // Keeps stdin open — the CLI stays alive until release() or the next push.
+1129:       await new Promise<void>((resolve) => { wake = resolve; });
+1130:     }
+1131:   })();
+1132: 
+1133:   return {
+1134:     stream,
+1135:     release: () => {
+1136:       released = true;
+1137:       resume();
+1138:     },
+1139:     push: (followUpMessages: unknown[]) => {
+1140:       queue.push(...followUpMessages);
+1141:       resume();
+1142:     },
+1143:     isOpen: () => !released
+1144:   };
+1145: =======
+1146:  * While it is parked, `push` writes one more message to the same stdin. That is
+1147:  * how a message sent during a turn reaches the running CLI (steering) instead of
+1148:  * waiting for the run to end. A push after `release` is refused, because the
+1149:  * CLI is already on its way out and would never read it.
+1150:  *
+1151:  * @param {Array<Object>} messages - SDKUserMessage records to send
+1152:  * @returns {{ stream: AsyncIterable, release: () => void, push: (message: unknown) => boolean }}
+1153:  */
+1154: function createHeldPromptStream(messages: unknown[]) {
+1155:   // Messages pushed while parked, waiting for the CLI to read them.
+1156:   const pending: unknown[] = [];
+1157:   let released = false;
+1158:   // Wakes the parked generator for a push or the release.
+1159:   let wake: (() => void) | null = null;
+1160: 
+1161:   const release = () => {
+1162:     released = true;
+1163:     wake?.();
+1164:   };
+1165: 
+1166:   const push = (message: unknown) => {
+1167:     if (released) {
+1168:       return false;
+1169:     }
+1170:     pending.push(message);
+1171:     wake?.();
+1172:     return true;
+1173:   };
+1174: 
+1175:   const stream = (async function* () {
+1176:     // The turn's own prompt always goes out, as it did before steering existed.
+1177:     for (const message of messages) {
+1178:       yield message;
+1179:     }
+1180:     for (;;) {
+1181:       while (pending.length > 0 && !released) {
+1182:         yield pending.shift();
+1183:       }
+1184:       // Keeps stdin open — the CLI stays alive until release() is called.
+1185:       if (released) {
+1186:         return;
+1187:       }
+1188:       await new Promise<void>((resolve) => { wake = resolve; });
+1189:       wake = null;
+1190:     }
+1191:   })();
+1192: 
+1193:   return { stream, release, push };
+1194: >>>>>>> upstream/main
+----
+1292: <<<<<<< dev
+1293:   // stream exists; the finally block calls it unless work is still outstanding.
+1294:   let inputReleased = false;
+1295:   let releasePromptStream: () => void = () => { inputReleased = true; };
+1296: =======
+1297:   // stream exists; the finally block calls it no matter how the run ends.
+1298:   let releasePromptStream: () => void = () => {};
+1299:   // Writes one more message to the held stdin stream (steering). Replaced
+1300:   // once the stream exists; refuses until then and after the release.
+1301:   let pushPromptMessage: (message: unknown) => boolean = () => false;
+1302:   // Every message steered into this run, by the uuid it was sent with. The CLI
+1303:   // echoes a message written to its stdin when it reads it, and only these
+1304:   // echoes are shown — the turn's own prompt is already on screen.
+1305:   const steeredMessageIds = new Set<string>();
+1306:   // The steered messages the CLI has not read yet. While any remain, the
+1307:   // turn's `result` does not end the run: the CLI reads them in a follow-up
+1308:   // turn of its own.
+1309:   const pendingSteerIds = new Set<string>();
+1310:   let steerFollowUpTimer: ReturnType<typeof setTimeout> | null = null;
+1311: >>>>>>> upstream/main
+----
+1361: <<<<<<< dev
+1362: =======
+1363:   // A new turn supersedes any earlier one still holding this session's process
+1364:   // open, so held runs cannot stack up across a conversation.
+1365:   if (sessionKey()) {
+1366:     releaseHeldSession(sessionKey()!);
+1367:   }
+1368: 
+1369:   // Closes the held stdin, going through the activeSessions entry so
+1370:   // `inputReleased` is set accurately for `askSideQuestion`'s own check —
+1371:   // unless a native side question (`askSideQuestion` below) is still
+1372:   // waiting on this same query. The SDK drops a write made after release
+1373:   // instead of erroring, so releasing under a pending question would have
+1374:   // the CLI cancel it ("Side question cancelled") instead of answering it.
+1375:   // `askSideQuestion`'s `finally` calls this again once the count drops back
+1376:   // to zero, picking the deferred release back up.
+1377:   //
+1378:   // The map entry under this session's key may belong to a newer run that
+1379:   // superseded this one (a turn started while this one was still held) — in
+1380:   // that case `addSession` already released this run's stdin directly via
+1381:   // its own closure when it superseded it, and the entry's pending count and
+1382:   // `releaseInput` belong to the new run, not this one. Only read or write
+1383:   // the entry when it is still this run's own (`entry.instance ===
+1384:   // queryInstance`); otherwise fall back to this run's own closer so a late
+1385:   // call here cannot touch the run that replaced it.
+1386:   //
+1387:   // `isIdleCeiling` is true only when this call is the idle timer itself
+1388:   // firing. A normal call (turn end, background work settling) still defers
+1389:   // under a pending native side question and arms the ceiling as a backstop;
+1390:   // the ceiling's own call must not defer again on top of itself — a side
+1391:   // question the CLI never answers would otherwise hold the process (and its
+1392:   // MCP servers) forever, so the ceiling forces the release through instead.
+1393:   const maybeReleasePromptStream = (isIdleCeiling = false) => {
+1394:     const found = sessionKey() ? getSession(sessionKey()!) : undefined;
+1395:     const entry = found && found.instance === queryInstance ? found : null;
+1396:     if (entry && entry.pendingNativeSideQuestions > 0 && !isIdleCeiling) {
+1397:       entry.releaseDeferred = true;
+1398:       // Re-arm (rather than drop) the same idle ceiling that governs every
+1399:       // other hold, so an unanswered question is rechecked instead of being
+1400:       // left to wait on `askSideQuestion`'s own resolution alone.
+1401:       scheduleRelease();
+1402:       return;
+1403:     }
+1404:     if (entry) {
+1405:       entry.releaseDeferred = false;
+1406:       if (entry.releaseInput) {
+1407:         entry.releaseInput();
+1408:       } else {
+1409:         releasePromptStream();
+1410:       }
+1411:     } else {
+1412:       releasePromptStream();
+1413:     }
+1414:   };
+1415: 
+1416: >>>>>>> upstream/main
+----
+1784: <<<<<<< dev
+1785:     // Reads `heldPrompt` through the closure so the retry below can swap the
+1786:     // stream without leaving a stale closer behind in activeSessions.
+1787:     releasePromptStream = () => {
+1788:       inputReleased = true;
+1789:       if (sessionKey()) {
+1790:         forgetHeldTurn(sessionKey(), heldTurn);
+1791:       }
+1792:       heldPrompt.release();
+1793:     };
+1794: =======
+1795:     releasePromptStream = heldPrompt.release;
+1796:     pushPromptMessage = heldPrompt.push;
+1797: >>>>>>> upstream/main
+----
+1814: <<<<<<< dev
+1815: =======
+1816:       releasePromptStream = heldPrompt.release;
+1817:       pushPromptMessage = heldPrompt.push;
+1818: >>>>>>> upstream/main
+----
+2120: <<<<<<< dev
+2121:         warnOnContextWindowMismatch(message);
+2122:         // The turn is done as far as the client is concerned.
+2123:         const abortPending = sessionKey() ? abortedSessionIds.has(sessionKey()) : false;
+2124:         // Whether this result answers a prompt the user pushed into the held
+2125:         // process, rather than background work reporting back on its own.
+2126:         const answersFollowUpPrompt = followUpPromptPending;
+2127:         followUpPromptPending = false;
+2128:         turnInFlight = false;
+2129:         // Work started during this turn, or work from an earlier turn that
+2130:         // has not settled yet (a follow-up turn reports one task in while
+2131:         // another is still going), is still running. Hold the process open
+2132:         // so it can finish and report back in a follow-up turn; the ceiling
+2133:         // is only a backstop for work that never reports.
+2134:         //
+2135:         // The release when the last task settles is this same branch on the
+2136:         // follow-up turn the CLI pushes for it, not the settling event
+2137:         // itself: closing stdin at that moment would cut the turn that
+2138:         // relays the task's result.
+2139:         //
+2140:         // When the turn reported its tasks, the tracker is the whole truth
+2141:         // about tasks: an Agent call without `run_in_background` is scored as
+2142:         // background by `startsBackgroundWork`, but the CLI runs it in the
+2143:         // foreground and it has settled before this `result` — holding for it
+2144:         // kept a process alive for the full ceiling with nothing outstanding.
+2145:         // The Stop-hook snapshot is read on both branches: a cron set up in an
+2146:         // earlier turn reaches neither the tracker nor `startsBackgroundWork`.
+2147:         const stillOutstanding = backgroundWork.hasOutstanding(sessionKey());
+2148:         const snapshotOutstanding = snapshotSource.snapshotOutstanding();
+2149:         const holdForTurn = sawTaskEventThisTurn
+2150:           ? (stillOutstanding || snapshotOutstanding)
+2151:           : (backgroundWorkPending || stillOutstanding || snapshotOutstanding);
+2152:         if (holdForTurn) {
+2153:           console.log(
+2154:             `[Claude SDK] Holding the process for outstanding background work (tasks: ${stillOutstanding}, snapshot: ${snapshotOutstanding}, started this turn: ${backgroundWorkPending}): session ${sessionKey() ?? capturedSessionId ?? 'unknown'}`,
+2155:           );
+2156:         }
+2157:         backgroundWorkPending = false;
+2158:         sawTaskEventThisTurn = false;
+2159:         if (!turnCompleteSent && !abortPending) {
+2160:           turnCompleteSent = true;
+2161:           ws.send(createCompleteMessage({ provider: 'claude', sessionId: capturedSessionId || sessionId || null, exitCode: 0 }));
+2162:           notifyRunStopped({
+2163:             userId: ws?.userId || null,
+2164:             provider: 'claude',
+2165:             sessionId: sessionId || capturedSessionId || null,
+2166:             sessionName: sessionSummary,
+2167:             stopReason: 'completed'
+2168:           });
+2169:         } else if (heldForBackgroundWork && !answersFollowUpPrompt && !abortPending && !holdForTurn) {
+2170:           // A result after the turn already reported complete means work we held
+2171:           // the process open for has finished and pushed a follow-up turn — but
+2172:           // one turn can background several tasks, and each reports back on its
+2173:           // own. Telling the user the work is done while a sibling is still
+2174:           // running would announce results that are not there yet, so this
+2175:           // waits for the reading that also ends the hold.
+2176:           notifyBackgroundWorkCompleted({
+2177:             userId: ws?.userId || null,
+2178:             provider: 'claude',
+2179:             sessionId: sessionId || capturedSessionId || null,
+2180:             sessionName: sessionSummary
+2181:           });
+2182:         }
+2183:         if (holdForTurn) {
+2184:           heldForBackgroundWork = true;
+2185:           scheduleRelease();
+2186:           if (sessionKey()) {
+2187:             registerHeldTurn(sessionKey(), heldTurn);
+2188:           }
+2189: =======
+2190:         const abortPending = sessionKey() ? abortedSessionIds.has(sessionKey()) : false;
+2191:         if (pendingSteerIds.size > 0 && !abortPending) {
+2192:           // The turn ended before Claude reached a tool-call boundary, so the
+2193:           // steered messages it never read are still queued in the CLI, which
+2194:           // runs them as a follow-up turn on this same process. The run is not
+2195:           // over for the client yet, and stdin must stay open for that turn.
+2196:           awaitSteerFollowUp();
+2197: >>>>>>> upstream/main
+----
+2334: <<<<<<< dev
+2335:     // A follow-up turn still in flight when this loop ended (abort, crash, the
+2336:     // CLI exiting) would otherwise leave its own invocation — and the run it
+2337:     // owns — waiting forever.
+2338:     settleFollowUpTurn();
+2339: =======
+2340:     if (steerFollowUpTimer) {
+2341:       clearTimeout(steerFollowUpTimer);
+2342:       steerFollowUpTimer = null;
+2343:     }
+2344:     releasePromptStream();
+2345: >>>>>>> upstream/main
+----
+########## server/modules/providers/list/opencode/opencode-session-synchronizer.provider.ts
+173: <<<<<<< dev
+174:   /**
+175:    * Drops the rows of sessions deleted from OpenCode outside CloudCLI.
+176:    *
+177:    * The generic orphan prune cannot see them: their `jsonl_path` is null on
+178:    * purpose (see `upsertSession`). Judged against every id in `session`,
+179:    * archived ones included — the upsert's `time_archived IS NULL` filter would
+180:    * read a session archived in OpenCode as deleted. An unreadable database
+181:    * skips the whole round.
+182:    */
+183:   private async pruneDeletedSessions(): Promise<void> {
+184:     // Imported here, not at the top: the websocket module reaches the provider
+185:     // registry, which constructs this class while it loads. Awaited before the
+186:     // ids are read so nothing can interleave between reading them and deleting:
+187:     // the runtime maps a provider id onto its app row as soon as OpenCode
+188:     // reports it, possibly before OpenCode has committed that session.
+189:     // A throw here would otherwise reject `synchronize()` and take the whole
+190:     // round's pruning down with it, this provider's and the generic one's.
+191:     let chatRunRegistry: typeof import('@/modules/websocket/index.js')['chatRunRegistry'];
+192:     try {
+193:       ({ chatRunRegistry } = await import('@/modules/websocket/index.js'));
+194:     } catch (error) {
+195:       const message = error instanceof Error ? error.message : String(error);
+196:       console.warn('[OpenCodeProvider] Skipped pruning deleted sessions:', message);
+197:       return;
+198:     }
+199: 
+200:     const dbPath = getOpenCodeDatabasePath();
+201:     if (!fsSync.existsSync(dbPath)) {
+202:       return;
+203:     }
+204: 
+205:     let sessionIds: Set<string>;
+206:     let databaseModifiedAt: number;
+207:     try {
+208:       // Taken before the snapshot, so a row written while it is read counts as
+209:       // newer than it rather than being judged by it.
+210:       const walPath = `${dbPath}-wal`;
+211:       databaseModifiedAt = Math.max(
+212:         fsSync.statSync(dbPath).mtimeMs,
+213:         fsSync.existsSync(walPath) ? fsSync.statSync(walPath).mtimeMs : 0,
+214:       );
+215: 
+216:       const db = new Database(dbPath, { readonly: true, fileMustExist: true });
+217:       try {
+218:         const rows = db.prepare('SELECT id FROM session').all() as Array<{ id: string }>;
+219:         sessionIds = new Set(rows.map((row) => row.id));
+220:       } finally {
+221:         db.close();
+222:       }
+223:     } catch (error) {
+224:       const message = error instanceof Error ? error.message : String(error);
+225:       console.warn('[OpenCodeProvider] Skipped pruning deleted sessions:', message);
+226:       return;
+227:     }
+228: 
+229:     this.pruneRows(sessionIds, databaseModifiedAt, chatRunRegistry);
+230:   }
+231: 
+232:   /**
+233:    * The judging-and-deleting half of `pruneDeletedSessions`, deliberately
+234:    * synchronous.
+235:    *
+236:    * Nothing may be awaited between reading the ids and deleting the rows: the
+237:    * runtime binds a provider id onto its app row from another module, and a
+238:    * yield here would let a row be bound after this snapshot and then deleted
+239:    * for an id the snapshot never saw. A non-async signature is what keeps that
+240:    * true, so do not make this method async to add a broadcast or a log.
+241:    */
+242:   private pruneRows(
+243:     sessionIds: Set<string>,
+244:     databaseModifiedAt: number,
+245:     chatRunRegistry: typeof import('@/modules/websocket/index.js')['chatRunRegistry'],
+246:   ): void {
+247:     try {
+248:       let pruned = 0;
+249:       const rows = [...sessionsDb.getAllSessions(), ...sessionsDb.getArchivedSessions()]
+250:         .filter((row) => row.provider === this.provider);
+251:       for (const row of rows) {
+252:         const providerSessionId = readOptionalString(row.provider_session_id);
+253:         if (!providerSessionId || chatRunRegistry.getRun(row.session_id)) {
+254:           continue;
+255:         }
+256: 
+257:         // A row touched after the database last changed was not judged by this
+258:         // snapshot. That is the case when OpenCode writes somewhere else than
+259:         // the path read here (`getOpenCodeDatabasePath` ignores `XDG_DATA_HOME`).
+260:         if (Date.parse(row.updated_at) > databaseModifiedAt) {
+261:           continue;
+262:         }
+263: 
+264:         if (!sessionIds.has(providerSessionId) && sessionsDb.deleteSessionById(row.session_id)) {
+265:           pruned += 1;
+266:         }
+267:       }
+268: 
+269:       if (pruned > 0) {
+270:         console.log(`[OpenCodeProvider] Pruned ${pruned} session(s) deleted in OpenCode`);
+271:       }
+272:     } catch (error) {
+273:       const message = error instanceof Error ? error.message : String(error);
+274:       console.warn('[OpenCodeProvider] Failed to prune deleted sessions:', message);
+275:     }
+276: =======
+277:   /** Whether this opened `opencode.db` has a `session.agent` column (absent in older opencode). */
+278:   private hasAgentColumn(db: Database.Database): boolean {
+279:     const columns = db.prepare('PRAGMA table_info(session)').all() as { name: string }[];
+280:     return columns.some((column) => column.name === 'agent');
+281:   }
+282: 
+283:   /** `AND s.id NOT IN (...)` for the registry's current ids, or no clause when it is empty. */
+284:   private registeredForkIdsClause(): { sql: string; ids: string[] } {
+285:     const ids = opencodeSideQuestionForks.list();
+286:     if (ids.length === 0) {
+287:       return { sql: '', ids: [] };
+288:     }
+289:     return { sql: `AND s.id NOT IN (${ids.map(() => '?').join(', ')})`, ids };
+290:   }
+291: 
+292:   /**
+293:    * One `NOT (...)` per pending fork, excluding any row in its directory
+294:    * created at or after its start time whose title ends in opencode's own
+295:    * `(fork #N)` suffix — the only marker available before a pending fork's id
+296:    * is read off an event (see opencode-side-question-forks.ts).
+297:    */
+298:   private pendingForkWindowClause(): { sql: string; params: Array<string | number> } {
+299:     const pendingForks = opencodeSideQuestionForks.listPending();
+300:     if (pendingForks.length === 0) {
+301:       return { sql: '', params: [] };
+302:     }
+303: 
+304:     const clauses = pendingForks
+305:       .map(() => "NOT (s.directory = ? AND s.time_created >= ? AND s.title LIKE '%(fork #%)')")
+306:       .join(' AND ');
+307:     const params = pendingForks.flatMap((fork) => [fork.directory, fork.startedAt]);
+308:     return { sql: `AND ${clauses}`, params };
+309: >>>>>>> upstream/main
+----
+########## server/modules/providers/provider.routes.ts
+14: <<<<<<< dev
+15: import { sessionClearService } from '@/modules/providers/services/session-clear.service.js';
+16: import { sessionForkService } from '@/modules/providers/services/session-fork.service.js';
+17: =======
+18: import { sideQuestionsService } from '@/modules/providers/services/side-questions.service.js';
+19: >>>>>>> upstream/main
+----
+########## src/modules/chat/composer/BackgroundSendDialog.tsx
+66: <<<<<<< dev
+67:           <Button type="button" variant="default" onClick={() => onResolve('send')}>
+68:             {t('claudeStatus.backgroundTask.prompt.send', { defaultValue: 'Send' })}
+69:           </Button>
+70:           <Button type="button" variant="destructive" onClick={() => onResolve('interrupt')}>
+71:             {t('claudeStatus.backgroundTask.prompt.interruptAndSend', { defaultValue: 'Interrupt and send' })}
+72: =======
+73:           {supportsSideQuestions && hasText && (
+74:             <Button type="button" variant="outline" onClick={() => onResolve('sideQuestion')}>
+75:               {t('claudeStatus.backgroundTask.prompt.sideQuestion', { defaultValue: 'Side question' })}
+76:             </Button>
+77:           )}
+78:           <Button type="button" variant="destructive" onClick={() => onResolve('send')}>
+79:             {t('claudeStatus.backgroundTask.prompt.sendAnyway', { defaultValue: 'Send anyway' })}
+80: >>>>>>> upstream/main
+----
+########## src/modules/chat/composer/ChatComposer.tsx
+17: <<<<<<< dev
+18: import { useChatWidthClasses } from '@/shared/hooks/useChatTypography';
+19: import type { BackgroundSendChoice, BackgroundSendPrompt, QueuedDraft, ScheduledMessage, SlashCommand,SessionActivity,PendingPermissionRequest,PermissionMode,ProviderModelOption } from '@/shared/types';
+20: =======
+21: import { MCP_ELICITATION_TOOL_NAME } from '@/shared/constants';
+22: import type { BackgroundSendChoice, BackgroundSendPrompt, PendingSteer, QueuedDraft, ScheduledMessage, SlashCommand,SessionActivity,PendingPermissionRequest,PermissionMode,ProviderModelOption } from '@/shared/types';
+23: >>>>>>> upstream/main
+----
+########## src/modules/chat/hooks/useChatComposerState.ts
+18: <<<<<<< dev
+19: import type { AntigravityGrantOutcome, BackgroundSendChoice, BackgroundSendPrompt, CommandModalPayload, CostCommandData, HelpCommandData, MarkSessionProcessing, ModelCommandData, QueuedDraft, SessionActivityMap, StatusCommandData,QueuedSendOptions,ChatAttachment,ChatMessage,PendingPermissionRequest,PermissionMode,SessionEstablishedContext,Project,ProjectSession,LLMProvider,SlashCommand } from '@/shared/types';
+20: import { CLEAR_COMMAND_NAME } from '@/modules/chat/utils/clearCommand';
+21: =======
+22: import type { BackgroundSendChoice, BackgroundSendPrompt, CommandModalPayload, CostCommandData, HelpCommandData, MarkSessionProcessing, ModelCommandData, PendingSteer, QueuedDraft, SessionActivityMap, StatusCommandData, SteerOutcome,QueuedSendOptions,ChatAttachment,ChatMessage,PendingPermissionRequest,PermissionMode,SessionEstablishedContext,Project,ProjectSession,LLMProvider,SlashCommand } from '@/shared/types';
+23: >>>>>>> upstream/main
+----
+1391: <<<<<<< dev
+1392:         interruptBackground = choice === 'interrupt';
+1393: =======
+1394:         if (choice === 'sideQuestion') {
+1395:           askSideQuestionAndClear(targetSessionId, currentInput);
+1396:           return;
+1397:         }
+1398: >>>>>>> upstream/main
+----
+########## src/modules/chat/hooks/useChatProviderState.ts
+73: <<<<<<< dev
+74:   supportsCompact?: boolean;
+75:   supportsFork?: boolean;
+76:   supportsClear?: boolean;
+77:   rewindRestoresFiles?: boolean;
+78: =======
+79:   supportsSideQuestions?: boolean;
+80:   supportsSteering?: boolean;
+81: >>>>>>> upstream/main
+----
+########## src/modules/chat/hooks/useChatRealtimeHandlers.ts
+4: <<<<<<< dev
+5: import type { ServerEvent,MarkSessionBackgroundWork,MarkSessionIdle,MarkSessionProcessing,PendingPermissionRequest,ProjectSession,LLMProvider,NormalizedMessage,GetSessionActivity,MarkSessionBackground } from '@/shared/types';
+6: import { notifyBackgroundWorkRefused } from '@/modules/chat/utils/backgroundWorkRefusal';
+7: =======
+8: import type { ServerEvent,MarkSessionIdle,MarkSessionProcessing,PendingPermissionRequest,ProjectSession,LLMProvider,NormalizedMessage,GetSessionActivity,MarkSessionBackground,SideQuestionEvent,SteerOutcome } from '@/shared/types';
+9: >>>>>>> upstream/main
+----
+########## src/modules/chat/transcript/MessageComponent.tsx
+83: <<<<<<< dev
+84:   const spacingClasses = useChatSpacing();
+85:   const widthClasses = useChatWidthClasses();
+86:   const isGrouped = prevMessage && prevMessage.type === message.type &&
+87:     ((prevMessage.type === 'assistant') ||
+88:       (prevMessage.type === 'user') ||
+89:       (prevMessage.type === 'tool') ||
+90:       (prevMessage.type === 'error'));
+91: =======
+92:   // A side question never groups with its neighbours: it is drawn as its own
+93:   // tinted aside regardless of what came before or after it.
+94:   const isGrouped = Boolean(prevMessage) && !message.sideQuestion && !prevMessage?.sideQuestion && prevMessage?.type === message.type &&
+95:     ((prevMessage?.type === 'assistant') ||
+96:       (prevMessage?.type === 'user') ||
+97:       (prevMessage?.type === 'tool') ||
+98:       (prevMessage?.type === 'error'));
+99: >>>>>>> upstream/main
+----
+########## src/modules/file-tree/hooks/useFileTreeOperations.ts
+8: <<<<<<< dev
+9: import { toProjectRelativePath } from '@/modules/file-tree/utils/fileTreeUtils';
+10: =======
+11: import { copyTextToClipboard, downloadBlob } from '@/shared/utils';
+12: >>>>>>> upstream/main
+----
+247: <<<<<<< dev
+248:   // copyTextToClipboard falls back to execCommand when the Clipboard API is
+249:   // unavailable (e.g. non-HTTPS), and the toast waits for the real outcome.
+250:   const copyPathToClipboard = useCallback(async (path: string) => {
+251:     const didCopy = await copyTextToClipboard(path);
+252: 
+253:     if (didCopy) {
+254:       showToast(t('fileTree.toast.pathCopied', 'Path copied to clipboard'), 'success');
+255:     } else {
+256:       showToast(t('fileTree.toast.copyFailed', 'Failed to copy path'), 'error');
+257:     }
+258:   }, [showToast, t]);
+259: 
+260:   // Copy absolute path to clipboard
+261:   const handleCopyPath = useCallback((item: FileTreeNode) => {
+262:     void copyPathToClipboard(item.path);
+263:   }, [copyPathToClipboard]);
+264: 
+265:   // Copy path relative to the project root
+266:   const handleCopyRelativePath = useCallback((item: FileTreeNode) => {
+267:     const projectRoot = selectedProject?.fullPath || selectedProject?.path;
+268:     void copyPathToClipboard(toProjectRelativePath(item.path, projectRoot));
+269:   }, [copyPathToClipboard, selectedProject]);
+270: 
+271:   const triggerBrowserDownload = useCallback((blob: Blob, fileName: string) => {
+272:     const url = URL.createObjectURL(blob);
+273:     const anchor = document.createElement('a');
+274: 
+275:     anchor.href = url;
+276:     anchor.download = fileName;
+277: 
+278:     document.body.appendChild(anchor);
+279:     anchor.click();
+280:     document.body.removeChild(anchor);
+281: 
+282:     URL.revokeObjectURL(url);
+283:   }, []);
+284: 
+285: =======
+286:   // Copy path to clipboard. The shared helper falls back to `execCommand('copy')` when the
+287:   // Clipboard API is missing (plain-HTTP access) or rejects the write (some mobile browsers);
+288:   // a single toast reports its outcome once it is known.
+289:   const handleCopyPath = useCallback((item: FileTreeNode) => {
+290:     void copyTextToClipboard(item.path).then((didCopy) => {
+291:       if (didCopy) {
+292:         showToast(t('fileTree.toast.pathCopied', 'Path copied to clipboard'), 'success');
+293:       } else {
+294:         showToast(t('fileTree.toast.copyFailed', 'Failed to copy path'), 'error');
+295:       }
+296:     });
+297:   }, [showToast, t]);
+298: 
+299: >>>>>>> upstream/main
+----
+########## src/modules/i18n/locales/en/chat.json
+392: <<<<<<< dev
+393:         "send": "Send",
+394:         "interruptAndSend": "Interrupt and send"
+395: =======
+396:         "sendAnyway": "Send anyway",
+397:         "sideQuestion": "Side question"
+398: >>>>>>> upstream/main
+----
+########## src/shared/types.ts
+900: <<<<<<< dev
+901: /** The answer to the prompt shown when sending over a session's background work: send and keep that work running, stop that work and send, queue the message until the work finishes, or do nothing. */
+902: export type BackgroundSendChoice = 'send' | 'interrupt' | 'queue' | 'cancel';
+903: =======
+904: /**
+905:  * A message sent into a running turn (steering) that the agent has not read
+906:  * yet. The composer shows it as a card until its echo reaches the transcript;
+907:  * `status` is `sending` until the server confirms it reached the turn, then
+908:  * `accepted`. Local to the tab that sent it.
+909:  */
+910: export type PendingSteer = {
+911:   /** The UUID the message was sent with; its transcript row and live echo carry it too. */
+912:   messageId: string;
+913:   /** The session whose turn it was sent into. */
+914:   sessionKey: string;
+915:   content: string;
+916:   /** Browser files kept so the message can go back into the composer intact. */
+917:   attachments: File[];
+918:   /** Descriptors uploaded before it was sent, reused if it has to be queued instead. */
+919:   uploadedAttachments: unknown[];
+920:   status: 'sending' | 'accepted';
+921: };
+922: 
+923: /**
+924:  * What became of a steered message, as the realtime handler reports it to the
+925:  * composer: `accepted` (the server put it into the turn), `refused` (the turn
+926:  * had already ended, so it should go out as the next turn) or `delivered` (the
+927:  * agent read it; its echo is in the transcript). `delivered` is reported for
+928:  * every live user message, so the composer matches it against its own ids.
+929:  */
+930: export type SteerOutcome = 'accepted' | 'refused' | 'delivered';
+931: 
+932: /** The answer to the prompt shown when sending over a session's background work: send now (stopping that work), queue the message until the work finishes, ask a side question instead, or do nothing. */
+933: export type BackgroundSendChoice = 'send' | 'queue' | 'sideQuestion' | 'cancel';
+934: >>>>>>> upstream/main
+----
