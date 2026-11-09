@@ -560,6 +560,8 @@ The `antigravity` entry, settled on 2026-09-21. Each value is a finding or a rec
 | `supportsMessageEditing` | `false` | ADR 0014 |
 | `rewindRestoresFiles` | `false` | nothing to restore without Edit |
 | `supportsClear` | `true` | Clear is a new session plus an archive (ADR 0005); for `agy` starting a new session is just omitting `--conversation` — no provider API to call |
+| `supportsSideQuestions` | `false` | the agy runtime has no `askSideQuestion` facet (upstream added side questions in v1.37.8) |
+| `supportsSteering` | `false` | no `steer` facet: print mode cannot take input into a running turn |
 
 The `false`s that reflect a decision rather than a missing upstream feature are already recorded: ADR 0014
 (Fork and Edit) and ADR 0015 (permissions), alongside the established `0004-no-codex-compact-via-sdk.md`,

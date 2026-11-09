@@ -326,6 +326,10 @@
     "sendAnyway": {
       "label": "Send anyway",
       "description": "Send now; this stops the background work"
+    },
+    "sendKeep": {
+      "label": "Send",
+      "description": "Send now; the background work keeps running"
     }
   },
   "shell": {
@@ -449,7 +453,18 @@
     "pending": "Scheduled for {{when}}",
     "failed": "Not sent — {{reason}}",
     "cancel": "Cancel scheduled message",
-    "dismiss": "Dismiss failure notice"
+    "dismiss": "Dismiss failure notice",
+    "busy": {
+      "heading": "If the session is busy then",
+      "interrupt": {
+        "label": "Send on time",
+        "description": "Stops a running turn or background work if it has to"
+      },
+      "wait": {
+        "label": "Wait",
+        "description": "Sends once the turn and its background work have finished"
+      }
+    }
   },
   "misc": {
     "copyToClipboard": "Copy to clipboard",

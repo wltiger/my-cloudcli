@@ -186,6 +186,12 @@
       "waitingForBackgroundWork": "等待后台工作结束",
       "edit": "编辑排队消息",
       "delete": "删除排队消息"
+    },
+    "steer": {
+      "label": "插话",
+      "sending": "发送中…",
+      "willRead": "{{provider}} 会在下一次调用工具时读到",
+      "attachments_other": "附带 {{count}} 个文件"
     }
   },
   "providerSelection": {
@@ -263,12 +269,16 @@
     "backgroundTask": {
       "prompt": {
         "title": "这个会话还有后台工作在运行",
-        "description": "「发送」会让后台工作继续运行。「中断并发送」会先停掉后台工作，它还没报告的内容会丢失。「排队」会等后台工作结束后再发送。",
+        "description": "新消息会开始一个新回合，这会停掉这些后台工作，它们还没报告的内容会丢失。也可以把消息排队，等后台工作结束后再发送。",
         "cancel": "取消",
         "queue": "排队",
-        "send": "发送",
-        "interruptAndSend": "中断并发送"
-      }
+        "sendAnyway": "仍然发送",
+        "sideQuestion": "旁问"
+      },
+      "workflow": "工作流 {{name}}",
+      "agent": "Agent {{description}}",
+      "command": "命令 {{description}}",
+      "count": "{{count}} 个任务"
     },
     "actions": {
       "thinking": "Thinking",
@@ -300,7 +310,8 @@
       "label": "后台任务仍在运行",
       "stop": "停止后台任务",
       "stopHint": "现在停止会一并结束仍在运行的后台任务，而不只是中断当前回复。"
-    }
+    },
+    "backgroundWork": "后台工作"
   },
   "projectSelection": {
     "startChatWithProvider": "选择一个项目以开始与 {{provider}} 聊天"
@@ -339,7 +350,8 @@
     "json": {
       "label": "JSON (.json)",
       "description": "全部消息原样输出，供工具使用。"
-    }
+    },
+    "includeSideQuestions": "包含旁问"
   },
   "schedule": {
     "trigger": "定时发送这条消息",
@@ -355,7 +367,18 @@
     "pending": "将于 {{when}} 发送",
     "failed": "未发送 — {{reason}}",
     "cancel": "取消定时消息",
-    "dismiss": "关闭失败提示"
+    "dismiss": "关闭失败提示",
+    "busy": {
+      "heading": "会话正忙的时候",
+      "interrupt": {
+        "label": "按时发送",
+        "description": "必要时停掉正在跑的回合或后台工作"
+      },
+      "wait": {
+        "label": "等待",
+        "description": "等回合和后台工作都结束后再发送"
+      }
+    }
   },
   "modelLibrary": {
     "effortLevels": "推理级别",
@@ -365,5 +388,64 @@
     "customModelsOnlyHint": "在所有模型选择器中隐藏 {{provider}} 的内置模型，并将您的第一个模型设为默认模型。在您添加模型之前，内置模型仍会显示。",
     "builtInModelsHidden": "开启“仅使用我的模型”时，这些模型不会出现在模型选择器中。",
     "customModelsOnlyFailed": "无法更改此设置。"
+  },
+  "mcpElicitation": {
+    "asks": "{{server}} 需要你填写信息",
+    "submit": "提交",
+    "decline": "拒绝",
+    "openLink": "打开链接",
+    "unsafeUrl": "这里只能打开 http 和 https 链接。",
+    "optional": "可选",
+    "choose": "请选择…",
+    "required": "必填",
+    "notANumber": "请输入数字",
+    "notAnInteger": "请输入整数",
+    "tooSmall": "不能小于 {{value}}",
+    "tooLarge": "不能大于 {{value}}",
+    "tooShort": "至少 {{count}} 个字符",
+    "tooLong": "最多 {{count}} 个字符",
+    "tooFew": "至少选 {{count}} 项",
+    "tooMany": "最多选 {{count}} 项",
+    "notAnEmail": "请输入邮箱地址",
+    "notAUri": "请输入完整地址，例如 https://example.com",
+    "notADate": "请输入日期",
+    "notADateTime": "请输入日期和时间",
+    "notTheFormat": "不是有效的 {{format}}"
+  },
+  "sideQuestion": {
+    "label": "旁问 · 不进入会话",
+    "pending": "正在旁边回答",
+    "failed": "旁问失败了。",
+    "dismiss": "关闭",
+    "unsupported": "这个 provider 不支持旁问。",
+    "noSession": "旁问需要一个已经开始的会话，这个会话还没开始。"
+  },
+  "sendMenu": {
+    "trigger": "发送选项",
+    "sendKeep": {
+      "label": "发送",
+      "description": "现在发送，后台工作继续运行"
+    },
+    "queue": {
+      "label": "排队",
+      "descriptionResponding": "这个回合结束后发送",
+      "descriptionBackground": "后台工作结束后发送"
+    },
+    "steer": {
+      "label": "插话",
+      "description": "送进这个回合，下一次调用工具时读到"
+    },
+    "sideQuestion": {
+      "label": "旁问",
+      "description": "现在在旁边问，会话本身看不到"
+    },
+    "stop": {
+      "label": "停止",
+      "description": "停止正在写的回复"
+    },
+    "sendAnyway": {
+      "label": "仍然发送",
+      "description": "现在发送，会停掉后台工作"
+    }
   }
 }

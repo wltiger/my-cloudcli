@@ -1,5 +1,6 @@
 import { useTranslation } from 'react-i18next';
 
+import { useChatWidthClasses } from '@/shared/hooks/useChatTypography';
 import type { PendingSteer } from '@/shared/types';
 
 type SteeredMessageCardProps = {
@@ -17,9 +18,11 @@ type SteeredMessageCardProps = {
 export default function SteeredMessageCard({ steer, providerLabel }: SteeredMessageCardProps) {
   const { t } = useTranslation('chat');
   const attachmentCount = steer.uploadedAttachments.length || steer.attachments.length;
+  // The reading-width setting (fork entry 3), like the queued card beside it.
+  const widthClasses = useChatWidthClasses();
 
   return (
-    <div className="settings-content-enter mx-auto mb-2 max-w-[54.25rem] rounded-xl rounded-t-none border border-primary/30 bg-primary/[0.06] px-3 py-2">
+    <div className={`settings-content-enter mx-auto mb-2 ${widthClasses.column} rounded-xl rounded-t-none border border-primary/30 bg-primary/[0.06] px-3 py-2`}>
       <div className="flex items-start gap-2.5">
         <span className="mt-1.5 h-1.5 w-1.5 shrink-0 animate-pulse rounded-full bg-primary" aria-hidden />
 

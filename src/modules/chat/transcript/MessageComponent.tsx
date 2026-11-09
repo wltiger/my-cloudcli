@@ -161,7 +161,10 @@ const MessageComponent = memo(({ message, prevMessage, createDiff, onFileOpen, o
       <div
         ref={messageRef}
         data-message-timestamp={message.timestamp || undefined}
-        className="chat-message side-question w-full px-3 sm:px-0"
+        // The reading settings (fork entry 3) apply here too: the row's side
+        // padding from the spacing level, and no prose size of its own below,
+        // so Markdown takes the font level.
+        className={`chat-message side-question w-full ${spacingClasses.row}`}
       >
         {isAnswerRow ? (
           <div className={`${railClassName} rounded-b-lg pb-2 pt-1.5`}>
@@ -169,7 +172,7 @@ const MessageComponent = memo(({ message, prevMessage, createDiff, onFileOpen, o
               {isPendingAnswer ? (
                 <Shimmer>{t('sideQuestion.pending')}</Shimmer>
               ) : (
-                <Markdown className="prose prose-sm prose-gray max-w-none font-serif dark:prose-invert">
+                <Markdown className="prose prose-gray max-w-none font-serif dark:prose-invert">
                   {formattedMessageContent}
                 </Markdown>
               )}
@@ -190,7 +193,7 @@ const MessageComponent = memo(({ message, prevMessage, createDiff, onFileOpen, o
                 dir="auto"
                 className="max-w-[85%] break-words rounded-2xl rounded-br-md border border-border bg-muted px-3 py-2 font-serif text-sm text-foreground shadow-sm dark:bg-gray-800"
               >
-                <Markdown breaks className="prose prose-sm max-w-none font-serif dark:prose-invert">
+                <Markdown breaks className="prose max-w-none font-serif dark:prose-invert">
                   {message.content}
                 </Markdown>
               </div>
