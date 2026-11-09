@@ -213,15 +213,18 @@ const restoreQueuedDraft = (sessionKey: string): QueuedDraft | null => {
         attachments: [],
         uploadedAttachments: saved.attachments ?? saved.images,
         options: saved.options,
+        waitFor: saved.waitFor,
       }
     : null;
 };
 
 // Whether the card already shows this stored queued message. Send options are
-// not compared: the card does not show them.
+// not compared: the card does not show them. What it waits for is: the server
+// can put a refused message back to wait for background work.
 const showsQueuedMessage = (card: QueuedDraft, stored: QueuedDraft): boolean => (
   card.content === stored.content
   && JSON.stringify(card.uploadedAttachments ?? []) === JSON.stringify(stored.uploadedAttachments ?? [])
+  && (card.waitFor ?? 'background') === (stored.waitFor ?? 'background')
 );
 
 // Whether a stored queued message is the card's message with more added after
@@ -996,6 +999,7 @@ export function useChatComposerState({
             content: durableDraft.content,
             options: durableDraft.options,
             attachments: durableDraft.uploadedAttachments,
+            waitFor: durableDraft.waitFor,
           });
           appendedToEarlierMessage = appended;
           queuedCard = {
@@ -1003,6 +1007,7 @@ export function useChatComposerState({
             attachments: durableDraft.attachments,
             uploadedAttachments: queuedMessage.attachments,
             options: queuedMessage.options,
+            waitFor: queuedMessage.waitFor ?? durableDraft.waitFor,
           };
         } catch (error) {
           const message = error instanceof Error ? error.message : 'Unknown error';
@@ -1152,6 +1157,9 @@ export function useChatComposerState({
         attachments: steer.attachments,
         uploadedAttachments: steer.uploadedAttachments,
         options: buildSendOptions(steer.content),
+        // Meant for the turn that just ended: it goes out now even if that
+        // turn left background work running (fork entry 31).
+        waitFor: 'turn',
       }, steer.sessionKey, { fromComposer: false });
     },
     [buildSendOptions, queueMessage, updatePendingSteers],
@@ -1286,6 +1294,9 @@ export function useChatComposerState({
           attachments: currentAttachments,
           uploadedAttachments,
           options: queuedOptions,
+          // Queued while a turn runs: it goes out when that turn ends, even if
+          // the turn leaves background work running (fork entry 31).
+          waitFor: 'turn',
         }, queuedSessionKey);
         return;
       }
@@ -1429,6 +1440,7 @@ export function useChatComposerState({
           attachments: currentAttachments,
           uploadedAttachments,
           options: buildSendOptions(currentInput),
+          waitFor: 'background',
         }, targetSessionId);
         return;
       }
@@ -1631,6 +1643,7 @@ export function useChatComposerState({
         attachments: sent.files,
         uploadedAttachments: sent.uploadedAttachments,
         options: sent.options,
+        waitFor: 'background',
       }, sent.sessionId);
       return;
     }

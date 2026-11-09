@@ -54,7 +54,7 @@ const backgroundOnly: SessionActivityMap = new Map([[
 
 const uploads = () => vi.mocked(fetch).mock.calls.filter(([url]) => String(url).includes('/api/assets/files'));
 
-const render = (processingSessions: SessionActivityMap) => {
+const render = (processingSessions: SessionActivityMap, isLoading = false) => {
   const sent: Array<{ type: string; interruptBackground?: boolean }> = [];
   const view = renderHook(({ session }: { session: ProjectSession }) =>
     useChatComposerState({
@@ -69,7 +69,7 @@ const render = (processingSessions: SessionActivityMap) => {
       currentProviderEffort: 'medium',
       currentProviderSupportsCompact: true,
       currentProviderSupportsClear: true,
-      isLoading: false,
+      isLoading,
       processingSessions,
       canAbortSession: false,
       tokenBudget: null,
@@ -181,6 +181,7 @@ test('Queue in the send menu persists the message behind the work with its uploa
   assert.equal(stored?.content, 'hello');
   assert.deepEqual(stored?.attachments, [UPLOADED]);
   assert.equal(stored?.options?.model, 'test-model');
+  assert.equal(stored?.waitFor, 'background', 'queued over the work on purpose, it waits for it');
   assert.equal(view.result.current.queuedDraft?.content, 'hello', 'the queued card shows the message');
   assert.equal(view.result.current.input, '', 'and the composer is cleared, as when queueing during a turn');
   assert.equal(view.result.current.attachedFiles.length, 0);
@@ -259,7 +260,18 @@ test('after a refusal, Queue persists the refused message without uploading its 
   const stored = readQueuedMessage('session-1');
   assert.equal(stored?.content, 'hello');
   assert.deepEqual(stored?.attachments, [UPLOADED]);
+  assert.equal(stored?.waitFor, 'background');
   await waitFor(() => assert.equal(view.result.current.input, ''));
+});
+
+test('a message queued while a turn runs waits only for that turn, even with background work outstanding', async () => {
+  const { view, sends } = render(backgroundOnly, true);
+  await act(async () => { view.result.current.setInput('after this turn'); });
+
+  await submit(view);
+
+  assert.equal(sends().length, 0, 'queued, not sent');
+  assert.equal(readQueuedMessage('session-1')?.waitFor, 'turn', 'it goes out when the turn ends, into the held process');
 });
 
 test('an edited message refused over background work is re-sent as the same edit', async () => {

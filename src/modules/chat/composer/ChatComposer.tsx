@@ -38,6 +38,7 @@ import QueuedMessageCard from '@/modules/chat/composer/QueuedMessageCard';
 import SteeredMessageCard from '@/modules/chat/composer/SteeredMessageCard';
 import BackgroundSendDialog from '@/modules/chat/composer/BackgroundSendDialog';
 import { ScheduleMessagePopover } from '@/modules/chat/composer/ScheduleMessagePopover';
+import type { ScheduleBusyMode } from '@/modules/chat/composer/ScheduleBusyModeToggle';
 import { ScheduledMessageList } from '@/modules/chat/composer/ScheduledMessageList';
 import ComposerModelMenu from '@/modules/chat/composer/ComposerModelMenu';
 import ComposerPermissionMenu from '@/modules/chat/composer/ComposerPermissionMenu';
@@ -105,7 +106,7 @@ type ChatComposerProps = {
   onCancelEditMessage: () => void;
   /** Messages waiting to be sent to this session later. */
   scheduledMessages: ScheduledMessage[];
-  onScheduleMessage: (scheduledFor: Date) => void;
+  onScheduleMessage: (scheduledFor: Date, onBusy: ScheduleBusyMode) => void;
   onCancelScheduledMessage: (id: string) => void;
   onEditQueuedDraft: () => void;
   onDeleteQueuedDraft: () => void;
@@ -396,7 +397,9 @@ export default function ChatComposer({
           attachmentCount={
             queuedDraft.uploadedAttachments?.length ?? queuedDraft.attachments.length
           }
-          waitingForBackgroundWork={backgroundWorkOutstanding}
+          // A message queued during a turn goes out when that turn ends, into
+          // the process still holding the work: it is not waiting for it.
+          waitingForBackgroundWork={backgroundWorkOutstanding && queuedDraft.waitFor !== 'turn'}
           onEdit={onEditQueuedDraft}
           onDelete={onDeleteQueuedDraft}
         />

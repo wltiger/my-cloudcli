@@ -31,6 +31,7 @@ import {
 import ChatMessagesPane from '@/modules/chat/transcript/ChatMessagesPane';
 import ChatComposer from '@/modules/chat/composer/ChatComposer';
 import { isActivityIndicatorVisible } from '@/modules/chat/composer/indicatorVisibility';
+import type { ScheduleBusyMode } from '@/modules/chat/composer/ScheduleBusyModeToggle';
 import CommandResultModal from '@/modules/chat/modals/CommandResultModal';
 import SessionForkDialog from '@/modules/chat/modals/SessionForkDialog';
 
@@ -459,14 +460,16 @@ function ChatInterface({
    * Hands the composer's current text to the server to send later, and clears
    * the box as a send would — the message has left the composer either way.
    */
-  const handleScheduleMessage = useCallback(async (scheduledFor: Date) => {
+  const handleScheduleMessage = useCallback(async (scheduledFor: Date, onBusy: ScheduleBusyMode) => {
     const content = input.trim();
     if (!content) return;
 
     const scheduled = await scheduleMessage({
       content,
       scheduledFor,
-      options: { model: currentProviderModel, effort: currentProviderEffort, permissionMode },
+      // `onBusy`: what the server does if the session is busy when it is due
+      // (fork entry 31); read by the scheduled-message dispatcher.
+      options: { model: currentProviderModel, effort: currentProviderEffort, permissionMode, onBusy },
     });
     if (scheduled) {
       setInput('');

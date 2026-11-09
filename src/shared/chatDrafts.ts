@@ -1,5 +1,5 @@
 import { api, ApiRequestError, readApiErrorMessage } from '@/shared/api';
-import type { QueuedSendOptions } from '@/shared/types';
+import type { QueuedMessageWaitFor, QueuedSendOptions } from '@/shared/types';
 
 /**
  * Unsent composer text and queued messages, stored in `auth.db` rather than in
@@ -34,6 +34,8 @@ export type StoredQueuedMessage = {
    * File objects, they can follow a queued message across session switches.
    */
   attachments?: unknown[];
+  /** See `QueuedDraft.waitFor`. */
+  waitFor?: QueuedMessageWaitFor;
 };
 
 type DraftRecord = {

@@ -251,7 +251,7 @@ async function dispatchRun(
   dependencies: ChatWebSocketDependencies,
   extraRuntimeOptions: AnyRecord = {},
   beforeRun?: (run: NonNullable<ReturnType<typeof chatRunRegistry.startRun>>) => void | Promise<void>,
-): Promise<{ started: boolean; error: string | null }> {
+): Promise<{ started: boolean; error: string | null; refused?: boolean }> {
   const provider = session.provider as LLMProvider;
 
   const run = chatRunRegistry.startRun({
@@ -333,7 +333,9 @@ async function dispatchRun(
     chatRunRegistry.completeRunIfCurrent(run, { exitCode: 1 });
   }
 
-  return { started: true, error: failure };
+  // `refused`: the runtime turned the prompt away because the process holding
+  // the session's background work could not take it (see the run registry).
+  return { started: true, error: failure, refused: run.refusedBackgroundWork };
 }
 
 /**
@@ -921,9 +923,15 @@ export async function runDetachedChatTurn(
      * land mid-run, so the timer outranks whatever is running.
      */
     interruptActiveRun?: boolean;
+    /**
+     * Stops the session's background work before the turn, as "Send anyway"
+     * does for an interactive send. A scheduled message sets it after its
+     * first attempt was refused by the process holding that work.
+     */
+    interruptBackground?: boolean;
   },
   dependencies: ChatWebSocketDependencies,
-): Promise<{ started: boolean; error: string | null }> {
+): Promise<{ started: boolean; error: string | null; refused?: boolean }> {
   const session = sessionsDb.getSessionById(input.sessionId);
   if (!session) {
     return { started: false, error: 'The session no longer exists.' };
@@ -962,6 +970,9 @@ export async function runDetachedChatTurn(
     session,
     { sessionId: input.sessionId, content: input.content, options: input.options ?? {} },
     dependencies,
+    // Top level, as on `chat.send`: never inside `options`, which is what a
+    // queued draft stores.
+    input.interruptBackground ? { interruptBackground: true } : {},
   );
 }
 

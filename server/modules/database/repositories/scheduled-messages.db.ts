@@ -99,6 +99,22 @@ export const scheduledMessagesDb = {
     })();
   },
 
+  /**
+   * Puts a claimed message back to pending, to be claimed again by a later
+   * poll. Used for a message scheduled to wait (fork entry 31) when it came
+   * due while its session was busy: it stays on the banner instead of going
+   * out — or being dropped — at the wrong moment.
+   */
+  releaseClaim(id: string): void {
+    getConnection()
+      .prepare(
+        `UPDATE scheduled_messages
+         SET status = 'pending', updated_at = CURRENT_TIMESTAMP
+         WHERE id = ? AND status = 'sent'`
+      )
+      .run(id);
+  },
+
   markFailed(id: string, reason: string): void {
     getConnection()
       .prepare(

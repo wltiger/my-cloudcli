@@ -34,6 +34,13 @@ type ChatRun = {
   writer: ChatSessionWriter;
   startedAt: number;
   completedAt: number | null;
+  /**
+   * Set when the Claude runtime refused this run's prompt because the process
+   * holding the session's background work could not take it (fork entry 29).
+   * Read by a send nobody watches — a queued or scheduled message — which
+   * otherwise could not tell a refusal from a turn that went through.
+   */
+  refusedBackgroundWork: boolean;
 };
 
 /**
@@ -130,6 +137,10 @@ function decorateAndRecordEvent(run: ChatRun, message: NormalizedMessage): Norma
   // Whichever arrives first wins; the duplicate is dropped here.
   if (message.kind === 'complete' && run.status === 'completed') {
     return null;
+  }
+
+  if (message.kind === 'error' && (message as { code?: unknown }).code === 'background_work_not_kept') {
+    run.refusedBackgroundWork = true;
   }
 
   run.lastSeq += 1;
@@ -245,6 +256,7 @@ export const chatRunRegistry = {
       writer: null as unknown as ChatSessionWriter,
       startedAt: Date.now(),
       completedAt: null,
+      refusedBackgroundWork: false,
     };
 
     run.writer = new ChatSessionWriter({
@@ -257,6 +269,14 @@ export const chatRunRegistry = {
       },
       decorateOutboundEvent: (message) => decorateAndRecordEvent(run, message),
     });
+
+    // Every tab watching this session's previous run keeps watching. A tab
+    // attaches to a run only when it subscribes, so a run nobody asked for (a
+    // queued or scheduled message the server sends) or one another tab started
+    // would otherwise reach it only after a reload — the reply already written.
+    for (const connection of existing?.writer.audience() ?? []) {
+      run.writer.updateWebSocket(connection);
+    }
 
     runs.set(input.appSessionId, run);
     return run;

@@ -1,5 +1,5 @@
 import { getConnection } from '@/modules/database/connection.js';
-import type { QueuedChatMessage } from '@/shared/types.js';
+import type { QueuedChatMessage, QueuedMessageWaitFor } from '@/shared/types.js';
 import { readQueuedChatMessage } from '@/shared/utils.js';
 
 /**
@@ -56,10 +56,17 @@ function parseQueuedMessage(raw: string | null): unknown | null {
  */
 function mergeQueuedMessages(earlier: QueuedChatMessage, later: QueuedChatMessage): QueuedChatMessage {
   const options = later.options ?? earlier.options;
+  // The joined turn waits for background work if either part did (fork entry
+  // 31): it is never sent earlier than one of its parts asked for. A part
+  // without the field waits for it; two such parts keep the old shape.
+  const waitFor: QueuedMessageWaitFor | undefined = earlier.waitFor === 'turn' && later.waitFor === 'turn'
+    ? 'turn'
+    : earlier.waitFor || later.waitFor ? 'background' : undefined;
   return {
     content: [earlier.content, later.content].filter((part) => part.trim()).join('\n\n'),
     ...(options ? { options } : {}),
     attachments: [...earlier.attachments, ...later.attachments],
+    ...(waitFor ? { waitFor } : {}),
   };
 }
 
@@ -164,11 +171,16 @@ export const sessionDraftsDb = {
    * one rather than being overwritten by it, so neither is lost and the order
    * they were queued in is kept.
    */
-  restoreQueuedMessage(candidate: QueuedSessionMessageRecord): void {
-    const restored = readQueuedChatMessage(candidate.queuedMessage);
-    if (!restored) {
+  //
+  // `changes.waitFor` puts it back waiting for something else: a message the
+  // process holding background work refused waits for that work to end (fork
+  // entry 31) instead of being pushed again on every poll.
+  restoreQueuedMessage(candidate: QueuedSessionMessageRecord, changes: { waitFor?: QueuedMessageWaitFor } = {}): void {
+    const read = readQueuedChatMessage(candidate.queuedMessage);
+    if (!read) {
       return;
     }
+    const restored = changes.waitFor ? { ...read, waitFor: changes.waitFor } : read;
 
     const db = getConnection();
     db.transaction(() => {
@@ -178,7 +190,7 @@ export const sessionDraftsDb = {
         candidate.sessionId,
         queuedSinceClaim
           ? JSON.stringify(mergeQueuedMessages(restored, queuedSinceClaim))
-          : candidate.claimToken,
+          : changes.waitFor ? JSON.stringify(restored) : candidate.claimToken,
       );
     })();
   },

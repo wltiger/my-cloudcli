@@ -140,6 +140,11 @@ export class ChatSessionWriter {
     this.connections.add(newConnection);
   }
 
+  /** The sockets still open on this run, for a new run of the same session to keep. */
+  audience(): RealtimeClientConnection[] {
+    return [...this.connections].filter((connection) => connection.readyState === WS_OPEN_STATE);
+  }
+
   setSessionId(sessionId: string): void {
     this.captureProviderSessionId(sessionId);
   }

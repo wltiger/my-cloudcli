@@ -1209,7 +1209,17 @@ export type QueuedChatMessage = {
   content: string;
   options?: Record<string, unknown>;
   attachments: unknown[];
+  /**
+   * What the message waits for (fork entry 31). `turn`: queued while a turn
+   * ran, so it goes out once that turn ends — into the process still held
+   * for background work, which keeps running. `background`: queued over
+   * background work on purpose, so it waits for that work too. Absent (rows
+   * from before this field) reads as `background`, the old behaviour.
+   */
+  waitFor?: QueuedMessageWaitFor;
 };
+
+export type QueuedMessageWaitFor = 'turn' | 'background';
 
 // ---------------------------
 //----------------- PROJECT PERSISTENCE TYPES ------------

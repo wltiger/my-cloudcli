@@ -311,7 +311,11 @@ test('Claude held-process reuse across turns', async (t) => {
       // The reused turn's events belong to the run waiting for them.
       assert.deepEqual(second.kinds(), ['text', 'complete']);
       assert.deepEqual(watcher.kinds(), ['text', 'complete'], 'a late subscriber sees the reused turn live');
-      assert.deepEqual(first.kinds(), ['text', 'complete'], 'the stale first run receives nothing further');
+      // The tab that watched the first run follows the session into the new
+      // one (a new run keeps its predecessor's audience): it sees the reused
+      // turn too, through the new run — sequenced from that run's start.
+      assert.deepEqual(first.kinds(), ['text', 'complete', 'text', 'complete'], 'a tab watching the session follows into the reused turn');
+      assert.equal(first.frames.at(-1)?.seq, 2, 'through the new run, not the finished one');
       assert.equal(second.frames[0]?.seq, 1, 'the new run sequences the reused turn from its own start');
       assert.deepEqual(
         chatRunRegistry.replayEvents('app-reuse', 0).map((event) => event.kind),

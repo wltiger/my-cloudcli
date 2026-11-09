@@ -11,10 +11,12 @@ import {
   ComposerMenuSeparator,
   ComposerMenuSurface,
 } from '@/modules/chat/composer/ComposerMenuPrimitives';
+import { ScheduleBusyModeToggle } from '@/modules/chat/composer/ScheduleBusyModeToggle';
+import type { ScheduleBusyMode } from '@/modules/chat/composer/ScheduleBusyModeToggle';
 
 type ScheduleMessagePopoverProps = {
   disabled: boolean;
-  onSchedule: (scheduledFor: Date) => void;
+  onSchedule: (scheduledFor: Date, onBusy: ScheduleBusyMode) => void;
 };
 
 /** Offsets people actually mean when they say "later". */
@@ -52,9 +54,10 @@ export function ScheduleMessagePopover({ disabled, onSchedule }: ScheduleMessage
   // Seeded an hour out, because a picker that opens on "now" is never what
   // scheduling means.
   const [customValue, setCustomValue] = useState(() => toLocalInputValue(new Date(Date.now() + 3_600_000)));
+  const [busyMode, setBusyMode] = useState<ScheduleBusyMode>('interrupt');
 
   const commit = (scheduledFor: Date) => {
-    onSchedule(scheduledFor);
+    onSchedule(scheduledFor, busyMode);
     setIsOpen(false);
   };
 
@@ -85,6 +88,8 @@ export function ScheduleMessagePopover({ disabled, onSchedule }: ScheduleMessage
 
       {isOpen && anchor && createPortal(
         <ComposerMenuSurface anchor={anchor} menuRef={menuRef} ariaLabel={ariaLabel}>
+          <ScheduleBusyModeToggle value={busyMode} onChange={setBusyMode} />
+          <ComposerMenuSeparator />
           <ComposerMenuHeading>{t('schedule.heading')}</ComposerMenuHeading>
           {QUICK_OFFSETS_MINUTES.map((minutes) => (
             <ComposerMenuItem

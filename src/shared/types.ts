@@ -895,7 +895,16 @@ export type QueuedDraft = {
    * permission settings while another session is being viewed.
    */
   options?: QueuedSendOptions;
+  /**
+   * What it waits for once queued (fork entry 31): `turn` — queued while a
+   * turn ran, it goes out when that turn ends, into the process still held
+   * for background work; `background` — queued over background work, it
+   * waits for that work too. Absent reads as `background`.
+   */
+  waitFor?: QueuedMessageWaitFor;
 };
+
+export type QueuedMessageWaitFor = 'turn' | 'background';
 
 /**
  * A message sent into a running turn (steering) that the agent has not read

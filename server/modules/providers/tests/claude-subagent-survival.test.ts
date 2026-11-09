@@ -375,7 +375,9 @@ test('Claude subagent work surviving a turn boundary and the next prompt', async
         ['status', 'text'],
         'the subagent keeps reporting into the run the user is watching',
       );
-      assert.deepEqual(first.kinds(), ['text', 'complete'], 'and no longer into the finished run');
+      // A tab that watched the finished run follows the session into the new
+      // one (it keeps its predecessor's audience), so it sees the same frames.
+      assert.deepEqual(first.kinds(), ['text', 'complete', 'status', 'text'], 'a tab watching the session follows into the new run');
 
       // The follow-up's own answer, with the subagent still working.
       await live.emit({
@@ -421,7 +423,9 @@ test('Claude subagent work surviving a turn boundary and the next prompt', async
         ['status', 'text'],
         'and a tab that reconnects during the hold replays them',
       );
-      assert.deepEqual(first.kinds(), ['text', 'complete'], 'still nothing to the finished first run');
+      // The tab that watched the first run has followed into the new one, so
+      // after its own first turn it has seen exactly what the new run sent.
+      assert.deepEqual(first.kinds(), ['text', 'complete', ...second.kinds()], 'it follows the session, not the finished run');
 
       // The investigation finally lands.
       await fireStop(live, []);

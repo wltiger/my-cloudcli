@@ -85,6 +85,7 @@ const readQueuedMessageInput = (value: unknown): QueuedChatMessage => {
     content,
     ...(isPlainObject(message.options) ? { options: message.options } : {}),
     attachments,
+    ...(message.waitFor === 'turn' || message.waitFor === 'background' ? { waitFor: message.waitFor } : {}),
   };
 };
 
