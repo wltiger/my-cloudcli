@@ -64,6 +64,9 @@ type ForkExtraOptions = {
   resume?: string;
   forkSession?: true;
   model?: string;
+  // Only set for a custom model with its own endpoint or declared window: the
+  // full SDK environment plus that model's overrides (see claude-custom-endpoint).
+  env?: NodeJS.ProcessEnv;
 };
 
 /**
@@ -209,6 +212,7 @@ export async function askClaudeSideQuestion(
     createQuery?: ProviderRuntimeContext['createQuery'];
     liveTasks: BackgroundTaskSummary[];
     now?: () => number;
+    env?: NodeJS.ProcessEnv;
   },
 ): Promise<SideQuestionOutcome> {
   const createQueryFn = deps.createQuery
@@ -222,5 +226,6 @@ export async function askClaudeSideQuestion(
     // Keeps the fork on the session's prompt cache; left unset lets the SDK
     // pick its own default instead of sending another provider's model id.
     model: request.model || undefined,
+    ...(deps.env ? { env: deps.env } : {}),
   }, createQueryFn);
 }

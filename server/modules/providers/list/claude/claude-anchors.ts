@@ -23,6 +23,10 @@ import type { AnyRecord } from '@/shared/types.js';
  *
  * Rows the provider writes alongside the conversation (`ai-title`,
  * `last-prompt`, `queue-operation`) carry no uuid and are simply skipped.
+ * Attachment rows are skipped too: a message steered into a running turn is
+ * written as one, and it is part of the turn it joined rather than a turn of
+ * its own, so it is no place to fork from (upstream gives it no edit anchor
+ * for the same reason).
  *
  * @param rows Raw transcript rows in file order, as read from the session JSONL.
  * @returns Row uuid -> anchor uuid. A row absent from the map has no anchor.
@@ -35,7 +39,7 @@ export function buildClaudeAnchorIndex(rows: AnyRecord[]): Map<string, string> {
   for (let index = lastCompactBoundaryIndex + 1; index < rows.length; index++) {
     const row = rows[index];
     const uuid = typeof row.uuid === 'string' ? row.uuid : '';
-    if (!uuid) {
+    if (!uuid || row.type === 'attachment') {
       continue;
     }
     turnLastRowUuid.set(readTurnKey(row, uuid), uuid);
@@ -45,7 +49,7 @@ export function buildClaudeAnchorIndex(rows: AnyRecord[]): Map<string, string> {
   for (let index = lastCompactBoundaryIndex + 1; index < rows.length; index++) {
     const row = rows[index];
     const uuid = typeof row.uuid === 'string' ? row.uuid : '';
-    if (!uuid) {
+    if (!uuid || row.type === 'attachment') {
       continue;
     }
     anchors.set(uuid, turnLastRowUuid.get(readTurnKey(row, uuid)) ?? uuid);

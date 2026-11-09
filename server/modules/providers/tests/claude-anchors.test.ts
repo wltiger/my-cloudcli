@@ -96,3 +96,20 @@ test('rows without a usable uuid are skipped instead of throwing', () => {
   assert.equal(anchors.size, 1);
   assert.equal(anchors.get('u1'), 'u1');
 });
+
+test('a message steered into a running turn (an attachment row) gets no anchor', () => {
+  // A steer is written as `type: 'attachment'` with a `queued_command`
+  // attachment. It joined the turn that was running, so it is no place to
+  // fork from; the rows around it keep their own anchors.
+  const anchors = buildClaudeAnchorIndex([
+    { uuid: 'u1', type: 'user', message: { role: 'user', content: 'start' } },
+    { uuid: 'a1', type: 'assistant', message: { id: 'msg_1', role: 'assistant', content: [{ type: 'tool_use', id: 'toolu_1', name: 'Read', input: {} }] } },
+    { uuid: 'att1', type: 'attachment', attachment: { type: 'queued_command', commandMode: 'prompt', prompt: 'also check the tests' } },
+    { uuid: 'a2', type: 'assistant', message: { id: 'msg_2', role: 'assistant', content: [{ type: 'text', text: 'will do' }] } },
+  ]);
+
+  assert.equal(anchors.has('att1'), false);
+  assert.equal(anchors.get('u1'), 'u1');
+  assert.equal(anchors.get('a1'), 'a1');
+  assert.equal(anchors.get('a2'), 'a2');
+});

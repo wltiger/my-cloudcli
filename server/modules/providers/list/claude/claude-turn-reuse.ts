@@ -354,6 +354,18 @@ export function claimHeldTurn(sessionKey: string, fingerprint: string): HeldTurn
 }
 
 /**
+ * Whether the session still has a parked run registered.
+ *
+ * Used by `claude-runtime.provider.ts` when a claim came back empty, to refuse a
+ * send that would otherwise release a process held for work the task tracker
+ * cannot see (a cron from an earlier turn, a start observed without a Stop
+ * hook): only the hold itself knows that work exists.
+ */
+export function hasHeldTurn(sessionKey: string): boolean {
+  return Boolean(sessionKey) && heldTurns.has(sessionKey);
+}
+
+/**
  * Says why {@link claimHeldTurn} found nothing to claim for this session.
  *
  * Used by `claude-runtime.provider.ts` when it refuses a send, so the refusal

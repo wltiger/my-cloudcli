@@ -38,6 +38,7 @@ import {
   createLiveTurnSettings,
   explainHeldTurnMiss,
   forgetHeldTurn,
+  hasHeldTurn,
   readHotTurnSettings,
   registerHeldTurn
 } from '@/modules/providers/list/claude/claude-turn-reuse.js';
@@ -1531,10 +1532,14 @@ async function queryClaudeSDK(
         await accepted.settled;
         return;
       }
-      if (backgroundWork.outstanding(sessionKey()).length > 0) {
+      if (backgroundWork.outstanding(sessionKey()).length > 0 || hasHeldTurn(sessionKey())) {
         // The held process cannot take this turn, and it still has background
         // work running. Releasing it would leave two processes writing one
         // transcript, so the send is refused and the user chooses instead.
+        // The tracker alone is not enough to say so: a process held only for
+        // a cron from an earlier turn, or for a start no Stop hook has
+        // reported yet, has an empty tracker but is still registered as held,
+        // and releasing it would kill that work without asking.
         // The cause is named in both the message and the log, because the
         // refusal alone cannot tell an edit from a changed setting from a
         // process that is gone.
@@ -1547,7 +1552,7 @@ async function queryClaudeSDK(
         ws.send(createNormalizedMessage({
           kind: 'error',
           code: 'background_work_not_kept',
-          content: `This session still has background work running, and this message cannot join it (${refusalReason}). Interrupt the work and send, or queue the message.`,
+          content: `This session still has background work running, and this message cannot join it (${refusalReason}).`,
           sessionId: sessionKey(),
           provider: 'claude'
         }));
@@ -1630,6 +1635,11 @@ async function queryClaudeSDK(
             _toolName: MCP_ELICITATION_TOOL_NAME,
             _input: input,
             _receivedAt: new Date(),
+            // Read back in resolveToolApproval() to clear this request's push
+            // notification on every device once it's answered on any of them,
+            // the same as a tool approval.
+            _userId: ws?.userId || null,
+            _sessionName: sessionSummary || null,
           },
           onCancel: (reason: string) => {
             ws.send(createNormalizedMessage({ kind: 'permission_cancelled', requestId, reason, sessionId: capturedSessionId || sessionId || null, provider: 'claude' }));
@@ -2449,6 +2459,31 @@ type NativeSideQuestionCapableInstance = {
 };
 
 /**
+ * The environment for a side question's read-only fork, when the session runs a
+ * Claude custom model with its own Base URL / API Key or declared window (fork
+ * entry 25): the same full SDK environment a turn gets, plus that model's
+ * overrides. Without it the fork would send the custom model id to the logged-in
+ * subscription instead. `undefined` for every other model, so the fork inherits
+ * the process environment exactly as before.
+ */
+async function buildSideQuestionEnv(
+  model: string | null | undefined,
+  context: ProviderRuntimeContext,
+): Promise<NodeJS.ProcessEnv | undefined> {
+  if (!model) {
+    return undefined;
+  }
+  let modelsDefinition: ProviderModelsDefinition;
+  try {
+    modelsDefinition = await context.getProviderModels();
+  } catch {
+    return undefined;
+  }
+  const customModelEnv = resolveClaudeCustomModelEnv(model, modelsDefinition);
+  return customModelEnv ? { ...buildClaudeSdkEnv(), ...customModelEnv } : undefined;
+}
+
+/**
  * Asks a side question on the live query of `request.appSessionId`, when one
  * is up and ships the method, or on a read-only fork otherwise.
  *
@@ -2523,6 +2558,7 @@ async function askSideQuestion(
         return askClaudeSideQuestion(request, sink, {
           createQuery: context.createQuery,
           liveTasks: backgroundWork.outstanding(request.appSessionId),
+          env: await buildSideQuestionEnv(request.model, context),
         });
       }
       return { status: 'error', error: errorMessage(error), answer: '' };
@@ -2555,6 +2591,7 @@ async function askSideQuestion(
   return askClaudeSideQuestion(request, sink, {
     createQuery: context.createQuery,
     liveTasks: backgroundWork.outstanding(request.appSessionId),
+    env: await buildSideQuestionEnv(request.model, context),
   });
 }
 

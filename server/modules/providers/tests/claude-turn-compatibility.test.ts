@@ -322,6 +322,31 @@ test('Claude per-turn process-reuse compatibility', async (t) => {
     return started;
   }
 
+  /**
+   * Sends a turn the held process cannot take. The hold here rests on a shell
+   * no task was registered for yet, so the tracker is empty — but the hold
+   * itself says work is running, and the send is refused rather than releasing
+   * the process under it (the client then offers to stop the work or queue).
+   */
+  async function startRefusedTurn(
+    sessionId: string,
+    options: AnyRecord = {},
+    command = 'go',
+    models: ProviderModelsDefinition = MODELS,
+  ) {
+    const connection = new FakeConnection();
+    await queryClaudeSDK(
+      command,
+      { ...BASE_OPTIONS, cwd: workspace, ...options, sessionId },
+      connection,
+      createContext(models),
+    );
+    await flush();
+    const refusal = connection.frames.find((frame) => frame.code === 'background_work_not_kept');
+    assert.equal(refusal?.kind, 'error', 'the send is refused, neither pushed nor superseding the hold');
+    return { connection, refusal };
+  }
+
   /** Winds a held run down the way settled background work does. */
   async function releaseHeldRun(live: FakeQuery, turn: Promise<unknown>): Promise<void> {
     await fireHook(live, 'Stop', { background_tasks: [], session_crons: [] });
@@ -345,48 +370,44 @@ test('Claude per-turn process-reuse compatibility', async (t) => {
 
   await t.test('a model on a custom endpoint needs a new process', async () => {
     const first = await startHeldTurn('compat-endpoint', {}, ENDPOINT_MODELS);
-    const second = await startTurn('compat-endpoint', { model: 'proxy-a' }, 'second', ENDPOINT_MODELS);
+    await startRefusedTurn('compat-endpoint', { model: 'proxy-a' }, 'second', ENDPOINT_MODELS);
 
-    assert.equal(queries.length, 2, 'the endpoint is baked into the process environment');
-    assert.equal(first.live.promptStreamClosed, true, 'the previous hold is released');
+    assert.equal(queries.length, 1, 'the endpoint is baked into the process environment, so the held process cannot take it');
+    assert.equal(first.live.promptStreamClosed, false, 'the refused send leaves the held process alone');
     assert.deepEqual(first.live.modelChanges, [], 'nothing was renegotiated on the abandoned process');
 
-    await queries[1]?.emit(RESULT);
-    await Promise.all([first.turn, second.turn]);
+    await releaseHeldRun(first.live, first.turn);
   });
 
   await t.test('two custom endpoints do not share a process', async () => {
     const first = await startHeldTurn('compat-two-endpoints', { model: 'proxy-a' }, ENDPOINT_MODELS);
-    const second = await startTurn('compat-two-endpoints', { model: 'proxy-b' }, 'second', ENDPOINT_MODELS);
+    await startRefusedTurn('compat-two-endpoints', { model: 'proxy-b' }, 'second', ENDPOINT_MODELS);
 
-    assert.equal(queries.length, 2, 'a shared base URL with a different key is still a different endpoint');
+    assert.equal(queries.length, 1, 'a shared base URL with a different key is still a different endpoint, so the held process cannot take it');
 
-    await queries[1]?.emit(RESULT);
-    await Promise.all([first.turn, second.turn]);
+    await releaseHeldRun(first.live, first.turn);
   });
 
   await t.test('a declared context window needs a new process', async () => {
     // The window is baked into the child process's environment at spawn time,
     // so a built-in model's held process can never serve a declared one.
     const first = await startHeldTurn('compat-window', {}, WINDOW_MODELS);
-    const second = await startTurn('compat-window', { model: 'window-256k' }, 'second', WINDOW_MODELS);
+    await startRefusedTurn('compat-window', { model: 'window-256k' }, 'second', WINDOW_MODELS);
 
-    assert.equal(queries.length, 2, 'the declared window is baked into the process environment');
-    assert.equal(first.live.promptStreamClosed, true, 'the previous hold is released');
+    assert.equal(queries.length, 1, 'the declared window is baked into the process environment, so the held process cannot take it');
+    assert.equal(first.live.promptStreamClosed, false, 'the refused send leaves the held process alone');
     assert.deepEqual(first.live.modelChanges, [], 'nothing was renegotiated on the abandoned process');
 
-    await queries[1]?.emit(RESULT);
-    await Promise.all([first.turn, second.turn]);
+    await releaseHeldRun(first.live, first.turn);
   });
 
   await t.test('two declared context windows do not share a process', async () => {
     const first = await startHeldTurn('compat-two-windows', { model: 'window-256k' }, WINDOW_MODELS);
-    const second = await startTurn('compat-two-windows', { model: 'window-128k' }, 'second', WINDOW_MODELS);
+    await startRefusedTurn('compat-two-windows', { model: 'window-128k' }, 'second', WINDOW_MODELS);
 
-    assert.equal(queries.length, 2, 'models that differ only by declared window are different processes');
+    assert.equal(queries.length, 1, 'models that differ only by declared window are different processes, so the held process cannot take it');
 
-    await queries[1]?.emit(RESULT);
-    await Promise.all([first.turn, second.turn]);
+    await releaseHeldRun(first.live, first.turn);
   });
 
   await t.test('a tightened permission mode is enforced on the very next tool use', async () => {
@@ -512,43 +533,39 @@ test('Claude per-turn process-reuse compatibility', async (t) => {
 
   await t.test('an effort change needs a new process', async () => {
     const first = await startHeldTurn('compat-effort');
-    const second = await startTurn('compat-effort', { effort: 'high' }, 'second question');
+    await startRefusedTurn('compat-effort', { effort: 'high' }, 'second question');
 
-    assert.equal(queries.length, 2, 'effort has no in-flight equivalent');
-    assert.equal(first.live.promptStreamClosed, true);
+    assert.equal(queries.length, 1, 'effort has no in-flight equivalent, so the held process cannot take it');
+    assert.equal(first.live.promptStreamClosed, false, 'the refused send leaves the held process alone');
 
-    await queries[1]?.emit(RESULT);
-    await Promise.all([first.turn, second.turn]);
+    await releaseHeldRun(first.live, first.turn);
   });
 
   await t.test('a working-directory change needs a new process', async () => {
     const first = await startHeldTurn('compat-cwd');
-    const second = await startTurn('compat-cwd', { cwd: path.join(workspace, 'elsewhere') }, 'second question');
+    await startRefusedTurn('compat-cwd', { cwd: path.join(workspace, 'elsewhere') }, 'second question');
 
-    assert.equal(queries.length, 2, 'the working directory is fixed at spawn time');
+    assert.equal(queries.length, 1, 'the working directory is fixed at spawn time, so the held process cannot take it');
 
-    await queries[1]?.emit(RESULT);
-    await Promise.all([first.turn, second.turn]);
+    await releaseHeldRun(first.live, first.turn);
   });
 
   await t.test('an edit carrying a resume anchor needs a new process', async () => {
     const first = await startHeldTurn('compat-anchor');
-    const second = await startTurn('compat-anchor', { resumeAnchorId: 'row-9' }, 'edited question');
+    await startRefusedTurn('compat-anchor', { resumeAnchorId: 'row-9' }, 'edited question');
 
-    assert.equal(queries.length, 2, 'a live process cannot rewind to an earlier anchor');
+    assert.equal(queries.length, 1, 'a live process cannot rewind to an earlier anchor, so the held process cannot take it');
 
-    await queries[1]?.emit(RESULT);
-    await Promise.all([first.turn, second.turn]);
+    await releaseHeldRun(first.live, first.turn);
   });
 
   await t.test('an edit of the first message needs a new process', async () => {
     const first = await startHeldTurn('compat-scratch');
-    const second = await startTurn('compat-scratch', { resumeFromScratch: true }, 'edited question');
+    await startRefusedTurn('compat-scratch', { resumeFromScratch: true }, 'edited question');
 
-    assert.equal(queries.length, 2, 'starting the conversation over cannot happen in flight');
+    assert.equal(queries.length, 1, 'starting the conversation over cannot happen in flight, so the held process cannot take it');
 
-    await queries[1]?.emit(RESULT);
-    await Promise.all([first.turn, second.turn]);
+    await releaseHeldRun(first.live, first.turn);
   });
 
   await t.test('a refused in-flight change falls back to a new process', async () => {

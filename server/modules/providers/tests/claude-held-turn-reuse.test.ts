@@ -464,6 +464,49 @@ test('Claude held-process reuse across turns', async (t) => {
     });
   });
 
+  await t.test('a send that cannot join a process held with no task registered is refused too', async () => {
+    // The hold rests on an observed background start alone, so the task
+    // tracker is empty — as it is for a cron set up in an earlier turn. The
+    // refusal reads the hold itself: releasing the process here would kill
+    // that work without asking.
+    await withIsolatedDatabase(async () => {
+      sessionsDb.createAppSession('app-untracked', 'claude', '/workspace/demo');
+
+      const first = new FakeConnection();
+      const firstRun = startRun('app-untracked', first);
+      const firstTurn = queryClaudeSDK('first question', { ...BASE_OPTIONS, sessionId: 'app-untracked' }, firstRun.writer, createContext());
+      await waitUntil(() => queries.length === 1, 'the first query to start');
+
+      const live = queries[0];
+      assert.ok(live);
+      await live.emit(BACKGROUND_BASH);
+      await live.emit({ type: 'result', session_id: 'provider-1' });
+      assert.equal(live.promptStreamClosed, false, 'the process is held for the observed start');
+
+      const second = new FakeConnection();
+      const secondRun = startRun('app-untracked', second);
+      await queryClaudeSDK(
+        'second question',
+        { ...BASE_OPTIONS, sessionId: 'app-untracked', cwd: '/workspace/elsewhere' },
+        secondRun.writer,
+        createContext(),
+      );
+      await flush();
+
+      assert.equal(queries.length, 1, 'the refused send starts no process of its own');
+      assert.equal(live.promptStreamClosed, false, 'and the held process is not released');
+      const refusal = second.frames.find((frame) => frame.code === 'background_work_not_kept');
+      assert.equal(refusal?.kind, 'error', 'the client is told why');
+      assert.match(String(refusal?.content), /settings differ from the held process \(cwd: /);
+      secondRun.writer.sendComplete({ exitCode: 1 });
+
+      // The CLI reports the start settled in a turn of its own, which ends the hold.
+      await live.emit({ type: 'result', session_id: 'provider-1' });
+      await firstTurn;
+      assert.equal(live.promptStreamClosed, true);
+    });
+  });
+
   await t.test('interrupt and send stops the outstanding task and releases the held process, even when the settings match', async () => {
     await withIsolatedDatabase(async () => {
       sessionsDb.createAppSession('app-interrupt', 'claude', '/workspace/demo');
