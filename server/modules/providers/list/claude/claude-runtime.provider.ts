@@ -18,7 +18,7 @@ import os from 'os';
 import path from 'path';
 
 import { query } from '@anthropic-ai/claude-agent-sdk';
-import type { SDKUserMessage } from '@anthropic-ai/claude-agent-sdk';
+import type { ElicitationRequest, ElicitationResult, SDKUserMessage } from '@anthropic-ai/claude-agent-sdk';
 
 import {
   appendFilesInputTag,
@@ -46,6 +46,7 @@ import {
   resolveContextWindowTotal
 } from '@/modules/providers/services/claude-context-window.js';
 import { resolveClaudeCodeExecutablePath } from '@/shared/claude-cli-path.js';
+import { askClaudeSideQuestion } from '@/modules/providers/list/claude/claude-side-question.provider.js';
 import {
   createNotificationEvent,
   notifyBackgroundWorkCompleted,
@@ -59,13 +60,16 @@ import {
   getReportedClaudeContextWindow,
   rememberClaudeContextWindow
 } from '@/modules/providers/services/provider-token-usage.service.js';
-import { createCompleteMessage, createNormalizedMessage } from '@/shared/utils.js';
+import { createCompleteMessage, createNormalizedMessage, errorMessage } from '@/shared/utils.js';
 import type {
   AnyRecord,
   BackgroundTaskSummary,
   ProviderModelsDefinition,
   ProviderRuntimeContext,
   ProviderRuntimeWriter,
+  SideQuestionRequest,
+  SideQuestionSink,
+  SideQuestionOutcome,
 } from '@/shared/types.js';
 
 // The notifications module is still JavaScript, and its defaults (`dedupeKey = null`)
@@ -86,7 +90,37 @@ type ActiveSession = {
   status: 'active' | 'aborted';
   writer: ClaudeRuntimeWriter | null;
   releaseInput: (() => void) | null;
+  // Set the moment `releaseInput` actually runs (idle ceiling, or the turn
+  // ending with no background work left). A native side question writes
+  // into that same stdin, and the SDK drops a write after it has been
+  // released rather than erroring, so this flag is the only signal
+  // `askSideQuestion` has to fall back to the read-only fork instead.
+  inputReleased: boolean;
+  // Count of `askSideQuestion` native calls currently in flight against
+  // this entry's live query. Carried across the mid-run re-registration
+  // below (same process, same question), reset only when superseded.
+  pendingNativeSideQuestions: number;
+  // Set when a release was requested (turn end, idle ceiling) while the
+  // count above was still positive, so the last question to settle knows
+  // to pick the deferred release back up.
+  releaseDeferred: boolean;
+  /**
+   * Delivers a user message into the running turn (see steerClaudeSDKSession).
+   * Resolves false once the turn has ended and the message can no longer join
+   * it; the caller then falls back to an ordinary next turn.
+   */
+  steerInput: SteerInput | null;
 };
+
+/** What a steered message carries: its text, attachments, and the id it is tracked by. */
+type SteerRequest = {
+  command: string;
+  images?: unknown;
+  files?: unknown;
+  messageId: string;
+};
+
+type SteerInput = (request: SteerRequest) => Promise<boolean>;
 
 type ToolApprovalDecision = AnyRecord | null;
 
@@ -150,7 +184,51 @@ const TOOL_APPROVAL_TIMEOUT_MS = parseInt(process.env.CLAUDE_TOOL_APPROVAL_TIMEO
 // forever. The timer resets on every message, so it measures silence, not total time.
 const BG_WAIT_CEILING_MS = 30 * 60 * 1000;
 
+// How long a turn that ended with steered messages still unread waits for the
+// follow-up turn the CLI runs them in, before giving up and ending the run.
+// That turn normally starts within milliseconds of the `result`; this only
+// bounds a CLI that dropped them, so the session is not left processing.
+const STEER_FOLLOW_UP_GRACE_MS = 30 * 1000;
+
 const TOOLS_REQUIRING_INTERACTION = new Set(['AskUserQuestion', 'ExitPlanMode']);
+
+// An MCP server's request for input travels as a permission request under this
+// name. It is not a tool the model can call: the name routes the request to the
+// client's McpElicitation panel and keys it in the pending-approval list, so a
+// page refresh replays it like any other prompt.
+const MCP_ELICITATION_TOOL_NAME = 'McpElicitation';
+
+/**
+ * Turns the client's answer to an McpElicitation request into the MCP result.
+ * The panel accepts with `updatedInput.content` and declines with a denial. No
+ * answer at all (an abort, a closed run) is `cancel`, never an invented accept.
+ */
+function toElicitationResult(decision: ToolApprovalDecision, mode: ElicitationRequest['mode']): ElicitationResult {
+  if (!decision || decision.cancelled) {
+    return { action: 'cancel' };
+  }
+  if (!decision.allow) {
+    return { action: 'decline' };
+  }
+  // A URL request is accepted without content: accepting is consent to open
+  // the page, and the server learns the outcome from the page itself.
+  if (mode === 'url') {
+    return { action: 'accept' };
+  }
+  const content = (decision.updatedInput as AnyRecord | undefined)?.content;
+  const fields: Record<string, string | number | boolean | string[]> = {};
+  if (content && typeof content === 'object' && !Array.isArray(content)) {
+    for (const [key, value] of Object.entries(content as AnyRecord)) {
+      // Form fields are flat primitives, or string lists for multi-select.
+      const isPrimitive = typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean';
+      const isStringList = Array.isArray(value) && value.every((item) => typeof item === 'string');
+      if (isPrimitive || isStringList) {
+        fields[key] = value as string | number | boolean | string[];
+      }
+    }
+  }
+  return { action: 'accept', content: fields };
+}
 
 // Ultracode is a session-scoped setting rather than an SDK effort level: it pairs xhigh
 // effort with standing dynamic-workflow orchestration, and the CLI only honours it when
@@ -469,12 +547,14 @@ function mapCliOptionsToSDK(options: AnyRecord = {}) {
  * @param {Object} queryInstance - SDK query instance
  * @param {Object} writer - WebSocket writer for reconnect support
  * @param {Function} releaseInput - Closes the held stdin stream so the CLI can exit
+ * @param {Function} steerInput - Pushes a user message into the running turn
  */
 function addSession(
   sessionId: string,
   queryInstance: ClaudeQuery,
   writer: ClaudeRuntimeWriter | null = null,
   releaseInput: (() => void) | null = null,
+  steerInput: SteerInput | null = null,
 ) {
   const existing = activeSessions.get(sessionId);
   // A different live instance under the same key means an earlier run was
@@ -500,14 +580,39 @@ function addSession(
     backgroundWork.clear(sessionId);
   }
   const carried = superseding ? null : existing;
-  activeSessions.set(sessionId, {
+  const sessionEntry: ActiveSession = {
     instance: queryInstance,
     startTime: carried?.startTime || Date.now(),
     status: 'active',
     writer,
-    // Re-registered mid-run once the provider session id lands; keep the closer.
-    releaseInput: releaseInput || carried?.releaseInput || null
-  });
+    // Set the moment `releaseInput` actually runs (idle ceiling, or the turn
+    // ending with no background work left). A native side question writes
+    // into that same stdin, and the SDK drops a write after it has been
+    // released rather than erroring, so this flag is the only signal
+    // `askSideQuestion` has to fall back to the read-only fork instead.
+    inputReleased: false,
+    releaseInput: null,
+    // Count of `askSideQuestion` native calls currently in flight against
+    // this entry's live query. Carried across the mid-run re-registration
+    // below (same process, same question), reset only when superseded.
+    pendingNativeSideQuestions: carried?.pendingNativeSideQuestions || 0,
+    // Set when a release was requested (turn end, idle ceiling) while the
+    // count above was still positive, so the last question to settle knows
+    // to pick the deferred release back up.
+    releaseDeferred: carried?.releaseDeferred || false,
+    // Re-registered mid-run once the provider session id lands; keep the
+    // steer entry point like the closer below.
+    steerInput: steerInput || carried?.steerInput || null,
+  };
+  // Re-registered mid-run once the provider session id lands; keep the closer.
+  const effectiveReleaseInput = releaseInput || carried?.releaseInput || null;
+  sessionEntry.releaseInput = effectiveReleaseInput
+    ? () => {
+      sessionEntry.inputReleased = true;
+      effectiveReleaseInput();
+    }
+    : null;
+  activeSessions.set(sessionId, sessionEntry);
   // The history reader reports a background agent as running or stopped by
   // whether this entry exists, and the cached history does not see this map.
   sessionHistoryCache.invalidate(sessionId);
@@ -992,34 +1097,44 @@ async function buildPromptMessages(command: string, images: unknown, files: unkn
  * of the run and kills anything still going in the background, so the iterable
  * has to stay pending until we actually want the process gone.
  *
- * Parking on a queue rather than a single promise is what lets a follow-up turn
- * be pushed into a process that is still held open: without it the only way to
- * send another prompt is a new process, which kills whatever the held one was
- * still running.
+ * Parking on a queue rather than a single promise is what lets more messages
+ * reach the same stdin while the process is held open. Two callers push:
+ * steering (a message sent during a turn, read at its next tool call) and a
+ * follow-up turn claimed from a process held for background work (see
+ * claude-turn-reuse). Without it the only way to send another prompt is a new
+ * process, which kills whatever the held one was still running. A push after
+ * `release` is refused, because the CLI is already on its way out and would
+ * never read it.
  *
  * @param {Array<Object>} messages - SDKUserMessage records to send
- * @returns {{ stream: AsyncIterable, release: () => void, push: (messages: Array<Object>) => void, isOpen: () => boolean }} Stream plus its controls
+ * @returns {{ stream: AsyncIterable, release: () => void, push: (messages: Array<Object>) => boolean, isOpen: () => boolean }} Stream plus its controls
  */
 function createHeldPromptStream(messages: unknown[]) {
-  const queue = [...messages];
-  let wake: (() => void) | null = null;
+  // Messages pushed while parked, waiting for the CLI to read them.
+  const pending: unknown[] = [];
   let released = false;
+  // Wakes the parked generator for a push or the release.
+  let wake: (() => void) | null = null;
 
   const resume = () => {
-    const pending = wake;
+    const parked = wake;
     wake = null;
-    pending?.();
+    parked?.();
   };
 
   const stream = (async function* () {
-    while (true) {
-      while (queue.length > 0) {
-        yield queue.shift();
+    // The turn's own prompt always goes out, as it did before steering existed.
+    for (const message of messages) {
+      yield message;
+    }
+    for (;;) {
+      while (pending.length > 0 && !released) {
+        yield pending.shift();
       }
+      // Keeps stdin open — the CLI stays alive until release() is called.
       if (released) {
         return;
       }
-      // Keeps stdin open — the CLI stays alive until release() or the next push.
       await new Promise<void>((resolve) => { wake = resolve; });
     }
   })();
@@ -1030,10 +1145,15 @@ function createHeldPromptStream(messages: unknown[]) {
       released = true;
       resume();
     },
-    push: (followUpMessages: unknown[]) => {
-      queue.push(...followUpMessages);
+    push: (pushed: unknown[]) => {
+      if (released) {
+        return false;
+      }
+      pending.push(...pushed);
       resume();
+      return true;
     },
+    // Read by the held turn's tryAccept before and after it adopts settings.
     isOpen: () => !released
   };
 }
@@ -1136,6 +1256,18 @@ async function queryClaudeSDK(
   // stream exists; the finally block calls it unless work is still outstanding.
   let inputReleased = false;
   let releasePromptStream: () => void = () => { inputReleased = true; };
+  // Writes one more message to the held stdin stream (steering). Replaced
+  // once the stream exists; refuses until then and after the release.
+  let pushPromptMessage: (message: unknown) => boolean = () => false;
+  // Every message steered into this run, by the uuid it was sent with. The CLI
+  // echoes a message written to its stdin when it reads it, and only these
+  // echoes are shown — the turn's own prompt is already on screen.
+  const steeredMessageIds = new Set<string>();
+  // The steered messages the CLI has not read yet. While any remain, the
+  // turn's `result` does not end the run: the CLI reads them in a follow-up
+  // turn of its own.
+  const pendingSteerIds = new Set<string>();
+  let steerFollowUpTimer: ReturnType<typeof setTimeout> | null = null;
   let idleReleaseTimer: ReturnType<typeof setTimeout> | null = null;
   // The client is told the turn is over as soon as `result` lands, even though
   // the process lingers, so the UI never waits out the idle hold.
@@ -1185,6 +1317,66 @@ async function queryClaudeSDK(
   let mainThreadModel: string | null = null;
   let lastSentTokenBudget: TokenBudget | null = null;
 
+  // Closes the held stdin, going through the activeSessions entry so
+  // `inputReleased` is set accurately for `askSideQuestion`'s own check —
+  // unless a native side question (`askSideQuestion` below) is still
+  // waiting on this same query. The SDK drops a write made after release
+  // instead of erroring, so releasing under a pending question would have
+  // the CLI cancel it ("Side question cancelled") instead of answering it.
+  // `askSideQuestion`'s `finally` calls this again once the count drops back
+  // to zero, picking the deferred release back up.
+  //
+  // The map entry under this session's key may belong to a newer run that
+  // superseded this one (a turn started while this one was still held) — in
+  // that case `addSession` already released this run's stdin directly via
+  // its own closure when it superseded it, and the entry's pending count and
+  // `releaseInput` belong to the new run, not this one. Only read or write
+  // the entry when it is still this run's own (`entry.instance ===
+  // queryInstance`); otherwise fall back to this run's own closer so a late
+  // call here cannot touch the run that replaced it.
+  //
+  // `isIdleCeiling` is true only when this call is the idle timer itself
+  // firing. A normal call (turn end, background work settling) still defers
+  // under a pending native side question and arms the ceiling as a backstop;
+  // the ceiling's own call must not defer again on top of itself — a side
+  // question the CLI never answers would otherwise hold the process (and its
+  // MCP servers) forever, so the ceiling forces the release through instead.
+  const maybeReleasePromptStream = (isIdleCeiling = false) => {
+    const found = sessionKey() ? getSession(sessionKey()!) : undefined;
+    const entry = found && found.instance === queryInstance ? found : null;
+    if (entry && entry.pendingNativeSideQuestions > 0 && !isIdleCeiling) {
+      entry.releaseDeferred = true;
+      // Re-arm (rather than drop) the same idle ceiling that governs every
+      // other hold, so an unanswered question is rechecked instead of being
+      // left to wait on `askSideQuestion`'s own resolution alone.
+      scheduleRelease();
+      return;
+    }
+    if (entry) {
+      entry.releaseDeferred = false;
+      if (entry.releaseInput) {
+        entry.releaseInput();
+      } else {
+        releasePromptStream();
+      }
+    } else {
+      releasePromptStream();
+    }
+  };
+
+  // A release deferred above for a pending native side question keeps stdin
+  // open, but the hold for background work is over. Unpublish the held handle
+  // so no follow-up turn is pushed into a process whose deferred release would
+  // close stdin under it mid-reply: the next send starts a process of its own
+  // and the question is asked again on a read-only fork — what upstream's
+  // supersede does in the same case. A release that did go through has
+  // already unpublished it (`releasePromptStream` sets `inputReleased`).
+  const unpublishDeferredHold = () => {
+    if (!inputReleased && sessionKey()) {
+      forgetHeldTurn(sessionKey(), heldTurn);
+    }
+  };
+
   // Arms (or re-arms) the idle countdown that eventually closes stdin.
   const scheduleRelease = () => {
     if (idleReleaseTimer) {
@@ -1193,7 +1385,7 @@ async function queryClaudeSDK(
     }
     idleReleaseTimer = setTimeout(() => {
       idleReleaseTimer = null;
-      releasePromptStream();
+      maybeReleasePromptStream(true);
     }, BG_WAIT_CEILING_MS);
     // Never let the hold keep the server process alive on its own.
     idleReleaseTimer?.unref?.();
@@ -1202,6 +1394,30 @@ async function queryClaudeSDK(
   // Hoisted above the try so the catch's cleanup can tell whether this run
   // still owns the activeSessions entry (or was superseded by a newer run).
   let queryInstance: ClaudeQuery | null = null;
+
+  // Delivers a message into this run while its turn is going. Priority `next`
+  // makes the CLI read it at the next tool-call boundary, without stopping the
+  // turn; a turn that ends before one runs it as a follow-up turn instead.
+  // Refused once the turn has been reported complete: the client then sends
+  // it as an ordinary new turn.
+  const steerIntoTurn: SteerInput = async ({ command: steerCommand, images, files, messageId }) => {
+    if (turnCompleteSent) {
+      return false;
+    }
+    const [steerMessage] = await buildPromptMessages(steerCommand, images, files, options.cwd);
+    // Reading attachments takes a moment; the turn may have ended meanwhile.
+    if (turnCompleteSent || !steerMessage) {
+      return false;
+    }
+    pendingSteerIds.add(messageId);
+    steeredMessageIds.add(messageId);
+    const pushed = pushPromptMessage({ ...steerMessage, priority: 'next', uuid: messageId });
+    if (!pushed) {
+      pendingSteerIds.delete(messageId);
+      steeredMessageIds.delete(messageId);
+    }
+    return pushed;
+  };
 
   try {
     const resolvedModel = await context.resolveResumeModel(sessionId, options.model);
@@ -1263,6 +1479,12 @@ async function queryClaudeSDK(
     if (mcpServers) {
       sdkOptions.mcpServers = mcpServers;
     }
+
+    // Makes the CLI echo each message it reads from stdin, at the moment it
+    // reads it. For a steered message that echo is the only word on when — and
+    // whether — Claude actually took it in; the run loop below drops every
+    // other echo, so nothing else changes on screen.
+    sdkOptions.extraArgs = { ...(sdkOptions.extraArgs || {}), 'replay-user-messages': null };
 
     // Every turn uses streaming input so stdin stays open past the turn's
     // `result`. The message list is reusable, but each query attempt needs its
@@ -1362,6 +1584,64 @@ async function queryClaudeSDK(
         }]
       }]
     };
+
+    // An MCP server asking the person for input mid-call ("elicitation"). The
+    // CLI declares form and URL elicitation support to every server, and without
+    // this callback the SDK answers each request with `decline` itself — the
+    // server is told a person refused when nobody was shown anything. The
+    // request takes the permission round trip so it reaches every attached tab,
+    // survives a refresh and raises a notification. There is no timeout here:
+    // the server keeps its own, and an abort arrives through the signal.
+    // An unattended run (the agent API, commit-message generation) has nobody to
+    // show the form to, so it leaves the callback unset: the SDK then declines
+    // at once, rather than the run waiting on an answer that cannot come.
+    if (!options.unattended) {
+      sdkOptions.onElicitation = async (request: ElicitationRequest, elicitationOptions: { signal: AbortSignal }) => {
+        const requestId = createRequestId();
+        const input = {
+          serverName: request.serverName,
+          message: request.message,
+          mode: request.mode ?? 'form',
+          requestedSchema: request.requestedSchema,
+          url: request.url,
+          elicitationId: request.elicitationId,
+          title: request.title,
+          displayName: request.displayName,
+          description: request.description,
+        };
+        const serverLabel = request.displayName || request.serverName;
+        ws.send(createNormalizedMessage({ kind: 'permission_request', requestId, toolName: MCP_ELICITATION_TOOL_NAME, input, sessionId: capturedSessionId || sessionId || null, provider: 'claude' }));
+        emitNotification(notificationEvent({
+          provider: 'claude',
+          sessionId: sessionId || capturedSessionId || null,
+          kind: 'action_required',
+          code: 'agent.notification',
+          meta: { message: `${serverLabel} asks: ${request.message}`, sessionName: sessionSummary },
+          severity: 'warning',
+          requiresUserAction: true,
+          dedupeKey: `claude:elicitation:${sessionId || capturedSessionId || 'none'}:${requestId}`
+        }));
+
+        const decision = await waitForToolApproval(requestId, {
+          timeoutMs: 0,
+          signal: elicitationOptions?.signal,
+          metadata: {
+            _sessionId: sessionId || capturedSessionId || null,
+            _toolName: MCP_ELICITATION_TOOL_NAME,
+            _input: input,
+            _receivedAt: new Date(),
+          },
+          onCancel: (reason: string) => {
+            ws.send(createNormalizedMessage({ kind: 'permission_cancelled', requestId, reason, sessionId: capturedSessionId || sessionId || null, provider: 'claude' }));
+          }
+        });
+        if (decision && !decision.cancelled) {
+          // Same as canUseTool: retract the answered prompt on every attached tab.
+          ws.send(createNormalizedMessage({ kind: 'permission_resolved', requestId, sessionId: capturedSessionId || sessionId || null, provider: 'claude' }));
+        }
+        return toElicitationResult(decision, request.mode);
+      };
+    }
 
     // Caveat: in 'auto' and 'bypassPermissions' modes the SDK resolves approval
     // at the permission-mode step and skips this callback, so interactive tools
@@ -1464,8 +1744,9 @@ async function queryClaudeSDK(
     // this fork pins ahead of upstream, so it is not always assignable to `ClaudeQuery`.
     const createQuery = (context.createQuery ?? query) as NonNullable<ProviderRuntimeContext['createQuery']>;
     let heldPrompt = createHeldPromptStream(promptMessages);
-    // Reads `heldPrompt` through the closure so the retry below can swap the
-    // stream without leaving a stale closer behind in activeSessions.
+    // Both read `heldPrompt` through the closure so the retry below can swap
+    // the stream without leaving a stale closer or pusher behind in
+    // activeSessions — which is why the retry does not reassign them.
     releasePromptStream = () => {
       inputReleased = true;
       if (sessionKey()) {
@@ -1473,6 +1754,7 @@ async function queryClaudeSDK(
       }
       heldPrompt.release();
     };
+    pushPromptMessage = (message: unknown) => heldPrompt.push([message]);
     try {
       queryInstance = createQuery({
         prompt: heldPrompt.stream as AsyncIterable<SDKUserMessage>,
@@ -1555,8 +1837,116 @@ async function queryClaudeSDK(
 
     // Track the query instance for abort capability
     if (sessionKey()) {
-      addSession(sessionKey()!, queryInstance, ws, releasePromptStream);
+      addSession(sessionKey()!, queryInstance, ws, releasePromptStream, steerIntoTurn);
     }
+
+    // Settles a turn whose `result` has arrived: tells the client the turn is
+    // over, then holds the process for background work or lets it go. Reached
+    // from the `result` branch, or from the steer grace timer when steered
+    // messages never started their follow-up turn.
+    const settleTurnResult = () => {
+      // The turn is done as far as the client is concerned.
+      const abortPending = sessionKey() ? abortedSessionIds.has(sessionKey()) : false;
+      // Whether this result answers a prompt the user pushed into the held
+      // process, rather than background work reporting back on its own. Read
+      // here, not at the raw result: the follow-up turn the CLI runs for a
+      // steered message still answers the same pushed prompt.
+      const answersFollowUpPrompt = followUpPromptPending;
+      followUpPromptPending = false;
+      turnInFlight = false;
+      // Work started during this turn, or work from an earlier turn that
+      // has not settled yet (a follow-up turn reports one task in while
+      // another is still going), is still running. Hold the process open
+      // so it can finish and report back in a follow-up turn; the ceiling
+      // is only a backstop for work that never reports.
+      //
+      // The release when the last task settles is this same branch on the
+      // follow-up turn the CLI pushes for it, not the settling event
+      // itself: closing stdin at that moment would cut the turn that
+      // relays the task's result.
+      //
+      // When the turn reported its tasks, the tracker is the whole truth
+      // about tasks: an Agent call without `run_in_background` is scored as
+      // background by `startsBackgroundWork`, but the CLI runs it in the
+      // foreground and it has settled before this `result` — holding for it
+      // kept a process alive for the full ceiling with nothing outstanding.
+      // The Stop-hook snapshot is read on both branches: a cron set up in an
+      // earlier turn reaches neither the tracker nor `startsBackgroundWork`.
+      const stillOutstanding = backgroundWork.hasOutstanding(sessionKey());
+      const snapshotOutstanding = snapshotSource.snapshotOutstanding();
+      const holdForTurn = sawTaskEventThisTurn
+        ? (stillOutstanding || snapshotOutstanding)
+        : (backgroundWorkPending || stillOutstanding || snapshotOutstanding);
+      if (holdForTurn) {
+        console.log(
+          `[Claude SDK] Holding the process for outstanding background work (tasks: ${stillOutstanding}, snapshot: ${snapshotOutstanding}, started this turn: ${backgroundWorkPending}): session ${sessionKey() ?? capturedSessionId ?? 'unknown'}`,
+        );
+      }
+      backgroundWorkPending = false;
+      sawTaskEventThisTurn = false;
+      if (!turnCompleteSent && !abortPending) {
+        turnCompleteSent = true;
+        ws.send(createCompleteMessage({ provider: 'claude', sessionId: capturedSessionId || sessionId || null, exitCode: 0 }));
+        notifyRunStopped({
+          userId: ws?.userId || null,
+          provider: 'claude',
+          sessionId: sessionId || capturedSessionId || null,
+          sessionName: sessionSummary,
+          stopReason: 'completed'
+        });
+      } else if (heldForBackgroundWork && !answersFollowUpPrompt && !abortPending && !holdForTurn) {
+        // A result after the turn already reported complete means work we held
+        // the process open for has finished and pushed a follow-up turn — but
+        // one turn can background several tasks, and each reports back on its
+        // own. Telling the user the work is done while a sibling is still
+        // running would announce results that are not there yet, so this
+        // waits for the reading that also ends the hold.
+        notifyBackgroundWorkCompleted({
+          userId: ws?.userId || null,
+          provider: 'claude',
+          sessionId: sessionId || capturedSessionId || null,
+          sessionName: sessionSummary
+        });
+      }
+      if (holdForTurn) {
+        heldForBackgroundWork = true;
+        scheduleRelease();
+        if (sessionKey()) {
+          registerHeldTurn(sessionKey(), heldTurn);
+        }
+      } else {
+        // Either nothing was backgrounded, or the background work just
+        // reported in — let the CLI exit now, as it always has (unless a
+        // native side question is still in flight; see
+        // `maybeReleasePromptStream`).
+        heldForBackgroundWork = false;
+        maybeReleasePromptStream();
+        unpublishDeferredHold();
+      }
+      // Only now is the run over for the client. Settling the invocation of a
+      // pushed turn any earlier — at a result that only hands over to a steer
+      // follow-up turn — would let its dispatch complete the run with exit
+      // code 1 while the CLI is still answering.
+      settleFollowUpTurn();
+    };
+
+    // A turn that ended with steered messages still unread waits for the
+    // follow-up turn the CLI starts for them. It starts at once (its `init`
+    // arrives within milliseconds); the grace timer only covers a CLI that
+    // drops them instead, so the run cannot sit "processing" until the idle
+    // ceiling with nothing coming.
+    const awaitSteerFollowUp = () => {
+      if (steerFollowUpTimer) {
+        clearTimeout(steerFollowUpTimer);
+      }
+      steerFollowUpTimer = setTimeout(() => {
+        steerFollowUpTimer = null;
+        console.warn(`[Claude SDK] Steered message(s) never started a follow-up turn for session ${sessionKey()}; ending the run.`);
+        pendingSteerIds.clear();
+        settleTurnResult();
+      }, STEER_FOLLOW_UP_GRACE_MS);
+      steerFollowUpTimer.unref?.();
+    };
 
     // Process streaming messages
     console.log('Starting async generator loop for session:', capturedSessionId || 'NEW');
@@ -1566,7 +1956,7 @@ async function queryClaudeSDK(
       if (message.session_id && !capturedSessionId) {
 
         capturedSessionId = message.session_id;
-        addSession(sessionKey()!, queryInstance, ws, releasePromptStream);
+        addSession(sessionKey()!, queryInstance, ws, releasePromptStream, steerIntoTurn);
 
         // Set session ID on writer
         if (ws.setSessionId && typeof ws.setSessionId === 'function') {
@@ -1580,6 +1970,33 @@ async function queryClaudeSDK(
         }
       } else {
         // session_id already captured
+      }
+
+      // The follow-up turn for unread steered messages has started; its own
+      // `result` ends the run.
+      if (steerFollowUpTimer && message.type === 'system' && message.subtype === 'init') {
+        clearTimeout(steerFollowUpTimer);
+        steerFollowUpTimer = null;
+      }
+
+      // The CLI's echo of a message it read from stdin (see `extraArgs`).
+      if (message.type === 'user' && message.isReplay === true) {
+        const echoedId = typeof message.uuid === 'string' ? message.uuid : '';
+        pendingSteerIds.delete(echoedId);
+        if (steeredMessageIds.has(echoedId)) {
+          if (steerFollowUpTimer && pendingSteerIds.size === 0) {
+            clearTimeout(steerFollowUpTimer);
+            steerFollowUpTimer = null;
+          }
+          // Shown now, where Claude read it, on every tab watching the run.
+          for (const steered of context.normalizeMessage(transformMessage(message), capturedSessionId || sessionId || null)) {
+            // A message read mid-turn is stored as an attachment of the turn,
+            // not a user row of its own, so it is no anchor for editing.
+            delete steered.transcriptAnchorId;
+            ws.send(steered);
+          }
+        }
+        continue;
       }
 
       // Transform and normalize message via adapter
@@ -1682,85 +2099,24 @@ async function queryClaudeSDK(
         && !snapshotSource.snapshotOutstanding()
       ) {
         heldForBackgroundWork = false;
-        releasePromptStream();
+        maybeReleasePromptStream();
+        unpublishDeferredHold();
       }
 
       if (message.type === 'result') {
         warnOnContextWindowMismatch(message);
-        // The turn is done as far as the client is concerned.
         const abortPending = sessionKey() ? abortedSessionIds.has(sessionKey()) : false;
-        // Whether this result answers a prompt the user pushed into the held
-        // process, rather than background work reporting back on its own.
-        const answersFollowUpPrompt = followUpPromptPending;
-        followUpPromptPending = false;
-        turnInFlight = false;
-        // Work started during this turn, or work from an earlier turn that
-        // has not settled yet (a follow-up turn reports one task in while
-        // another is still going), is still running. Hold the process open
-        // so it can finish and report back in a follow-up turn; the ceiling
-        // is only a backstop for work that never reports.
-        //
-        // The release when the last task settles is this same branch on the
-        // follow-up turn the CLI pushes for it, not the settling event
-        // itself: closing stdin at that moment would cut the turn that
-        // relays the task's result.
-        //
-        // When the turn reported its tasks, the tracker is the whole truth
-        // about tasks: an Agent call without `run_in_background` is scored as
-        // background by `startsBackgroundWork`, but the CLI runs it in the
-        // foreground and it has settled before this `result` — holding for it
-        // kept a process alive for the full ceiling with nothing outstanding.
-        // The Stop-hook snapshot is read on both branches: a cron set up in an
-        // earlier turn reaches neither the tracker nor `startsBackgroundWork`.
-        const stillOutstanding = backgroundWork.hasOutstanding(sessionKey());
-        const snapshotOutstanding = snapshotSource.snapshotOutstanding();
-        const holdForTurn = sawTaskEventThisTurn
-          ? (stillOutstanding || snapshotOutstanding)
-          : (backgroundWorkPending || stillOutstanding || snapshotOutstanding);
-        if (holdForTurn) {
-          console.log(
-            `[Claude SDK] Holding the process for outstanding background work (tasks: ${stillOutstanding}, snapshot: ${snapshotOutstanding}, started this turn: ${backgroundWorkPending}): session ${sessionKey() ?? capturedSessionId ?? 'unknown'}`,
-          );
-        }
-        backgroundWorkPending = false;
-        sawTaskEventThisTurn = false;
-        if (!turnCompleteSent && !abortPending) {
-          turnCompleteSent = true;
-          ws.send(createCompleteMessage({ provider: 'claude', sessionId: capturedSessionId || sessionId || null, exitCode: 0 }));
-          notifyRunStopped({
-            userId: ws?.userId || null,
-            provider: 'claude',
-            sessionId: sessionId || capturedSessionId || null,
-            sessionName: sessionSummary,
-            stopReason: 'completed'
-          });
-        } else if (heldForBackgroundWork && !answersFollowUpPrompt && !abortPending && !holdForTurn) {
-          // A result after the turn already reported complete means work we held
-          // the process open for has finished and pushed a follow-up turn — but
-          // one turn can background several tasks, and each reports back on its
-          // own. Telling the user the work is done while a sibling is still
-          // running would announce results that are not there yet, so this
-          // waits for the reading that also ends the hold.
-          notifyBackgroundWorkCompleted({
-            userId: ws?.userId || null,
-            provider: 'claude',
-            sessionId: sessionId || capturedSessionId || null,
-            sessionName: sessionSummary
-          });
-        }
-        if (holdForTurn) {
-          heldForBackgroundWork = true;
-          scheduleRelease();
-          if (sessionKey()) {
-            registerHeldTurn(sessionKey(), heldTurn);
-          }
+        if (pendingSteerIds.size > 0 && !abortPending) {
+          // The turn ended before Claude reached a tool-call boundary, so the
+          // steered messages it never read are still queued in the CLI, which
+          // runs them as a follow-up turn on this same process. The run is not
+          // over for the client yet, and stdin must stay open for that turn —
+          // `turnInFlight` stays true, so a task that stops in between cannot
+          // release the process before that turn starts.
+          awaitSteerFollowUp();
         } else {
-          // Either nothing was backgrounded, or the background work just
-          // reported in — let the CLI exit now, as it always has.
-          heldForBackgroundWork = false;
-          releasePromptStream();
+          settleTurnResult();
         }
-        settleFollowUpTurn();
       } else if (idleReleaseTimer) {
         // Background activity after the turn — a `task_progress` report from a
         // running task, or anything else the CLI emits — pushes the countdown
@@ -1817,7 +2173,18 @@ async function queryClaudeSDK(
     const wasAborted = sessionKey() ? abortedSessionIds.delete(sessionKey()!) : false;
     if (wasAborted) {
       // The abort already produced the terminal complete; a generator throw
-      // caused by interrupt() is expected noise, not a user-facing error.
+      // caused by interrupt() is expected noise, not a user-facing error. It
+      // is still a cancelled run, reported the same way as when the stream
+      // ends after the interrupt.
+      if (!turnCompleteSent) {
+        notifyRunStopped({
+          userId: ws?.userId || null,
+          provider: 'claude',
+          sessionId: sessionId || capturedSessionId || null,
+          sessionName: sessionSummary,
+          stopReason: 'aborted'
+        });
+      }
       return;
     }
 
@@ -1882,6 +2249,13 @@ async function queryClaudeSDK(
       }
       releasePromptStream();
     }
+    // A steer follow-up timer left armed when the loop ended would otherwise
+    // fire into a run that is already gone. The stdin itself is closed (or
+    // deliberately kept for the ceiling) by the branch above, never here.
+    if (steerFollowUpTimer) {
+      clearTimeout(steerFollowUpTimer);
+      steerFollowUpTimer = null;
+    }
     // A follow-up turn still in flight when this loop ended (abort, crash, the
     // CLI exiting) would otherwise leave its own invocation — and the run it
     // owns — waiting forever.
@@ -1929,6 +2303,32 @@ async function abortClaudeSDKSession(sessionId: string) {
     abortedSessionIds.delete(sessionId);
     return false;
   }
+}
+
+/**
+ * Delivers a user message into a session's running turn ("steering"): Claude
+ * reads it at its next tool-call boundary and carries on with it in mind, with
+ * nothing stopped. A turn that ends before another tool call reads it in a
+ * follow-up turn on the same process, and the run is not reported complete
+ * until it has.
+ *
+ * Resolves false when the session has no live run or its turn has already been
+ * reported complete — the message could only start a new turn then, which is
+ * the caller's to send.
+ * @param {string} sessionId - App session identifier
+ * @param {string} command - The message text
+ * @param {Object} options - `images`, `files` (verified descriptors) and `messageId`
+ * @returns {Promise<boolean>} True once the message is on its way to the CLI
+ */
+async function steerClaudeSDKSession(sessionId: string, command: string, options: AnyRecord = {}) {
+  const session = getSession(sessionId);
+  if (!session || session.status !== 'active' || !session.steerInput) {
+    return false;
+  }
+  const messageId = typeof options.messageId === 'string' && options.messageId
+    ? options.messageId
+    : crypto.randomUUID();
+  return session.steerInput({ command, images: options.images, files: options.files, messageId });
 }
 
 /**
@@ -2030,6 +2430,134 @@ function reconnectSessionWriter(sessionId: string, newRawWs: unknown) {
   return true;
 }
 
+/**
+ * SDK 0.3.311 ships `Query.prototype.askSideQuestion` without it in the SDK's
+ * own typings (checked in node_modules/@anthropic-ai/claude-agent-sdk) — hence
+ * the local types below rather than an imported one.
+ */
+type NativeSideQuestionResult = {
+  response: string;
+  synthetic: boolean;
+  refusalFallback?: AnyRecord;
+};
+
+type NativeSideQuestionCapableInstance = {
+  askSideQuestion: (
+    question: string,
+    options?: { signal?: AbortSignal },
+  ) => Promise<NativeSideQuestionResult | null>;
+};
+
+/**
+ * Asks a side question on the live query of `request.appSessionId`, when one
+ * is up and ships the method, or on a read-only fork otherwise.
+ *
+ * Measured 2026-10-27 (`claude-measurement`, SDK 0.3.311, five calls each,
+ * alternating): median response time, native vs the fork —
+ *   mid-turn (process mid-generation):        native 1504 ms, fork 7476 ms
+ *   background (held only for background work): native 2141 ms, fork 5016 ms
+ * Native wins in both busy states, so the path taken here does not depend on
+ * which one the process is in: any live query with the method answers
+ * natively. Caveat: the CLI refused a foreground `sleep 240` during
+ * measurement, so most "mid-turn" calls likely ran after the turn ended too
+ * — the gap there may be narrower than measured, not wider.
+ *
+ * `liveTasks` for the fork path comes from this runtime's own background
+ * work tracker, keyed by the app session id, so the fork's prompt can say
+ * which of the session's own tasks are still running.
+ */
+async function askSideQuestion(
+  request: SideQuestionRequest,
+  sink: SideQuestionSink,
+  context: ProviderRuntimeContext,
+): Promise<SideQuestionOutcome> {
+  const session = getSession(request.appSessionId);
+  // The SDK does not type this method (see above), so the instance is read
+  // through the local type rather than `ClaudeQuery`. Kept alongside the
+  // original (`session.instance`, typed `ClaudeQuery`) so the `finally`
+  // below can compare identity without comparing through this cast — the
+  // cast's structural type and `ClaudeQuery` share no members TS can see,
+  // so a `===` between two values of those two types reads as a mistake.
+  const instance = session?.instance as NativeSideQuestionCapableInstance | undefined;
+
+  // A session whose stdin was already released (turn ended with no
+  // background work, or the idle ceiling) still has `instance` around, but
+  // a write into its input stream is silently dropped rather than answered.
+  // The fork path below spawns its own process instead, so it is the only
+  // one that can still reach this session's transcript.
+  // `session &&` (not just `instance &&`) narrows `session` itself for the
+  // rest of this block, since `instance` was read off it through a cast TS
+  // cannot trace back.
+  if (session && instance && typeof instance.askSideQuestion === 'function' && !session.inputReleased) {
+    // Counted on the session entry so `queryClaudeSDK`'s
+    // `maybeReleasePromptStream` defers a release requested while this is
+    // still above zero, instead of closing stdin under the question.
+    session.pendingNativeSideQuestions = (session.pendingNativeSideQuestions || 0) + 1;
+    try {
+      const result = await instance.askSideQuestion(request.question, { signal: request.signal });
+      const response = result?.response;
+      if (typeof response === 'string' && response.length > 0) {
+        sink.delta(response);
+        return { status: 'done', answer: response };
+      }
+      return { status: 'error', error: 'Claude returned no answer.', answer: '' };
+    } catch (error) {
+      // `request.signal` is what `dismiss` aborts to end this ask at once —
+      // a deliberate drop, never retried. A session whose stdin was
+      // released while this ask was still outstanding (a new turn
+      // superseding this one via `releaseHeldSession`, which lets the old
+      // process go directly and does not consult the pending count above)
+      // is the CLI cancelling the question for a reason that was not that
+      // signal — most of all "Side question cancelled" — so it gets one
+      // more try on the read-only fork instead of surfacing the CLI's own
+      // error. A plain failure with the session still live is not retried.
+      // `session` (not a fresh lookup) so a map entry replaced meanwhile by
+      // a new turn's own registration does not hide this very query's
+      // release, which `releaseHeldSession` sets on this same object.
+      // Cast through `unknown`: the `if` above narrowed `session.inputReleased`
+      // to the literal `false`, but that narrowing does not survive the
+      // `await` above in reality — `releaseHeldSession` can flip it from
+      // other code while this call is in flight — so TS's belief that this
+      // comparison can never be true is the stale part, not the check.
+      if (!request.signal?.aborted && (session.inputReleased as unknown) === true) {
+        return askClaudeSideQuestion(request, sink, {
+          createQuery: context.createQuery,
+          liveTasks: backgroundWork.outstanding(request.appSessionId),
+        });
+      }
+      return { status: 'error', error: errorMessage(error), answer: '' };
+    } finally {
+      // Re-fetched: a mid-run re-registration (`addSession`, once the
+      // provider session id lands) carries this count onto a new entry
+      // object for the same instance, so the one to decrement is whichever
+      // is current now — but only when it is still the entry for the
+      // instance this question was asked on. A turn that superseded this
+      // run while the question was in flight replaced the map entry with
+      // the new run's own (a different `instance`, a `pendingNativeSideQuestions`
+      // count that was never incremented for this question), and must not
+      // be decremented or released on this question's account.
+      const entry = getSession(request.appSessionId);
+      // Compared through `unknown`, not through the `NativeSideQuestionCapableInstance`
+      // cast above: `entry.instance` is `ClaudeQuery` and `instance` is that
+      // cast's type, and the two share no member TS can see, so a direct
+      // `===` between them reads as unintentional even though both sides
+      // are (or were) the very same object.
+      if (entry && (entry.instance as unknown) === (instance as unknown)) {
+        entry.pendingNativeSideQuestions = Math.max(0, (entry.pendingNativeSideQuestions || 0) - 1);
+        if (entry.pendingNativeSideQuestions === 0 && entry.releaseDeferred) {
+          entry.releaseDeferred = false;
+          entry.releaseInput?.();
+        }
+      }
+    }
+  }
+
+  return askClaudeSideQuestion(request, sink, {
+    createQuery: context.createQuery,
+    liveTasks: backgroundWork.outstanding(request.appSessionId),
+  });
+}
+
 export const claudeRuntime = {
   run: queryClaudeSDK,
   abort: abortClaudeSDKSession,
@@ -2039,12 +2567,15 @@ export const claudeRuntime = {
   },
   listBackgroundWork: listClaudeSDKBackgroundWork,
   stopBackgroundTask: stopClaudeSDKTask,
+  askSideQuestion,
+  steer: steerClaudeSDKSession,
 };
 
 // Export public API
 export {
   queryClaudeSDK,
   abortClaudeSDKSession,
+  steerClaudeSDKSession,
   listClaudeSDKBackgroundWork,
   stopClaudeSDKTask,
   isClaudeSDKSessionActive,

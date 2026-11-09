@@ -5,21 +5,25 @@ import type { BackgroundSendChoice, BackgroundSendPrompt } from '@/shared/types'
 
 type BackgroundSendDialogProps = {
   prompt: BackgroundSendPrompt | null;
+  /** False until the capability matrix has loaded, or for a provider it does not list; the side-question button is left out rather than offered and then refused. */
+  supportsSideQuestions?: boolean;
+  /** False only for an attachment-only composer: a side question cannot carry attachments, so an empty question would be refused silently. Defaults to true so existing callers, which only ever opened this dialog with typed text, keep working. */
+  hasText?: boolean;
   onResolve: (choice: BackgroundSendChoice) => void;
 };
 
 /**
  * Rendered by chat's ChatComposer when a message is sent to a session whose
- * turn has ended but whose background work is still running. The choices are
- * to send and keep that work running, to interrupt that work and send, to queue
- * the message until the work finishes, or to cancel.
+ * turn has ended but whose background work is still running. Sending now
+ * stops that work, so the choices are to send anyway, queue the message until
+ * the work finishes, or cancel.
  *
  * Cancel comes first in the DOM so Dialog's open-focus lands on it: an Enter
  * pressed right after the send that opened the prompt (a double Enter, a key
  * repeat) cancels instead of stopping the work. Esc and a click outside also
- * cancel. Interrupting takes a deliberate click or Tab.
+ * cancel. Sending anyway takes a deliberate click or Tab.
  */
-export default function BackgroundSendDialog({ prompt, onResolve }: BackgroundSendDialogProps) {
+export default function BackgroundSendDialog({ prompt, supportsSideQuestions = false, hasText = true, onResolve }: BackgroundSendDialogProps) {
   const { t } = useTranslation('chat');
 
   return (
@@ -48,7 +52,7 @@ export default function BackgroundSendDialog({ prompt, onResolve }: BackgroundSe
 
         <p id="background-send-dialog-description" className="mt-3 text-sm text-muted-foreground">
           {t('claudeStatus.backgroundTask.prompt.description', {
-            defaultValue: 'Send keeps that work running. Interrupt and send stops it first, and anything it has not reported yet is lost. Queue sends the message when the work finishes.',
+            defaultValue: 'A new message starts a new turn, which stops that work; anything it has not reported yet is lost. Queue the message to send it when the work finishes.',
           })}
         </p>
 
@@ -56,14 +60,16 @@ export default function BackgroundSendDialog({ prompt, onResolve }: BackgroundSe
           <Button type="button" variant="outline" onClick={() => onResolve('cancel')}>
             {t('claudeStatus.backgroundTask.prompt.cancel', { defaultValue: 'Cancel' })}
           </Button>
-          <Button type="button" variant="outline" onClick={() => onResolve('queue')}>
+          <Button type="button" variant="default" onClick={() => onResolve('queue')}>
             {t('claudeStatus.backgroundTask.prompt.queue', { defaultValue: 'Queue' })}
           </Button>
-          <Button type="button" variant="default" onClick={() => onResolve('send')}>
-            {t('claudeStatus.backgroundTask.prompt.send', { defaultValue: 'Send' })}
-          </Button>
-          <Button type="button" variant="destructive" onClick={() => onResolve('interrupt')}>
-            {t('claudeStatus.backgroundTask.prompt.interruptAndSend', { defaultValue: 'Interrupt and send' })}
+          {supportsSideQuestions && hasText && (
+            <Button type="button" variant="outline" onClick={() => onResolve('sideQuestion')}>
+              {t('claudeStatus.backgroundTask.prompt.sideQuestion', { defaultValue: 'Side question' })}
+            </Button>
+          )}
+          <Button type="button" variant="destructive" onClick={() => onResolve('send')}>
+            {t('claudeStatus.backgroundTask.prompt.sendAnyway', { defaultValue: 'Send anyway' })}
           </Button>
         </div>
       </DialogContent>

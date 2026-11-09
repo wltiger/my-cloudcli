@@ -17,16 +17,15 @@ describe('the background-work send dialog', () => {
     });
   });
 
-  it('maps each of the four buttons to its choice', () => {
+  it('maps each button to its choice', () => {
     const onResolve = vi.fn();
     render(<BackgroundSendDialog prompt={PROMPT} onResolve={onResolve} />);
 
     fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
     fireEvent.click(screen.getByRole('button', { name: 'Queue' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Interrupt and send' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Send anyway' }));
 
-    expect(onResolve.mock.calls).toEqual([['cancel'], ['queue'], ['send'], ['interrupt']]);
+    expect(onResolve.mock.calls).toEqual([['cancel'], ['queue'], ['send']]);
   });
 
   it('cancels on Escape and on a click outside', () => {

@@ -178,22 +178,11 @@ test('queue persists the message behind the work with its uploaded files, sends 
   assert.equal(view.result.current.attachedFiles.length, 0);
 });
 
-test('send sends the message and does not ask the server to stop the work', async () => {
+test('send anyway sends the message with the interrupt flag on the top level of the frame', async () => {
   const { view, sends } = render(backgroundOnly);
   await act(async () => { view.result.current.setInput('hello'); });
 
   await submitAndAnswer(view, 'send');
-
-  assert.equal(sends().length, 1);
-  assert.equal(sends()[0]?.interruptBackground, undefined, 'no interrupt flag on a plain send');
-  assert.equal(appendQueuedMessage.mock.calls.length, 0);
-});
-
-test('interrupt and send sends the message with the interrupt flag on the top level of the frame', async () => {
-  const { view, sends } = render(backgroundOnly);
-  await act(async () => { view.result.current.setInput('hello'); });
-
-  await submitAndAnswer(view, 'interrupt');
 
   assert.equal(sends().length, 1);
   assert.equal(sends()[0]?.interruptBackground, true);
