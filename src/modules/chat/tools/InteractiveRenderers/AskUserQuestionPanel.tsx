@@ -4,6 +4,8 @@ import { useTranslation } from 'react-i18next';
 import type { PermissionPanelProps,Question } from '@/shared/types';
 import { useChatFontClasses } from '@/shared/hooks/useChatTypography';
 import { FullscreenSurface, FullscreenToggleButton } from '@/shared/ui';
+import { AskQuestionNotesField } from '@/modules/chat/tools/InteractiveRenderers/AskQuestionNotesField';
+import { NOTES_LABEL_PREFIX } from '@/modules/chat/utils/askQuestionNotes';
 
 /** Stable fallback so the memoized handlers below are not invalidated on every
  *  render by a fresh `[]` literal when a request carries no questions. */
@@ -48,11 +50,17 @@ export const AskUserQuestionPanel: React.FC<PermissionPanelProps> = ({
   const [selections, setSelections] = useState<Map<number, Set<string>>>(() => new Map());
   const [otherTexts, setOtherTexts] = useState<Map<number, string>>(() => new Map());
   const [otherActive, setOtherActive] = useState<Map<number, boolean>>(() => new Map());
+  const [notesTexts, setNotesTexts] = useState<Map<number, string>>(() => new Map());
+  const [notesOpen, setNotesOpen] = useState<Map<number, boolean>>(() => new Map());
   const [mounted, setMounted] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
 
   const containerRef = useRef<HTMLDivElement>(null);
   const otherInputRef = useRef<HTMLTextAreaElement>(null);
+  const notesInputRef = useRef<HTMLTextAreaElement>(null);
+  // Which text field the user typed in last, so a re-mount (fullscreen) hands
+  // focus back to that one when both are open.
+  const lastFieldRef = useRef<'other' | 'notes' | null>(null);
 
   useEffect(() => {
     requestAnimationFrame(() => setMounted(true));
@@ -62,10 +70,10 @@ export const AskUserQuestionPanel: React.FC<PermissionPanelProps> = ({
   // fullscreen re-parents the panel, so re-focus then too or the number-key
   // shortcuts go dead.
   useEffect(() => {
-    if (!otherActive.get(currentStep)) {
+    if (!otherActive.get(currentStep) && !notesOpen.get(currentStep)) {
       containerRef.current?.focus();
     }
-  }, [currentStep, otherActive, isFullscreen]);
+  }, [currentStep, otherActive, notesOpen, isFullscreen]);
 
   // Grow the field to its content up to the cap, then let it scroll. Runs
   // whenever the field (re)appears, because a saved answer may already span
@@ -82,6 +90,32 @@ export const AskUserQuestionPanel: React.FC<PermissionPanelProps> = ({
     field.focus();
     fitOtherField(field);
   }, [otherActive, currentStep, fitOtherField, isFullscreen]);
+
+  // Runs after the "Other" effect, so it wins only when the notes were the
+  // field last typed in (or were just opened).
+  useEffect(() => {
+    if (!notesOpen.get(currentStep)) return;
+    if (otherActive.get(currentStep) && lastFieldRef.current !== 'notes') return;
+    const field = notesInputRef.current;
+    if (!field) return;
+    field.focus();
+    // A re-mounted field (fullscreen, a step coming back) would otherwise put
+    // the caret before the text already written.
+    field.setSelectionRange(field.value.length, field.value.length);
+  }, [notesOpen, otherActive, currentStep, isFullscreen]);
+
+  const openNotes = useCallback((qIdx: number) => {
+    lastFieldRef.current = 'notes';
+    if (notesOpen.get(qIdx)) {
+      notesInputRef.current?.focus();
+      return;
+    }
+    setNotesOpen(prev => new Map(prev).set(qIdx, true));
+  }, [notesOpen]);
+
+  const setNotesText = useCallback((qIdx: number, text: string) => {
+    setNotesTexts(prev => new Map(prev).set(qIdx, text));
+  }, []);
 
   const toggleOption = useCallback((qIdx: number, label: string, multiSelect: boolean) => {
     setSelections(prev => {
@@ -128,14 +162,26 @@ export const AskUserQuestionPanel: React.FC<PermissionPanelProps> = ({
     return answers;
   }, [questions, selections, otherActive, otherTexts]);
 
-  // Picked labels in option order, then the typed answer, for each question.
+  // Claude's per-question notes, keyed by question text like the answers.
+  const buildAnnotations = useCallback(() => {
+    const annotations: Record<string, { notes: string }> = {};
+    questions.forEach((q, idx) => {
+      const notes = (notesTexts.get(idx) || '').trim();
+      if (notes) annotations[q.question] = { notes };
+    });
+    return annotations;
+  }, [questions, notesTexts]);
+
+  // Picked labels in option order, then the typed answer, then the notes, for each question.
   const buildLabelLists = useCallback(() => questions.map((q, idx) => {
     const selected = selections.get(idx) || new Set<string>();
     const labels = q.options.map((option) => option.label).filter((label) => selected.has(label));
     const otherText = (otherTexts.get(idx) || '').trim();
     if (q.custom !== false && otherActive.get(idx) && otherText) labels.push(otherText);
+    const notes = (notesTexts.get(idx) || '').trim();
+    if (notes) labels.push(`${NOTES_LABEL_PREFIX}${notes}`);
     return labels;
-  }), [questions, selections, otherActive, otherTexts]);
+  }), [questions, selections, otherActive, otherTexts, notesTexts]);
 
   // Answering ends the panel's job, so drop out of fullscreen to reveal the
   // chat stream (and whatever the agent replies next).
@@ -145,8 +191,16 @@ export const AskUserQuestionPanel: React.FC<PermissionPanelProps> = ({
       onDecision(request.requestId, { allow: true, updatedInput: { answers: buildLabelLists() } });
       return;
     }
-    onDecision(request.requestId, { allow: true, updatedInput: { ...input, answers: buildAnswers() } });
-  }, [onDecision, request.requestId, input, buildAnswers, buildLabelLists, answersAsLabelLists]);
+    const annotations = buildAnnotations();
+    onDecision(request.requestId, {
+      allow: true,
+      updatedInput: {
+        ...input,
+        answers: buildAnswers(),
+        ...(Object.keys(annotations).length > 0 ? { annotations } : {}),
+      },
+    });
+  }, [onDecision, request.requestId, input, buildAnswers, buildAnnotations, buildLabelLists, answersAsLabelLists]);
 
   // Claude carries on without answers; a dismissed OpenCode question is
   // rejected, which ends that turn as OpenCode's own Dismiss does.
@@ -184,6 +238,13 @@ export const AskUserQuestionPanel: React.FC<PermissionPanelProps> = ({
       return;
     }
 
+    // n for notes
+    if ((e.key === 'n' || e.key === 'N') && !e.ctrlKey && !e.metaKey && !e.altKey) {
+      e.preventDefault();
+      openNotes(currentStep);
+      return;
+    }
+
     // Enter to advance / submit
     if (e.key === 'Enter') {
       e.preventDefault();
@@ -199,7 +260,7 @@ export const AskUserQuestionPanel: React.FC<PermissionPanelProps> = ({
       handleSkip();
       return;
     }
-  }, [currentStep, questions, toggleOption, toggleOther, handleSubmit, handleSkip]);
+  }, [currentStep, questions, toggleOption, toggleOther, openNotes, handleSubmit, handleSkip]);
 
   if (questions.length === 0) return null;
 
@@ -209,12 +270,15 @@ export const AskUserQuestionPanel: React.FC<PermissionPanelProps> = ({
   const multi = q.multiSelect || false;
   const selected = selections.get(currentStep) || new Set<string>();
   const isOtherOn = otherActive.get(currentStep) || false;
+  const isNotesOpen = notesOpen.get(currentStep) || false;
   // While the multi-line field is active, a bare Enter is a line break, so the
   // advance/submit key is the explicit combo — Next and Submit must agree.
-  const keyHint = isOtherOn ? 'Ctrl+Enter' : 'Enter';
+  const keyHint = isOtherOn || isNotesOpen ? 'Ctrl+Enter' : 'Enter';
   const isLast = currentStep === total - 1;
   const isFirst = currentStep === 0;
-  const hasCurrentSelection = selected.size > 0 || (isOtherOn && (otherTexts.get(currentStep) || '').trim().length > 0);
+  const hasCurrentSelection = selected.size > 0
+    || (isOtherOn && (otherTexts.get(currentStep) || '').trim().length > 0)
+    || (notesTexts.get(currentStep) || '').trim().length > 0;
 
   // Split out of the card so fullscreen can pin it to the bottom of the
   // viewport — the card's own `overflow-hidden` would trap a sticky footer.
@@ -257,7 +321,7 @@ export const AskUserQuestionPanel: React.FC<PermissionPanelProps> = ({
           <button
             type="button"
             onClick={handleSubmit}
-            disabled={!hasCurrentSelection && !Object.keys(buildAnswers()).length}
+            disabled={!hasCurrentSelection && !Object.keys(buildAnswers()).length && !Object.keys(buildAnnotations()).length}
             className={`inline-flex items-center gap-1 rounded-lg bg-gradient-to-r from-blue-600 to-blue-500 font-semibold text-white shadow-sm transition-all duration-200 hover:shadow-md disabled:cursor-not-allowed disabled:opacity-30 disabled:shadow-none dark:from-blue-500 dark:to-blue-600 ${
               isFullscreen ? 'px-6 py-2.5 text-[14px]' : 'px-3.5 py-1.5 text-[11px]'
             }`}
@@ -490,12 +554,29 @@ export const AskUserQuestionPanel: React.FC<PermissionPanelProps> = ({
                     // Prevent container keydown from firing
                     e.stopPropagation();
                   }}
+                  onFocus={() => { lastFieldRef.current = 'other'; }}
                   placeholder={t('chat:misc.typeAnswer')}
                   aria-label={t('chat:misc.typeAnswer')}
                   className={`block w-full resize-none overflow-y-auto rounded-lg border-0 bg-gray-50 px-3 py-1.5 ${fontClasses.optionLabel} text-gray-900 outline-none ring-1 ring-gray-200 transition-shadow duration-200 placeholder:text-gray-400 focus:ring-2 focus:ring-blue-400 dark:bg-gray-900/60 dark:text-gray-100 dark:ring-gray-700 dark:placeholder:text-gray-600 dark:focus:ring-blue-500`}
                 />
               </div>
             )}
+
+            {/* Notes — kept alongside the picked option, offered on every question */}
+            <AskQuestionNotesField
+              open={isNotesOpen}
+              value={notesTexts.get(currentStep) || ''}
+              isFullscreen={isFullscreen}
+              fieldClassName={fontClasses.optionLabel}
+              fieldRef={notesInputRef}
+              onOpen={() => openNotes(currentStep)}
+              onChange={(text) => setNotesText(currentStep, text)}
+              onFocus={() => { lastFieldRef.current = 'notes'; }}
+              onAdvance={() => {
+                if (isLast) handleSubmit();
+                else setCurrentStep(s => s + 1);
+              }}
+            />
           </div>
         </div>
 

@@ -4,6 +4,7 @@
  */
 
 import { ANTIGRAVITY_TOOL_CONFIGS } from '@/modules/chat/tools/configs/antigravityToolConfigs';
+import { readQuestionNotes } from '@/modules/chat/utils/askQuestionNotes';
 
 export type ToolDisplayConfig = {
   input: {
@@ -666,13 +667,15 @@ export const TOOL_CONFIGS: Record<string, ToolDisplayConfig> = {
       title: (input: any, context?: { toolResult?: any }) => {
         const questions = Array.isArray(input?.questions) ? input.questions : [];
         const answers = input?.answers || context?.toolResult?.toolUseResult?.answers || {};
+        const annotations = input?.annotations || context?.toolResult?.toolUseResult?.annotations;
         if (questions.length === 1) {
           const header = questions[0]?.header || 'Question';
           const answer = answers[questions[0]?.question];
           return answer ? `${header} — ${answer}` : header;
         }
 
-        const answered = questions.filter((question: any) => answers[question?.question]).length;
+        const answered = questions.filter((question: any) =>
+          answers[question?.question] || readQuestionNotes(annotations, question?.question)).length;
         return answered > 0
           ? `${questions.length} questions — ${answered} answered`
           : `${questions.length} questions`;
@@ -681,7 +684,8 @@ export const TOOL_CONFIGS: Record<string, ToolDisplayConfig> = {
       contentType: 'question-answer',
       getContentProps: (input: any, context?: { toolResult?: any }) => ({
         questions: input.questions || [],
-        answers: input.answers || context?.toolResult?.toolUseResult?.answers || {}
+        answers: input.answers || context?.toolResult?.toolUseResult?.answers || {},
+        annotations: input.annotations || context?.toolResult?.toolUseResult?.annotations || {},
       }),
     },
     // The result only restates the selection the input now carries.

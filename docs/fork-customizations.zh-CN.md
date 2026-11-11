@@ -645,3 +645,13 @@ Stop 是能看见的那一半。`chat.abort` 现在接受「run 已结束、但�
 
 **v1.37.8 合并提示（2026-11-09）：** 官方的旁问（`dcc0bfbc`）在本条两个方法的同一位置插入了三个辅助方法（`hasAgentColumn`、`registeredForkIdsClause`、`pendingForkWindowClause`）；两组都保留，并给 `pruneRows` 补上合并时丢掉的那个右花括号。清理会读到 `session` 表里所有 id，包括旁问开的副本，但副本永远没有 CloudCLI 的行，所以不会误删也不会漏删。
 
+
+## 40. 问题面板可以在选了选项之后再写补充说明
+
+**涉及文件：** *本 fork 自有：* `src/modules/chat/tools/InteractiveRenderers/AskQuestionNotesField.tsx`（`[n] + 补充说明` 这一行和它的多行输入框）、`src/modules/chat/tools/ContentRenderers/AskQuestionNotesLine.tsx`（卡片上的补充行）、`src/modules/chat/utils/askQuestionNotes.ts`（`NOTES_LABEL_PREFIX`、`readQuestionNotes`）、`server/modules/providers/list/opencode/opencode-question-notes.ts`（`splitQuestionNotes`）；测试 `src/modules/chat/tests/askQuestionNotes.test.tsx`、`server/modules/providers/tests/opencode-question-notes.test.ts`，以及 `src/modules/chat/tests/askUserQuestionPanel.test.tsx` 里 `notes:` 开头的用例。*官方自有（少量新增接入）：* `src/modules/chat/tools/InteractiveRenderers/AskUserQuestionPanel.tsx`（补充状态、`n` 快捷键、焦点规则、提交时的 `annotations` / 末尾标签、Submit 能否点、按键提示）、`src/modules/chat/tools/ContentRenderers/QuestionAnswerContent.tsx`（新增 `annotations` 参数；只写了补充的题不算跳过）、`src/modules/chat/tools/ToolRenderer.tsx`（把 `annotations` 传下去）、`src/modules/chat/tools/configs/toolConfigs.ts`（content props 里带 `annotations`；标题计数算上只写补充的题）、`server/modules/providers/list/opencode/opencode-sessions.provider.ts`（`toAskUserQuestionCall` 把末尾的补充项拆进 `toolInput.annotations`）、`src/modules/i18n/locales/{en,zh-CN}/chat.json`（`misc.addNotes`、`misc.notesPlaceholder`、`misc.notesLabel`；zh-CN 新增 `misc` 块）。
+
+**为什么改：** 单选题里，选中的选项和自己写的 Other 只能留一个，想给选择加一句说明就得放弃选择。Claude 的 CLI 本来就有这个字段：`AskUserQuestion` 接受 `annotations[问题].notes`，发给模型的是 `"<问题>"="<答案>" notes: <补充>`（没选选项时是 `"<问题>"=(no option selected) notes: <补充>`）。终端只在带 preview 的问题上提供它（按 `n`），网页面板从来没发过。
+
+**和官方的差异：** 每道题的选项下面都有一行 `[n] + 补充说明`，「只许选选项」（`custom: false`）的题也有。按 `n` 或点它打开多行输入框，按键和 Other 框一样（Enter 换行，Ctrl/Cmd+Enter 下一题或提交）；补充和 Other 互不影响，只写补充也能提交，写过补充的题回来时自动展开。Claude 收到 `updatedInput.annotations`（一题都没写补充就不带）。OpenCode 的问题工具没有这个字段，所以一题的补充作为它标签列表里末尾的一项 `notes: …` 发出（模型读到 `"<问题>"="<选项>, notes: …"`），sessions provider 再把末尾的 `notes: ` 项拆回 `toolInput.annotations` 给卡片用。接受的歧义：OpenCode 的 Other 答案本身以 `notes: ` 开头、后面又没写补充时，会显示成补充。卡片在运行中和刷新后都显示「补充：」一行，Claude 这边不做任何解析：运行中的 SDK 帧（`tool_use_result`）和 transcript（`toolUseResult`）都带结构化的 `annotations`（2026-11-11 在 SDK 0.3.322 上用真实回合核对过）。只写了补充的题算已回答（不显示 Skipped，标题计数算上）。补充框切全屏后焦点还在，和 Other 一样。
+
+**同步官方时怎么办：** 两边都留。本 fork 自有的文件不会冲突；官方文件里的接入都是新增。如果官方重做了面板，重新接上补充状态、输入框和提交里的 `annotations`，并保留焦点规则：补充框打开时容器不能把焦点抢回去，否则切全屏后敲的数字会去选选项、Enter 会把写了一半的补充提交出去。如果官方自己做了补充功能，用官方的并撤掉这一条；只有官方没处理 OpenCode 的答案时，才保留 OpenCode 末尾项的约定。
