@@ -17,17 +17,19 @@ type AskQuestionNotesFieldProps = {
   fieldRef: React.RefObject<HTMLTextAreaElement>;
   onOpen: () => void;
   onChange: (text: string) => void;
-  onFocus: () => void;
   /** Ctrl/Cmd+Enter: go to the next question, or submit on the last one. */
   onAdvance: () => void;
 };
 
 /**
- * The "+ Add notes" entry under a question's options. Closed it is one row
- * (also opened with the `n` key, handled by the panel); open it is a
- * multi-line field whose keys follow the "Other" field: Enter is a line
- * break, Ctrl/Cmd+Enter advances, and nothing typed reaches the panel's
- * shortcuts.
+ * Rendered by chat's AskUserQuestionPanel under each question's options: the
+ * "+ Add notes" entry, so the user can add context to a picked option.
+ * Closed it is one row (also opened with the `n` key, handled by the panel);
+ * open it is a multi-line field. It mirrors the panel's "Other" field on
+ * purpose — height cap, auto-grow, keys (Enter is a line break, Ctrl/Cmd+Enter
+ * advances, nothing typed reaches the panel's shortcuts) and styling — kept as
+ * a copy so the upstream panel is not refactored; recheck it when upstream
+ * changes that field.
  */
 export const AskQuestionNotesField: React.FC<AskQuestionNotesFieldProps> = ({
   open,
@@ -37,16 +39,15 @@ export const AskQuestionNotesField: React.FC<AskQuestionNotesFieldProps> = ({
   fieldRef,
   onOpen,
   onChange,
-  onFocus,
   onAdvance,
 }) => {
   const { t } = useTranslation();
 
-  // A restored note may already span several lines when its step comes back
-  // into view, or when fullscreen re-mounts the field.
+  // Re-fit whenever the text changes from outside: a step whose notes span
+  // more or fewer lines comes into view, or fullscreen re-mounts the field.
   useLayoutEffect(() => {
     if (open && fieldRef.current) fitField(fieldRef.current);
-  }, [open, isFullscreen, fieldRef]);
+  }, [open, value, isFullscreen, fieldRef]);
 
   if (!open) {
     return (
@@ -72,11 +73,7 @@ export const AskQuestionNotesField: React.FC<AskQuestionNotesFieldProps> = ({
         ref={fieldRef}
         rows={1}
         value={value}
-        onChange={(e) => {
-          onChange(e.target.value);
-          fitField(e.target);
-        }}
-        onFocus={onFocus}
+        onChange={(e) => onChange(e.target.value)}
         onKeyDown={(e) => {
           if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
             e.preventDefault();

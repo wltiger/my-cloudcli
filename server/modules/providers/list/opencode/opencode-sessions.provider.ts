@@ -205,12 +205,12 @@ const toAskUserQuestionCall = (toolMessage: NormalizedMessage, toolState: AnyRec
   });
 
   toolMessage.toolName = 'AskUserQuestion';
-  toolMessage.toolInput = {
-    ...input,
-    questions,
-    ...(Object.keys(answers).length > 0 ? { answers } : {}),
-    ...(Object.keys(annotations).length > 0 ? { annotations } : {}),
-  };
+  toolMessage.toolInput = Object.keys(answers).length > 0
+    ? { ...input, questions, answers }
+    : { ...input, questions };
+  if (Object.keys(annotations).length > 0) {
+    (toolMessage.toolInput as AnyRecord).annotations = annotations;
+  }
 };
 
 /**

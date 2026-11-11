@@ -315,6 +315,31 @@ test('notes: the field keeps focus and its text when fullscreen is toggled', () 
   assert.equal(notesField()?.value, 'half a thought');
 });
 
+test('notes: with "Other" open too, fullscreen hands focus back to the field typed in last', () => {
+  const { container } = renderPanel([questionA]);
+  activateOther(container);
+  fireEvent.change(otherField(container), { target: { value: 'my own answer' } });
+  writeNotes(container, 'typed last');
+
+  fireEvent.click(screen.getByRole('button', { name: 'Fullscreen' }));
+  assert.equal(document.activeElement, notesField(), 'notes were typed last');
+
+  fireEvent.change(otherField(document.body), { target: { value: 'my own answer, edited' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Exit fullscreen' }));
+  assert.equal(document.activeElement, otherField(document.body), '"Other" was typed last');
+});
+
+test('notes: clicking an option while the field is open does not pull focus into the field', () => {
+  const { container } = renderPanel([questionA]);
+  writeNotes(container, 'a note');
+
+  const vue = screen.getByRole('button', { name: /Vue/ });
+  vue.focus();
+  fireEvent.click(vue);
+
+  assert.notEqual(document.activeElement, notesField(), 'focus stays out of the notes field');
+});
+
 test('notes: with the field open the advance hint is Ctrl+Enter', () => {
   const { container } = renderPanel([questionA, questionB]);
   assert.match(screen.getByRole('button', { name: /Next/ }).textContent ?? '', /Enter/);
