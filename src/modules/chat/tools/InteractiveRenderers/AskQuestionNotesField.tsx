@@ -43,8 +43,10 @@ export const AskQuestionNotesField: React.FC<AskQuestionNotesFieldProps> = ({
 }) => {
   const { t } = useTranslation();
 
-  // Re-fit whenever the text changes from outside: a step whose notes span
-  // more or fewer lines comes into view, or fullscreen re-mounts the field.
+  // The only place the field is sized: it re-fits on every text change —
+  // typing included (onChange does not fit) — and when a step whose notes
+  // span more or fewer lines comes into view, or fullscreen re-mounts it.
+  // Keep `value` in the dependencies, or the field stops growing as you type.
   useLayoutEffect(() => {
     if (open && fieldRef.current) fitField(fieldRef.current);
   }, [open, value, isFullscreen, fieldRef]);
