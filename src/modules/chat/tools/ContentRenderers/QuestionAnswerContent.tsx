@@ -2,10 +2,14 @@ import React, { useState } from 'react';
 
 import { useChatFontClasses } from '@/shared/hooks/useChatTypography';
 import type { Question } from '@/shared/types';
+import { AskQuestionNotesLine } from '@/modules/chat/tools/ContentRenderers/AskQuestionNotesLine';
+import { readQuestionNotes } from '@/modules/chat/utils/askQuestionNotes';
 
 type QuestionAnswerContentProps = {
   questions: Question[];
   answers: Record<string, string>;
+  /** Per-question notes the user added, keyed by question text. */
+  annotations?: unknown;
   className?: string;
 };
 
@@ -17,6 +21,7 @@ type QuestionAnswerContentProps = {
 export const QuestionAnswerContent: React.FC<QuestionAnswerContentProps> = ({
   questions,
   answers,
+  annotations,
   className = '',
 }) => {
   const [expandedIdx, setExpandedIdx] = useState<number | null>(null);
@@ -30,7 +35,9 @@ export const QuestionAnswerContent: React.FC<QuestionAnswerContentProps> = ({
     return null;
   }
 
-  const hasAnyAnswer = Object.keys(answers || {}).length > 0;
+  // A question answered with notes alone counts as answered.
+  const hasAnyAnswer = Object.keys(answers || {}).length > 0
+    || questions.some((q) => Boolean(readQuestionNotes(annotations, q?.question)));
   const total = questions.length;
 
   return (
@@ -55,7 +62,8 @@ export const QuestionAnswerContent: React.FC<QuestionAnswerContentProps> = ({
           : options.some((option) => option.label === answer)
             ? [answer]
             : answer.split(', ');
-        const skipped = !answer;
+        const notes = readQuestionNotes(annotations, q.question);
+        const skipped = !answer && !notes;
         const isExpanded = expandedIdx === idx;
 
         return (
@@ -69,11 +77,11 @@ export const QuestionAnswerContent: React.FC<QuestionAnswerContentProps> = ({
               className="flex w-full items-start gap-2.5 px-3 py-2 text-left transition-colors hover:bg-gray-50 dark:hover:bg-gray-800/50"
             >
               <div className={`mt-0.5 flex h-4 w-4 flex-shrink-0 items-center justify-center rounded-full ${
-                answerLabels.length > 0
+                !skipped
                   ? 'bg-blue-100 dark:bg-blue-900/40'
                   : 'bg-gray-100 dark:bg-gray-800'
               }`}>
-                {answerLabels.length > 0 ? (
+                {!skipped ? (
                   <svg className="h-2.5 w-2.5 text-blue-600 dark:text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={3}>
                     <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
                   </svg>
@@ -117,6 +125,8 @@ export const QuestionAnswerContent: React.FC<QuestionAnswerContentProps> = ({
                     })}
                   </div>
                 )}
+
+                {notes && <AskQuestionNotesLine notes={notes} className={fontClasses.optionDescription} />}
 
                 {!isExpanded && skipped && hasAnyAnswer && (
                   <span className="mt-1 inline-block text-[10px] italic text-gray-400 dark:text-gray-500">

@@ -2,6 +2,7 @@ import fsSync from 'node:fs';
 
 import Database from 'better-sqlite3';
 
+import { splitQuestionNotes } from '@/modules/providers/list/opencode/opencode-question-notes.js';
 import { isOpenCodeSessionActive } from '@/modules/providers/list/opencode/opencode-runtime.provider.js';
 import { parseFilesInputTag, parseImagesInputTag } from '@/shared/image-attachments.js';
 import type { IProviderSessions } from '@/shared/interfaces.js';
@@ -181,6 +182,7 @@ const toAskUserQuestionCall = (toolMessage: NormalizedMessage, toolState: AnyRec
 
   const answerLists = readObjectRecord(toolState.metadata)?.answers;
   const answers: Record<string, string> = {};
+  const annotations: Record<string, { notes: string }> = {};
   const questions = input.questions.map((entry: unknown, index: number) => {
     const question = readObjectRecord(entry);
     if (!question) {
@@ -188,11 +190,14 @@ const toAskUserQuestionCall = (toolMessage: NormalizedMessage, toolState: AnyRec
     }
 
     const text = readOptionalString(question.question);
-    const picked = Array.isArray(answerLists) && Array.isArray(answerLists[index])
+    const { labels: picked, notes } = splitQuestionNotes(Array.isArray(answerLists) && Array.isArray(answerLists[index])
       ? (answerLists[index] as unknown[]).filter((label): label is string => typeof label === 'string' && label.trim().length > 0)
-      : [];
+      : []);
     if (text && picked.length > 0) {
       answers[text] = picked.join(', ');
+    }
+    if (text && notes) {
+      annotations[text] = { notes };
     }
 
     const { multiple, ...rest } = question;
@@ -203,6 +208,9 @@ const toAskUserQuestionCall = (toolMessage: NormalizedMessage, toolState: AnyRec
   toolMessage.toolInput = Object.keys(answers).length > 0
     ? { ...input, questions, answers }
     : { ...input, questions };
+  if (Object.keys(annotations).length > 0) {
+    (toolMessage.toolInput as AnyRecord).annotations = annotations;
+  }
 };
 
 /**

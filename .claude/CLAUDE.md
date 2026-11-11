@@ -96,6 +96,10 @@ In Playwright, set this before navigating (e.g. via `context.addInitScript` boun
 
 Remember to stop the dev server and kill any leftover process on ports 3001/5173 afterward (`concurrently`'s SIGTERM doesn't always reach the child `tsx`/`vite` processes on Windows — check `netstat -ano | grep :3001` if a restart fails with `EADDRINUSE`).
 
+In this environment `Get-NetTCPConnection` and `netstat -ano` can report a listener's PID as `0`; never pipe port-owner PIDs into `taskkill` unfiltered (PIDs 0 and 4 are the System process). Stop a dev server you started from a background shell through its task handle first, then find leftovers by command line and start time (`Get-CimInstance Win32_Process -Filter "Name='node.exe'"`) and kill those exact PIDs.
+
+Windows reserves dynamic TCP port ranges; on this machine (2026-11-11) 5141–5240 was excluded, which covers Vite's default 5173. A `listen EACCES` on the Vite port means: pick a port outside `netsh interface ipv4 show excludedportrange protocol=tcp` (e.g. `VITE_PORT=5444`).
+
 **Running multiple test/build agents concurrently:** give each its own `DATABASE_PATH`/`SERVER_PORT`/`VITE_PORT` so their dev servers don't collide — but that alone isn't enough. The MCP Playwright server shares one underlying browser/session across all callers in this environment, so concurrent agents driving it can land on each other's tabs mid-`evaluate` (observed: one agent's `localStorage` write/delete landing on a sibling's page). Each concurrently-running agent that needs real browser verification must launch its **own isolated browser instance** instead of relying on the shared MCP Playwright tools — e.g. drive `playwright-core` (or `playwright`) directly against the system's installed Chromium/Edge from a throwaway script, rather than the shared server. Sequential (one-at-a-time) testing can keep using the shared MCP tools as normal; this only matters when multiple agents are testing in parallel.
 
 ## Backend architecture (`server/`)

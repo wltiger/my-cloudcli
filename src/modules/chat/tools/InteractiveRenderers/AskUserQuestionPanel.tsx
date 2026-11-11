@@ -4,6 +4,8 @@ import { useTranslation } from 'react-i18next';
 import type { PermissionPanelProps,Question } from '@/shared/types';
 import { useChatFontClasses } from '@/shared/hooks/useChatTypography';
 import { FullscreenSurface, FullscreenToggleButton } from '@/shared/ui';
+import { AskQuestionNotesField } from '@/modules/chat/tools/InteractiveRenderers/AskQuestionNotesField';
+import { useAskQuestionNotes } from '@/modules/chat/hooks/useAskQuestionNotes';
 
 /** Stable fallback so the memoized handlers below are not invalidated on every
  *  render by a fresh `[]` literal when a request carries no questions. */
@@ -83,6 +85,16 @@ export const AskUserQuestionPanel: React.FC<PermissionPanelProps> = ({
     fitOtherField(field);
   }, [otherActive, currentStep, fitOtherField, isFullscreen]);
 
+  // Notes alongside a picked option (fork). Called after the focus effects
+  // above so it can hand focus back to the notes field after them.
+  const notes = useAskQuestionNotes({
+    questions,
+    currentStep,
+    otherOn: otherActive.get(currentStep) || false,
+    isFullscreen,
+  });
+  const { labelFor: notesLabelFor, buildAnnotations: buildNotesAnnotations, open: openNotes } = notes;
+
   const toggleOption = useCallback((qIdx: number, label: string, multiSelect: boolean) => {
     setSelections(prev => {
       const next = new Map(prev);
@@ -128,14 +140,16 @@ export const AskUserQuestionPanel: React.FC<PermissionPanelProps> = ({
     return answers;
   }, [questions, selections, otherActive, otherTexts]);
 
-  // Picked labels in option order, then the typed answer, for each question.
+  // Picked labels in option order, then the typed answer, then the notes, for each question.
   const buildLabelLists = useCallback(() => questions.map((q, idx) => {
     const selected = selections.get(idx) || new Set<string>();
     const labels = q.options.map((option) => option.label).filter((label) => selected.has(label));
     const otherText = (otherTexts.get(idx) || '').trim();
     if (q.custom !== false && otherActive.get(idx) && otherText) labels.push(otherText);
+    const notesLabel = notesLabelFor(idx);
+    if (notesLabel) labels.push(notesLabel);
     return labels;
-  }), [questions, selections, otherActive, otherTexts]);
+  }), [questions, selections, otherActive, otherTexts, notesLabelFor]);
 
   // Answering ends the panel's job, so drop out of fullscreen to reveal the
   // chat stream (and whatever the agent replies next).
@@ -145,8 +159,16 @@ export const AskUserQuestionPanel: React.FC<PermissionPanelProps> = ({
       onDecision(request.requestId, { allow: true, updatedInput: { answers: buildLabelLists() } });
       return;
     }
-    onDecision(request.requestId, { allow: true, updatedInput: { ...input, answers: buildAnswers() } });
-  }, [onDecision, request.requestId, input, buildAnswers, buildLabelLists, answersAsLabelLists]);
+    const annotations = buildNotesAnnotations();
+    onDecision(request.requestId, {
+      allow: true,
+      updatedInput: {
+        ...input,
+        answers: buildAnswers(),
+        ...(Object.keys(annotations).length > 0 ? { annotations } : {}),
+      },
+    });
+  }, [onDecision, request.requestId, input, buildAnswers, buildNotesAnnotations, buildLabelLists, answersAsLabelLists]);
 
   // Claude carries on without answers; a dismissed OpenCode question is
   // rejected, which ends that turn as OpenCode's own Dismiss does.
@@ -184,6 +206,13 @@ export const AskUserQuestionPanel: React.FC<PermissionPanelProps> = ({
       return;
     }
 
+    // n for notes
+    if ((e.key === 'n' || e.key === 'N') && !e.ctrlKey && !e.metaKey && !e.altKey) {
+      e.preventDefault();
+      openNotes();
+      return;
+    }
+
     // Enter to advance / submit
     if (e.key === 'Enter') {
       e.preventDefault();
@@ -199,7 +228,7 @@ export const AskUserQuestionPanel: React.FC<PermissionPanelProps> = ({
       handleSkip();
       return;
     }
-  }, [currentStep, questions, toggleOption, toggleOther, handleSubmit, handleSkip]);
+  }, [currentStep, questions, toggleOption, toggleOther, openNotes, handleSubmit, handleSkip]);
 
   if (questions.length === 0) return null;
 
@@ -211,10 +240,12 @@ export const AskUserQuestionPanel: React.FC<PermissionPanelProps> = ({
   const isOtherOn = otherActive.get(currentStep) || false;
   // While the multi-line field is active, a bare Enter is a line break, so the
   // advance/submit key is the explicit combo — Next and Submit must agree.
-  const keyHint = isOtherOn ? 'Ctrl+Enter' : 'Enter';
+  const keyHint = isOtherOn || notes.isOpen ? 'Ctrl+Enter' : 'Enter';
   const isLast = currentStep === total - 1;
   const isFirst = currentStep === 0;
-  const hasCurrentSelection = selected.size > 0 || (isOtherOn && (otherTexts.get(currentStep) || '').trim().length > 0);
+  const hasCurrentSelection = selected.size > 0
+    || (isOtherOn && (otherTexts.get(currentStep) || '').trim().length > 0)
+    || notes.hasText;
 
   // Split out of the card so fullscreen can pin it to the bottom of the
   // viewport — the card's own `overflow-hidden` would trap a sticky footer.
@@ -257,7 +288,7 @@ export const AskUserQuestionPanel: React.FC<PermissionPanelProps> = ({
           <button
             type="button"
             onClick={handleSubmit}
-            disabled={!hasCurrentSelection && !Object.keys(buildAnswers()).length}
+            disabled={!hasCurrentSelection && !Object.keys(buildAnswers()).length && !notes.hasAnyText}
             className={`inline-flex items-center gap-1 rounded-lg bg-gradient-to-r from-blue-600 to-blue-500 font-semibold text-white shadow-sm transition-all duration-200 hover:shadow-md disabled:cursor-not-allowed disabled:opacity-30 disabled:shadow-none dark:from-blue-500 dark:to-blue-600 ${
               isFullscreen ? 'px-6 py-2.5 text-[14px]' : 'px-3.5 py-1.5 text-[11px]'
             }`}
@@ -477,6 +508,7 @@ export const AskUserQuestionPanel: React.FC<PermissionPanelProps> = ({
                   onChange={(e) => {
                     setOtherText(currentStep, e.target.value);
                     fitOtherField(e.target);
+                    notes.markOtherTyped();
                   }}
                   onKeyDown={(e) => {
                     // Enter alone is a line break in a multi-line field; only
@@ -496,6 +528,21 @@ export const AskUserQuestionPanel: React.FC<PermissionPanelProps> = ({
                 />
               </div>
             )}
+
+            {/* Notes — kept alongside the picked option, offered on every question */}
+            <AskQuestionNotesField
+              open={notes.isOpen}
+              value={notes.text}
+              isFullscreen={isFullscreen}
+              fieldClassName={fontClasses.optionLabel}
+              fieldRef={notes.fieldRef}
+              onOpen={notes.open}
+              onChange={notes.setText}
+              onAdvance={() => {
+                if (isLast) handleSubmit();
+                else setCurrentStep(s => s + 1);
+              }}
+            />
           </div>
         </div>
 

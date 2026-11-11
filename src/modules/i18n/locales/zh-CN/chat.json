@@ -448,5 +448,10 @@
       "label": "仍然发送",
       "description": "现在发送，会停掉后台工作"
     }
+  },
+  "misc": {
+    "addNotes": "补充说明",
+    "notesPlaceholder": "补充说明（可选）……",
+    "notesLabel": "补充："
   }
 }
