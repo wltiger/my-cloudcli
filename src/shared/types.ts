@@ -26,6 +26,20 @@ export type ProviderModelOption = {
   apiKey?: string;
   /** Claude-only declared context window in raw tokens; the form shows it in K units. */
   contextWindow?: number;
+  /** Claude-only system prompt source, at most one of the two; neither means Claude Code's default prompt. */
+  systemPromptAgent?: string;
+  systemPrompt?: string;
+};
+
+/**
+ * One global Claude agent from `GET /api/providers/claude/agents`. `tools` and `disallowedTools` are `null`
+ * when the agent's file does not declare that key, and an array (possibly empty) when it does.
+ */
+export type ClaudeAgentSummary = {
+  name: string;
+  description: string;
+  tools: string[] | null;
+  disallowedTools: string[] | null;
 };
 
 /**
@@ -54,6 +68,9 @@ export type CustomProviderModelInput = {
   apiKey?: string;
   /** Raw tokens, not K units: the form converts before it builds this payload. */
   contextWindow?: number;
+  /** Claude-only; send at most one, and neither to use Claude Code's default prompt (an update that omits both clears them). */
+  systemPromptAgent?: string;
+  systemPrompt?: string;
   effort?: {
     values: string[];
     default?: string;

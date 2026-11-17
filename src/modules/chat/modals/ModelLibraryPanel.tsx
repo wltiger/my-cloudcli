@@ -26,6 +26,12 @@ import ClaudeCustomEndpointFields, {
   readClaudeCustomEndpointFromOption,
   type ClaudeCustomEndpointValue,
 } from '@/modules/chat/modals/ClaudeCustomEndpointFields';
+import ClaudeSystemPromptFields, {
+  buildClaudeSystemPromptPayload,
+  EMPTY_SYSTEM_PROMPT,
+  readClaudeSystemPromptFromOption,
+  type ClaudeSystemPromptValue,
+} from '@/modules/chat/modals/ClaudeSystemPromptFields';
 
 const PROVIDERS: Array<{ id: LLMProvider; label: string }> = [
   { id: 'claude', label: 'Claude' },
@@ -62,6 +68,7 @@ export default function ModelLibraryPanel({
   const [model, setModel] = useState('');
   const [modelId, setModelId] = useState('');
   const [customEndpoint, setCustomEndpoint] = useState<ClaudeCustomEndpointValue>(EMPTY_CUSTOM_ENDPOINT);
+  const [systemPrompt, setSystemPrompt] = useState<ClaudeSystemPromptValue>(EMPTY_SYSTEM_PROMPT);
   // Effort levels ticked in the form; they become the custom model's declared
   // levels, which is what makes the composer offer Reasoning for it.
   const [effortLevels, setEffortLevels] = useState<string[]>([]);
@@ -115,6 +122,7 @@ export default function ModelLibraryPanel({
     setModel('');
     setModelId('');
     setCustomEndpoint(EMPTY_CUSTOM_ENDPOINT);
+    setSystemPrompt(EMPTY_SYSTEM_PROMPT);
     setEffortLevels([]);
     setError(null);
   };
@@ -147,6 +155,7 @@ export default function ModelLibraryPanel({
     setModel(option.label);
     setModelId(option.value);
     setCustomEndpoint(readClaudeCustomEndpointFromOption(selectedProvider, option));
+    setSystemPrompt(readClaudeSystemPromptFromOption(selectedProvider, option));
     setEffortLevels(option.effort?.values.map((level) => level.value) ?? []);
     setConfirmDeleteRecordId(null);
     setNotice(null);
@@ -195,6 +204,7 @@ export default function ModelLibraryPanel({
     }
 
     const endpointPayload = buildClaudeCustomEndpointPayload(selectedProvider, customEndpoint);
+    const systemPromptPayload = buildClaudeSystemPromptPayload(selectedProvider, systemPrompt);
 
     const effort = buildEffortInput();
     setSaving(true);
@@ -206,6 +216,7 @@ export default function ModelLibraryPanel({
           model: normalizedModel,
           id: normalizedId,
           ...endpointPayload,
+          ...systemPromptPayload,
           ...(effort === undefined ? {} : { effort }),
         });
         setNotice(`${normalizedModel} was updated.`);
@@ -214,6 +225,7 @@ export default function ModelLibraryPanel({
           model: normalizedModel,
           id: normalizedId,
           ...endpointPayload,
+          ...systemPromptPayload,
           ...(effort === undefined ? {} : { effort }),
         });
         setNotice(`${normalizedModel} was added.`);
@@ -385,6 +397,9 @@ export default function ModelLibraryPanel({
 
           {selectedProvider === 'claude' && (
             <ClaudeCustomEndpointFields value={customEndpoint} onChange={setCustomEndpoint} />
+          )}
+          {selectedProvider === 'claude' && (
+            <ClaudeSystemPromptFields value={systemPrompt} onChange={setSystemPrompt} />
           )}
 
           {error && (
