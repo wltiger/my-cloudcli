@@ -42,6 +42,23 @@ const WINDOW_MODELS: ProviderModelsDefinition = {
   DEFAULT: 'default',
 };
 
+/**
+ * Adds endpoint-less custom models that differ only in where their system
+ * prompt comes from (fork entry 41), so reuse can only be refused on that.
+ */
+const PROMPT_MODELS: ProviderModelsDefinition = {
+  OPTIONS: [
+    ...MODELS.OPTIONS,
+    { value: 'agent-a', label: 'Agent A', isCustom: true, systemPromptAgent: 'agent-a' },
+    { value: 'agent-a-twin', label: 'Agent A twin', isCustom: true, systemPromptAgent: 'agent-a' },
+    { value: 'agent-b', label: 'Agent B', isCustom: true, systemPromptAgent: 'agent-b' },
+    { value: 'prompt-a', label: 'Prompt A', isCustom: true, systemPrompt: 'You are A.' },
+    { value: 'prompt-a-twin', label: 'Prompt A twin', isCustom: true, systemPrompt: 'You are A.' },
+    { value: 'prompt-b', label: 'Prompt B', isCustom: true, systemPrompt: 'You are B.' },
+  ],
+  DEFAULT: 'default',
+};
+
 /** Lets pending microtasks and I/O callbacks run before asserting. */
 async function flush(rounds = 6): Promise<void> {
   for (let i = 0; i < rounds; i += 1) {
@@ -407,6 +424,72 @@ test('Claude per-turn process-reuse compatibility', async (t) => {
 
     assert.equal(queries.length, 1, 'models that differ only by declared window are different processes, so the held process cannot take it');
 
+    await releaseHeldRun(first.live, first.turn);
+  });
+
+  await t.test('a different agent needs a new process', async () => {
+    const first = await startHeldTurn('compat-two-agents', { model: 'agent-a' }, PROMPT_MODELS);
+    await startRefusedTurn('compat-two-agents', { model: 'agent-b' }, 'second', PROMPT_MODELS);
+
+    assert.equal(queries.length, 1, 'the agent is fixed when the process spawns, so the held process cannot take another');
+    assert.equal(first.live.promptStreamClosed, false, 'the refused send leaves the held process alone');
+
+    await releaseHeldRun(first.live, first.turn);
+  });
+
+  await t.test('a different system prompt needs a new process', async () => {
+    const first = await startHeldTurn('compat-two-prompts', { model: 'prompt-a' }, PROMPT_MODELS);
+    const { refusal } = await startRefusedTurn('compat-two-prompts', { model: 'prompt-b' }, 'second', PROMPT_MODELS);
+
+    assert.equal(queries.length, 1, 'the prompt is fixed when the process spawns, so the held process cannot take another');
+    assert.equal(first.live.promptStreamClosed, false, 'the refused send leaves the held process alone');
+    // The refusal names the setting that differs, but never echoes the prompt or its digest.
+    assert.match(String(refusal?.content), /settings differ from the held process \(systemPrompt\)/);
+
+    await releaseHeldRun(first.live, first.turn);
+  });
+
+  await t.test('switching between the default prompt and a replaced one needs a new process', async () => {
+    const toAgent = await startHeldTurn('compat-default-to-agent', {}, PROMPT_MODELS);
+    await startRefusedTurn('compat-default-to-agent', { model: 'agent-a' }, 'second', PROMPT_MODELS);
+    await releaseHeldRun(toAgent.live, toAgent.turn);
+
+    const toPrompt = await startHeldTurn('compat-default-to-prompt', {}, PROMPT_MODELS);
+    await startRefusedTurn('compat-default-to-prompt', { model: 'prompt-a' }, 'second', PROMPT_MODELS);
+    await releaseHeldRun(toPrompt.live, toPrompt.turn);
+
+    const toDefault = await startHeldTurn('compat-prompt-to-default', { model: 'prompt-a' }, PROMPT_MODELS);
+    await startRefusedTurn('compat-prompt-to-default', { model: 'default' }, 'second', PROMPT_MODELS);
+    await releaseHeldRun(toDefault.live, toDefault.turn);
+
+    const agentToPrompt = await startHeldTurn('compat-agent-to-prompt', { model: 'agent-a' }, PROMPT_MODELS);
+    await startRefusedTurn('compat-agent-to-prompt', { model: 'prompt-a' }, 'second', PROMPT_MODELS);
+    await releaseHeldRun(agentToPrompt.live, agentToPrompt.turn);
+
+    assert.equal(queries.length, 4, 'one process per hold; none of the refused sends started another');
+  });
+
+  await t.test('models with the same agent share a process', async () => {
+    const first = await startHeldTurn('compat-same-agent', { model: 'agent-a' }, PROMPT_MODELS);
+    const second = await startTurn('compat-same-agent', { model: 'agent-a-twin' }, 'second question', PROMPT_MODELS);
+
+    assert.equal(queries.length, 1, 'an identical agent leaves the process reusable');
+    assert.equal(first.live.prompts.length, 2, 'the follow-up reached the held input stream');
+
+    await first.live.emit(RESULT);
+    await second.turn;
+    await releaseHeldRun(first.live, first.turn);
+  });
+
+  await t.test('models with the same system prompt share a process', async () => {
+    const first = await startHeldTurn('compat-same-prompt', { model: 'prompt-a' }, PROMPT_MODELS);
+    const second = await startTurn('compat-same-prompt', { model: 'prompt-a-twin' }, 'second question', PROMPT_MODELS);
+
+    assert.equal(queries.length, 1, 'an identical prompt leaves the process reusable');
+    assert.equal(first.live.prompts.length, 2, 'the follow-up reached the held input stream');
+
+    await first.live.emit(RESULT);
+    await second.turn;
     await releaseHeldRun(first.live, first.turn);
   });
 

@@ -1,5 +1,5 @@
 import { readDeclaredContextWindow } from '@/modules/providers/services/claude-context-window.js';
-import type { ProviderModelsDefinition } from '@/shared/types.js';
+import type { AnyRecord, ProviderModelsDefinition } from '@/shared/types.js';
 
 /**
  * Environment a Claude custom model needs the spawned CLI to run with. Every
@@ -40,4 +40,56 @@ export function resolveClaudeCustomModelEnv(
   }
 
   return Object.keys(env).length > 0 ? env : null;
+}
+
+/**
+ * Where a Claude custom model gets its system prompt when it replaces Claude
+ * Code's default one: the name of an agent file in the global agents directory,
+ * or the prompt text itself.
+ */
+export type ClaudeSystemPromptSource =
+  | { kind: 'agent'; agent: string }
+  | { kind: 'prompt'; prompt: string };
+
+/**
+ * Looks up the system prompt source `model` replaces the default prompt with,
+ * using the same catalog lookup as {@link resolveClaudeCustomModelEnv}. Returns
+ * null for the default prompt — every built-in model, and every custom model
+ * with neither field. Used by `claude-runtime.provider.ts` for a turn (through
+ * {@link applyClaudeSystemPromptSource}) and for a side question's fork. See
+ * fork-customizations.md.
+ */
+export function resolveClaudeSystemPromptSource(
+  model: string | undefined,
+  modelsDefinition: ProviderModelsDefinition,
+): ClaudeSystemPromptSource | null {
+  const selectedModel = modelsDefinition?.OPTIONS?.find((option) => option.value === model);
+
+  if (selectedModel?.systemPromptAgent) {
+    return { kind: 'agent', agent: selectedModel.systemPromptAgent };
+  }
+  if (selectedModel?.systemPrompt) {
+    return { kind: 'prompt', prompt: selectedModel.systemPrompt };
+  }
+  return null;
+}
+
+/**
+ * Applies `model`'s system prompt source to a turn's SDK options, after the
+ * default `claude_code` preset is already set: an agent rides in the SDK's
+ * `agent` option next to that preset, a prompt text replaces the preset
+ * outright. A model with no source leaves the options untouched. Used by
+ * `mapCliOptionsToSDK` in `claude-runtime.provider.ts`.
+ */
+export function applyClaudeSystemPromptSource(
+  sdkOptions: AnyRecord,
+  model: string | undefined,
+  modelsDefinition: ProviderModelsDefinition,
+): void {
+  const source = resolveClaudeSystemPromptSource(model, modelsDefinition);
+  if (source?.kind === 'agent') {
+    sdkOptions.agent = source.agent;
+  } else if (source?.kind === 'prompt') {
+    sdkOptions.systemPrompt = source.prompt;
+  }
 }

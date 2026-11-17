@@ -193,6 +193,15 @@ export function buildTurnSettingsFingerprint(sdkOptions: AnyRecord = {}): string
     // identically to a built-in one — a held process spawned with the variable
     // could then serve a model that must not see it, or the reverse.
     contextWindow: env.CLAUDE_CODE_MAX_CONTEXT_TOKENS ?? null,
+    // A custom model's agent and replacement system prompt (fork entry 41) are
+    // fixed when the process spawns, and without them here a held process built
+    // for one model's prompt would serve a model that must not see it. A prompt
+    // can run to tens of thousands of characters, so a string is kept as its
+    // digest, like the key above; the default preset object is small and stable.
+    agent: typeof sdkOptions.agent === 'string' ? sdkOptions.agent : null,
+    systemPrompt: typeof sdkOptions.systemPrompt === 'string'
+      ? createHash('sha256').update(sdkOptions.systemPrompt).digest('hex')
+      : sdkOptions.systemPrompt ?? null,
   });
 }
 
@@ -373,8 +382,8 @@ export function hasHeldTurn(sessionKey: string): boolean {
  * claim came back empty: a successful claim removes the handle and this would
  * then misreport "no held process".
  *
- * Reports setting names with their values, except the API key, which only the
- * name is shown for.
+ * Reports setting names with their values, except the API key and the system
+ * prompt, which only the name is shown for (the prompt is kept as a digest).
  */
 export function explainHeldTurnMiss(sessionKey: string, fingerprint: string): string {
   const handle = sessionKey ? heldTurns.get(sessionKey) : undefined;
@@ -386,7 +395,7 @@ export function explainHeldTurnMiss(sessionKey: string, fingerprint: string): st
   const next = JSON.parse(fingerprint) as AnyRecord;
   const changed = Object.keys({ ...held, ...next })
     .filter((name) => JSON.stringify(held[name]) !== JSON.stringify(next[name]))
-    .map((name) => (name === 'apiKey'
+    .map((name) => (name === 'apiKey' || name === 'systemPrompt'
       ? name
       : `${name}: ${JSON.stringify(held[name] ?? null)} -> ${JSON.stringify(next[name] ?? null)}`));
   return `settings differ from the held process (${changed.join('; ')})`;

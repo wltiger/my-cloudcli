@@ -3,6 +3,11 @@ import test from 'node:test';
 
 import type { ProviderModelsDefinition } from '@/shared/types.js';
 
+// Multi-line on purpose: the text must reach the SDK untouched.
+const CUSTOM_SYSTEM_PROMPT = 'You are a terse relay assistant.\n\nAnswer in one line.';
+
+const DEFAULT_SYSTEM_PROMPT = { type: 'preset', preset: 'claude_code' };
+
 const CUSTOM_ENDPOINT_CATALOG: ProviderModelsDefinition = {
   OPTIONS: [
     { value: 'default', label: 'Default' },
@@ -36,6 +41,22 @@ const CUSTOM_ENDPOINT_CATALOG: ProviderModelsDefinition = {
       isCustom: true,
       contextWindow: 262_144,
     },
+    {
+      value: 'agent-model',
+      label: 'Endpoint model with an agent prompt',
+      isCustom: true,
+      baseUrl: 'http://localhost:11434',
+      apiKey: 'sk-local-123',
+      systemPromptAgent: 'relay-agent',
+    },
+    {
+      value: 'prompt-model',
+      label: 'Endpoint model with its own prompt',
+      isCustom: true,
+      baseUrl: 'http://localhost:11434',
+      apiKey: 'sk-local-123',
+      systemPrompt: CUSTOM_SYSTEM_PROMPT,
+    },
   ],
   DEFAULT: 'default',
 };
@@ -53,6 +74,8 @@ const createFakeWs = () => ({
 
 /** Stream the next `query()` call replays, so a turn can end on a real result. */
 let queuedMessages: Record<string, any>[] = [];
+/** When set, the next `query()` call's stream throws it, as a CLI that exited early does. */
+let queuedStreamError: Error | null = null;
 
 const createFakeContext = (
   modelsDefinition: ProviderModelsDefinition,
@@ -93,9 +116,14 @@ test('Claude runtime environment overrides', async (t) => {
         calls.push(args);
         const messages = queuedMessages;
         queuedMessages = [];
+        const streamError = queuedStreamError;
+        queuedStreamError = null;
         return (async function* () {
           for (const message of messages) {
             yield message;
+          }
+          if (streamError) {
+            throw streamError;
           }
         })();
       },
@@ -328,5 +356,87 @@ test('Claude runtime environment overrides', async (t) => {
     );
 
     assert.deepEqual(ws.frames.filter((frame) => frame.kind === 'error'), []);
+  });
+
+  // The custom-model system prompt source (fork entry 41): an agent name rides
+  // in the SDK's `agent` option, a prompt text replaces the system prompt.
+  await t.test('an agent model sends its agent name and keeps the default system prompt', async () => {
+    await queryClaudeSDK(
+      'hello',
+      { sessionId: 'session-agent', model: 'agent-model', images: [], files: [] },
+      createFakeWs(),
+      createFakeContext(CUSTOM_ENDPOINT_CATALOG),
+    );
+
+    const call = calls.at(-1);
+    assert.equal(call?.options.agent, 'relay-agent');
+    assert.deepEqual(call?.options.systemPrompt, DEFAULT_SYSTEM_PROMPT);
+    assert.equal(call?.options.env.ANTHROPIC_BASE_URL, 'http://localhost:11434', 'the endpoint is untouched');
+  });
+
+  await t.test('a prompt model sends its text as the whole system prompt, with no agent', async () => {
+    await queryClaudeSDK(
+      'hello',
+      { sessionId: 'session-prompt', model: 'prompt-model', images: [], files: [] },
+      createFakeWs(),
+      createFakeContext(CUSTOM_ENDPOINT_CATALOG),
+    );
+
+    const call = calls.at(-1);
+    // A brand-new session (no resume) gets the source on its very first turn.
+    assert.equal(call?.options.resume, undefined);
+    assert.equal(call?.options.systemPrompt, CUSTOM_SYSTEM_PROMPT);
+    assert.equal('agent' in call!.options, false);
+    assert.equal(call?.options.env.ANTHROPIC_BASE_URL, 'http://localhost:11434', 'the endpoint is untouched');
+  });
+
+  await t.test('a resumed session keeps sending the system prompt source', async () => {
+    await queryClaudeSDK(
+      'continue',
+      { sessionId: 'session-agent', model: 'agent-model', images: [], files: [] },
+      createFakeWs(),
+      createFakeContext(CUSTOM_ENDPOINT_CATALOG, () => 'provider-session-97'),
+    );
+
+    const call = calls.at(-1);
+    assert.equal(call?.options.resume, 'provider-session-97');
+    assert.equal(call?.options.agent, 'relay-agent');
+    assert.deepEqual(call?.options.systemPrompt, DEFAULT_SYSTEM_PROMPT);
+  });
+
+  for (const model of ['default', 'plain-model', 'local-model', 'window-model']) {
+    await t.test(`model "${model}" keeps the default system prompt and no agent (no regression)`, async () => {
+      await queryClaudeSDK(
+        'hello',
+        { sessionId: `session-default-${model}`, model, images: [], files: [] },
+        createFakeWs(),
+        createFakeContext(CUSTOM_ENDPOINT_CATALOG),
+      );
+
+      const call = calls.at(-1);
+      assert.deepEqual(call?.options.systemPrompt, DEFAULT_SYSTEM_PROMPT);
+      assert.equal('agent' in call!.options, false);
+    });
+  }
+
+  // What the runtime does with a CLI failure on an agent turn, whatever its
+  // cause. Measured against CLI 2.1.326 / SDK 0.3.322 (M2): an unknown `agent`
+  // makes no CLI error at all — the run proceeds on the default prompt — so in
+  // practice the error shown is the endpoint's, not "agent not found".
+  await t.test('a failed agent run is reported as the run error, never retried on the default prompt', async () => {
+    const callsBefore = calls.length;
+    const ws = createFakeWs();
+    queuedStreamError = new Error('Agent "relay-agent" not found. Available agents: quick');
+    await queryClaudeSDK(
+      'hello',
+      { sessionId: 'session-missing-agent', model: 'agent-model', images: [], files: [] },
+      ws,
+      createFakeContext(CUSTOM_ENDPOINT_CATALOG),
+    );
+
+    assert.equal(calls.length, callsBefore + 1, 'one query only: no second run without the agent');
+    const errors = ws.frames.filter((frame) => frame.kind === 'error');
+    assert.equal(errors.length, 1);
+    assert.match(String(errors[0].content), /Agent "relay-agent" not found/);
   });
 });

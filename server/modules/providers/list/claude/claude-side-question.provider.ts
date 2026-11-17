@@ -67,6 +67,9 @@ type ForkExtraOptions = {
   // Only set for a custom model with its own endpoint or declared window: the
   // full SDK environment plus that model's overrides (see claude-custom-endpoint).
   env?: NodeJS.ProcessEnv;
+  // Only set for a custom model that replaces the default system prompt: used
+  // instead of the `claude_code` preset (see claude-custom-endpoint).
+  systemPrompt?: { type: 'custom'; prompt: string; snapshot: false };
 };
 
 /**
@@ -116,7 +119,8 @@ async function runSideQuestionQuery(
     cwd: request.projectPath ?? undefined,
     abortController,
     pathToClaudeCodeExecutable: resolveClaudeCodeExecutablePath(process.env.CLAUDE_CLI_PATH),
-    systemPrompt: { type: 'preset', preset: 'claude_code', append: SIDE_QUESTION_SYSTEM_PROMPT_APPEND },
+    systemPrompt: extraOptions.systemPrompt
+      ?? { type: 'preset', preset: 'claude_code', append: SIDE_QUESTION_SYSTEM_PROMPT_APPEND },
   };
 
   const finish = (outcome: SideQuestionOutcome): SideQuestionOutcome => {
@@ -213,6 +217,10 @@ export async function askClaudeSideQuestion(
     liveTasks: BackgroundTaskSummary[];
     now?: () => number;
     env?: NodeJS.ProcessEnv;
+    // The replacement for the default system prompt, when the session's model
+    // has one. `snapshot: false` makes the SDK render it fresh instead of
+    // reusing the prompt recorded in the resumed session.
+    systemPromptText?: string;
   },
 ): Promise<SideQuestionOutcome> {
   const createQueryFn = deps.createQuery
@@ -227,5 +235,14 @@ export async function askClaudeSideQuestion(
     // pick its own default instead of sending another provider's model id.
     model: request.model || undefined,
     ...(deps.env ? { env: deps.env } : {}),
+    ...(deps.systemPromptText !== undefined
+      ? {
+        systemPrompt: {
+          type: 'custom' as const,
+          prompt: `${deps.systemPromptText}\n\n${SIDE_QUESTION_SYSTEM_PROMPT_APPEND}`,
+          snapshot: false as const,
+        },
+      }
+      : {}),
   }, createQueryFn);
 }

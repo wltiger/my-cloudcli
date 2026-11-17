@@ -26,7 +26,11 @@ import {
   normalizeImageDescriptors
 } from '@/shared/image-attachments.js';
 import { createBackgroundWorkSnapshot } from '@/modules/providers/list/claude/claude-background-work.js';
-import { resolveClaudeCustomModelEnv } from '@/modules/providers/list/claude/claude-custom-endpoint.js';
+import {
+  applyClaudeSystemPromptSource,
+  resolveClaudeCustomModelEnv,
+  resolveClaudeSystemPromptSource
+} from '@/modules/providers/list/claude/claude-custom-endpoint.js';
 import {
   CLAUDE_PREDEFINED_MODELS,
   CLAUDE_ULTRACODE_EFFORT
@@ -42,6 +46,7 @@ import {
   readHotTurnSettings,
   registerHeldTurn
 } from '@/modules/providers/list/claude/claude-turn-reuse.js';
+import { readClaudeAgentPrompt } from '@/modules/providers/services/claude-agents.service.js';
 import {
   readDeclaredContextWindow,
   resolveContextWindowTotal
@@ -518,6 +523,9 @@ function mapCliOptionsToSDK(options: AnyRecord = {}) {
     type: 'preset',
     preset: 'claude_code'
   };
+  // A custom model may replace that prompt with an agent's or its own text.
+  // See fork-customizations.md.
+  applyClaudeSystemPromptSource(sdkOptions, sdkOptions.model, modelsDefinition);
 
   sdkOptions.settingSources = ['project', 'user', 'local'];
 
@@ -2487,6 +2495,66 @@ async function buildSideQuestionEnv(
 }
 
 /**
+ * The text a side question's read-only fork runs under instead of Claude Code's
+ * default system prompt, when the session's model replaces it (fork entry 41):
+ * the model's own prompt text, or the body of its agent file — the fork reads no
+ * settings, so it cannot look an agent up by name. `{ error }` when the agent
+ * file is missing, unreadable or empty: the question then fails rather than
+ * falling back to the default prompt the endpoint may reject. `null` for every
+ * other model, and when the catalog cannot be read (the same fail-open as
+ * {@link buildSideQuestionEnv}).
+ */
+async function buildSideQuestionSystemPrompt(
+  model: string | null | undefined,
+  context: ProviderRuntimeContext,
+): Promise<{ text: string } | { error: string } | null> {
+  if (!model) {
+    return null;
+  }
+  let modelsDefinition: ProviderModelsDefinition;
+  try {
+    modelsDefinition = await context.getProviderModels();
+  } catch {
+    return null;
+  }
+  const source = resolveClaudeSystemPromptSource(model, modelsDefinition);
+  if (!source) {
+    return null;
+  }
+  if (source.kind === 'prompt') {
+    return { text: source.prompt };
+  }
+  const agentPrompt = await readClaudeAgentPrompt(source.agent);
+  return agentPrompt
+    ? { text: agentPrompt }
+    : { error: `Agent "${source.agent}" was not found, could not be read, or has an empty prompt.` };
+}
+
+/**
+ * Answers a side question on a read-only fork of the session's process, with
+ * the model's endpoint environment and replacement system prompt (if any).
+ * Both fork paths of `askSideQuestion` — no live process, and the retry after a
+ * native question was cancelled — go through here so they cannot disagree.
+ */
+async function askSideQuestionOnFork(
+  request: SideQuestionRequest,
+  sink: SideQuestionSink,
+  context: ProviderRuntimeContext,
+): Promise<SideQuestionOutcome> {
+  const systemPrompt = await buildSideQuestionSystemPrompt(request.model, context);
+  if (systemPrompt && 'error' in systemPrompt) {
+    // An outcome, not a throw, like every other failure of this call.
+    return { status: 'error', error: systemPrompt.error, answer: '' };
+  }
+  return askClaudeSideQuestion(request, sink, {
+    createQuery: context.createQuery,
+    liveTasks: backgroundWork.outstanding(request.appSessionId),
+    env: await buildSideQuestionEnv(request.model, context),
+    ...(systemPrompt ? { systemPromptText: systemPrompt.text } : {}),
+  });
+}
+
+/**
  * Asks a side question on the live query of `request.appSessionId`, when one
  * is up and ships the method, or on a read-only fork otherwise.
  *
@@ -2558,11 +2626,7 @@ async function askSideQuestion(
       // other code while this call is in flight — so TS's belief that this
       // comparison can never be true is the stale part, not the check.
       if (!request.signal?.aborted && (session.inputReleased as unknown) === true) {
-        return askClaudeSideQuestion(request, sink, {
-          createQuery: context.createQuery,
-          liveTasks: backgroundWork.outstanding(request.appSessionId),
-          env: await buildSideQuestionEnv(request.model, context),
-        });
+        return askSideQuestionOnFork(request, sink, context);
       }
       return { status: 'error', error: errorMessage(error), answer: '' };
     } finally {
@@ -2591,11 +2655,7 @@ async function askSideQuestion(
     }
   }
 
-  return askClaudeSideQuestion(request, sink, {
-    createQuery: context.createQuery,
-    liveTasks: backgroundWork.outstanding(request.appSessionId),
-    env: await buildSideQuestionEnv(request.model, context),
-  });
+  return askSideQuestionOnFork(request, sink, context);
 }
 
 export const claudeRuntime = {
