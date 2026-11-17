@@ -3,6 +3,7 @@ import express, { type Request, type Response } from 'express';
 import { resolveAntigravityMediaFile } from '@/modules/providers/list/antigravity/antigravity-sessions.provider.js';
 import { grantAntigravityAction } from '@/modules/providers/list/antigravity/antigravity-permissions.js';
 import { providerAuthService } from '@/modules/providers/services/provider-auth.service.js';
+import { listClaudeAgents } from '@/modules/providers/services/claude-agents.service.js';
 import { claudeSettingsPermissionsService } from '@/modules/providers/services/claude-settings-permissions.service.js';
 import { providerCapabilitiesService } from '@/modules/providers/services/provider-capabilities.service.js';
 import { providerCliService } from '@/modules/providers/services/provider-cli.service.js';
@@ -656,6 +657,8 @@ const parseCustomProviderModelPayload = (payload: unknown): CustomProviderModelI
   const id = readOptionalQueryString(body.id);
   const baseUrl = readOptionalQueryString(body.baseUrl);
   const apiKey = readOptionalQueryString(body.apiKey);
+  const systemPromptAgent = readOptionalQueryString(body.systemPromptAgent);
+  const systemPrompt = readOptionalQueryString(body.systemPrompt);
   // Carried through as-is (only coerced to a number) so a malformed declaration
   // is rejected by the service's validation instead of being silently dropped,
   // which would read as "clear the field".
@@ -694,6 +697,8 @@ const parseCustomProviderModelPayload = (payload: unknown): CustomProviderModelI
     baseUrl,
     apiKey,
     contextWindow,
+    systemPromptAgent,
+    systemPrompt,
     ...(effort === undefined ? {} : { effort }),
   };
 };
@@ -1034,6 +1039,14 @@ router.get(
   asyncHandler(async (_req: Request, res: Response) => {
     const sources = await claudeSettingsPermissionsService.listRuleSources();
     res.json(createApiSuccessResponse({ sources }));
+  }),
+);
+
+// Read-only: the global agents a Claude custom model can take its system prompt from.
+router.get(
+  '/claude/agents',
+  asyncHandler(async (_req: Request, res: Response) => {
+    res.json(createApiSuccessResponse({ agents: await listClaudeAgents() }));
   }),
 );
 

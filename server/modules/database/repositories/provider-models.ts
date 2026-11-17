@@ -17,11 +17,13 @@ type CustomProviderModelRow = {
   context_window: number | null;
   effort_values: string | null;
   effort_default: string | null;
+  system_prompt_agent: string | null;
+  system_prompt: string | null;
 };
 
 const CUSTOM_PROVIDER_MODEL_COLUMNS = `
   id, provider, model_id, model_name, sort_order, base_url, api_key, context_window,
-  effort_values, effort_default
+  effort_values, effort_default, system_prompt_agent, system_prompt
 `;
 
 /**
@@ -79,6 +81,8 @@ const toCustomProviderModelRecord = (
   baseUrl: row.base_url,
   apiKey: row.api_key,
   contextWindow: row.context_window,
+  systemPromptAgent: row.system_prompt_agent,
+  systemPrompt: row.system_prompt,
   effort: readStoredEffort(row),
 });
 
@@ -151,9 +155,9 @@ export const providerModelsDb = {
     const result = db.prepare(`
       INSERT INTO provider_models (
         provider, model_id, model_name, sort_order, base_url, api_key, context_window,
-        effort_values, effort_default
+        effort_values, effort_default, system_prompt_agent, system_prompt
       )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       provider,
       input.id,
@@ -164,6 +168,8 @@ export const providerModelsDb = {
       input.contextWindow ?? null,
       effort.values,
       effort.defaultValue,
+      input.systemPromptAgent ?? null,
+      input.systemPrompt ?? null,
     );
 
     const row = readCustomProviderModelRow(provider, Number(result.lastInsertRowid));
@@ -188,7 +194,8 @@ export const providerModelsDb = {
 
       db.prepare(`
         UPDATE provider_models
-        SET model_id = ?, model_name = ?, base_url = ?, api_key = ?, context_window = ?, updated_at = CURRENT_TIMESTAMP
+        SET model_id = ?, model_name = ?, base_url = ?, api_key = ?, context_window = ?,
+          system_prompt_agent = ?, system_prompt = ?, updated_at = CURRENT_TIMESTAMP
         WHERE provider = ? AND id = ?
       `).run(
         input.id,
@@ -196,6 +203,8 @@ export const providerModelsDb = {
         input.baseUrl ?? null,
         input.apiKey ?? null,
         input.contextWindow ?? null,
+        input.systemPromptAgent ?? null,
+        input.systemPrompt ?? null,
         provider,
         recordId,
       );

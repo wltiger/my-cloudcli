@@ -216,6 +216,11 @@ CREATE TABLE IF NOT EXISTS provider_models (
     -- Kept last: upgraded databases add these after the columns above.
     effort_values TEXT DEFAULT NULL,
     effort_default TEXT DEFAULT NULL,
+    -- Claude custom models only: where the system prompt comes from instead of
+    -- Claude Code's default. At most one is set (an agent name from the global
+    -- agents directory, or the prompt text); both NULL means the default.
+    system_prompt_agent TEXT DEFAULT NULL,
+    system_prompt TEXT DEFAULT NULL,
     UNIQUE(provider, model_id)
 );
 `;

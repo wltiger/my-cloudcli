@@ -1,4 +1,9 @@
-import type { CustomProviderModelEffort, ProviderModelOption } from '@/shared/types.js';
+import type {
+  CustomProviderModelEffort,
+  CustomProviderModelInput,
+  LLMProvider,
+  ProviderModelOption,
+} from '@/shared/types.js';
 import { AppError } from '@/shared/utils.js';
 
 /**
@@ -93,4 +98,69 @@ export const assertValidContextWindow = (contextWindow: number | undefined): voi
       statusCode: 400,
     },
   );
+};
+
+/** Longest custom system prompt a model may store, counted in JS string length after trimming. */
+const CUSTOM_MODEL_SYSTEM_PROMPT_MAX_LENGTH = 50_000;
+
+/**
+ * The shape of an agent name a model may store. Narrower than a file name on
+ * purpose: the name is matched against agent frontmatter and handed to the CLI,
+ * never joined into a file path.
+ */
+const SYSTEM_PROMPT_AGENT_NAME_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;
+
+/**
+ * Validates and normalizes where a custom model's system prompt comes from: an
+ * agent name or a prompt text, never both. Both values are trimmed and an empty
+ * one counts as not set, so the result carries only the keys that hold a value
+ * (neither key means "use Claude Code's default prompt"). Only Claude can take
+ * a replacement, so another provider with a non-empty value is rejected; this
+ * check covers just these two fields, not the endpoint ones. The agent's file
+ * is deliberately not looked up: it may be deleted later, and the runtime
+ * reports that. Used by `provider-models.service.ts` when normalizing a
+ * create/update payload.
+ */
+export const normalizeCustomModelSystemPrompt = (
+  provider: LLMProvider,
+  input: Pick<CustomProviderModelInput, 'systemPromptAgent' | 'systemPrompt'>,
+): Pick<CustomProviderModelInput, 'systemPromptAgent' | 'systemPrompt'> => {
+  const systemPromptAgent = input.systemPromptAgent?.trim() || undefined;
+  const systemPrompt = input.systemPrompt?.trim() || undefined;
+  if (!systemPromptAgent && !systemPrompt) {
+    return {};
+  }
+
+  if (provider !== 'claude') {
+    throw new AppError('Only Claude models can replace the system prompt.', {
+      code: 'MODEL_SYSTEM_PROMPT_UNSUPPORTED_PROVIDER',
+      statusCode: 400,
+    });
+  }
+  if (systemPromptAgent && systemPrompt) {
+    throw new AppError('Choose either a system prompt agent or a custom system prompt, not both.', {
+      code: 'MODEL_SYSTEM_PROMPT_CONFLICT',
+      statusCode: 400,
+    });
+  }
+  if (systemPromptAgent && !SYSTEM_PROMPT_AGENT_NAME_PATTERN.test(systemPromptAgent)) {
+    throw new AppError(
+      'Agent name must be 1-64 characters: letters, digits, hyphens or underscores.',
+      {
+        code: 'MODEL_INVALID_AGENT_NAME',
+        statusCode: 400,
+      },
+    );
+  }
+  if (systemPrompt && systemPrompt.length > CUSTOM_MODEL_SYSTEM_PROMPT_MAX_LENGTH) {
+    throw new AppError(
+      `System prompt must be ${CUSTOM_MODEL_SYSTEM_PROMPT_MAX_LENGTH} characters or fewer.`,
+      {
+        code: 'MODEL_SYSTEM_PROMPT_TOO_LONG',
+        statusCode: 400,
+      },
+    );
+  }
+
+  return systemPromptAgent ? { systemPromptAgent } : { systemPrompt };
 };

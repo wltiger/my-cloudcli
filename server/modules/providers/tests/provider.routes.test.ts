@@ -771,6 +771,165 @@ test('custom model routes accept, validate, and return reasoning-effort levels',
   });
 });
 
+test('custom model routes store, switch, clear and validate the system prompt source', async () => {
+  await withProviderServer(async (baseUrl) => {
+    type PromptFields = { systemPromptAgent?: string; systemPrompt?: string };
+    type ModelBody = {
+      data?: {
+        model: PromptFields & { recordId: number };
+        models: { OPTIONS: Array<PromptFields & { value: string }> };
+      };
+      error?: { code: string };
+    };
+    const sendModel = async (method: string, route: string, body: unknown) => {
+      const response = await fetch(`${baseUrl}/api/providers/${route}`, {
+        method,
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      return { status: response.status, payload: await response.json() as ModelBody };
+    };
+    const readCatalogOption = async (value: string) => {
+      const response = await fetch(`${baseUrl}/api/providers/claude/models`);
+      const payload = await response.json() as { data: { models: { OPTIONS: Array<PromptFields & { value: string }> } } };
+      return payload.data.models.OPTIONS.find((option) => option.value === value);
+    };
+
+    const withAgent = await sendModel('POST', 'claude/models', {
+      model: 'Agent model',
+      id: 'agent-model',
+      systemPromptAgent: ' dispatch-coder ',
+    });
+    assert.equal(withAgent.status, 201);
+    assert.equal(withAgent.payload.data?.model.systemPromptAgent, 'dispatch-coder');
+    assert.equal(withAgent.payload.data?.model.systemPrompt, undefined);
+    const agentOption = await readCatalogOption('agent-model');
+    assert.equal(agentOption?.systemPromptAgent, 'dispatch-coder');
+    assert.equal(agentOption !== undefined && 'systemPrompt' in agentOption, false);
+
+    // A PATCH switches the model from the agent to a multi-line custom prompt.
+    const prompt = 'You are a coder.\n\n- Be brief.\r\n- Ask nothing.';
+    const switched = await sendModel(
+      'PATCH',
+      `claude/models/${withAgent.payload.data?.model.recordId}`,
+      { model: 'Agent model', id: 'agent-model', systemPrompt: prompt },
+    );
+    assert.equal(switched.status, 200);
+    assert.equal(switched.payload.data?.model.systemPrompt, prompt);
+    assert.equal(switched.payload.data?.model.systemPromptAgent, undefined);
+    assert.equal((await readCatalogOption('agent-model'))?.systemPrompt, prompt);
+
+    // A PATCH naming neither field clears both.
+    const cleared = await sendModel(
+      'PATCH',
+      `claude/models/${withAgent.payload.data?.model.recordId}`,
+      { model: 'Agent model', id: 'agent-model' },
+    );
+    assert.equal(cleared.status, 200);
+    const clearedOption = await readCatalogOption('agent-model');
+    assert.equal(clearedOption !== undefined && 'systemPrompt' in clearedOption, false);
+    assert.equal(clearedOption !== undefined && 'systemPromptAgent' in clearedOption, false);
+
+    // Whitespace-only values are "not set".
+    const blank = await sendModel('POST', 'claude/models', {
+      model: 'Blank',
+      id: 'blank-model',
+      systemPromptAgent: '   ',
+      systemPrompt: '\n\t',
+    });
+    assert.equal(blank.status, 201);
+    assert.equal(blank.payload.data?.model.systemPromptAgent, undefined);
+    assert.equal(blank.payload.data?.model.systemPrompt, undefined);
+
+    const limit = await sendModel('POST', 'claude/models', {
+      model: 'At limit',
+      id: 'at-limit',
+      systemPrompt: 'x'.repeat(50_000),
+    });
+    assert.equal(limit.status, 201);
+    assert.equal(limit.payload.data?.model.systemPrompt?.length, 50_000);
+
+    const rejected: Array<{ body: Record<string, unknown>; code: string }> = [
+      {
+        body: { systemPromptAgent: 'dispatch-coder', systemPrompt: 'You are a coder.' },
+        code: 'MODEL_SYSTEM_PROMPT_CONFLICT',
+      },
+      { body: { systemPrompt: 'x'.repeat(50_001) }, code: 'MODEL_SYSTEM_PROMPT_TOO_LONG' },
+      { body: { systemPromptAgent: 'has space' }, code: 'MODEL_INVALID_AGENT_NAME' },
+      { body: { systemPromptAgent: '../etc/passwd' }, code: 'MODEL_INVALID_AGENT_NAME' },
+      { body: { systemPromptAgent: 'a'.repeat(65) }, code: 'MODEL_INVALID_AGENT_NAME' },
+    ];
+    for (const [index, { body, code }] of rejected.entries()) {
+      const response = await sendModel('POST', 'claude/models', {
+        model: `Rejected ${index}`,
+        id: `rejected-${index}`,
+        ...body,
+      });
+      assert.equal(response.status, 400, JSON.stringify(body).slice(0, 80));
+      assert.equal(response.payload.error?.code, code);
+    }
+
+    const updateRejected = await sendModel(
+      'PATCH',
+      `claude/models/${withAgent.payload.data?.model.recordId}`,
+      { model: 'Agent model', id: 'agent-model', systemPromptAgent: 'a', systemPrompt: 'b' },
+    );
+    assert.equal(updateRejected.status, 400);
+    assert.equal(updateRejected.payload.error?.code, 'MODEL_SYSTEM_PROMPT_CONFLICT');
+  });
+});
+
+test('custom model routes refuse the system prompt fields for non-Claude providers only', async () => {
+  await withProviderServer(async (baseUrl) => {
+    const postModel = async (provider: string, body: Record<string, unknown>) => {
+      const response = await fetch(`${baseUrl}/api/providers/${provider}/models`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      return {
+        status: response.status,
+        payload: await response.json() as {
+          data?: { model: Record<string, unknown> };
+          error?: { code: string };
+        },
+      };
+    };
+
+    for (const provider of ['codex', 'cursor', 'opencode', 'antigravity']) {
+      for (const field of [
+        { systemPromptAgent: 'dispatch-coder' },
+        { systemPrompt: 'You are a coder.' },
+      ]) {
+        const response = await postModel(provider, {
+          model: 'Nope',
+          id: `${provider}-nope-${Object.keys(field)[0]}`,
+          ...field,
+        });
+        assert.equal(response.status, 400, `${provider} ${JSON.stringify(field)}`);
+        assert.equal(response.payload.error?.code, 'MODEL_SYSTEM_PROMPT_UNSUPPORTED_PROVIDER');
+      }
+
+      const plain = await postModel(provider, { model: 'Plain', id: `${provider}-plain` });
+      assert.equal(plain.status, 201, provider);
+      assert.equal('systemPrompt' in (plain.payload.data?.model ?? {}), false);
+    }
+
+    // The endpoint fields keep their pre-existing, provider-agnostic behaviour.
+    const endpoint = await postModel('codex', {
+      model: 'Gateway',
+      id: 'gateway-endpoint',
+      baseUrl: 'http://localhost:11434',
+      apiKey: 'sk-local-123',
+      contextWindow: 262_144,
+    });
+    assert.equal(endpoint.status, 201);
+    assert.equal(endpoint.payload.data?.model.baseUrl, 'http://localhost:11434');
+    assert.equal(endpoint.payload.data?.model.apiKey, 'sk-local-123');
+    assert.equal(endpoint.payload.data?.model.contextWindow, 262_144);
+  });
+});
+
 test('the running-sessions route reports a session held open for background work', async () => {
   // The client polls this route to keep every tab's activity map in step, so
   // a session whose turn ended but whose agent is still running has to be in

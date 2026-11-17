@@ -535,9 +535,10 @@ const addProviderModelCustomEndpointColumns = (db: Database): void => {
  * A `CREATE TABLE IF NOT EXISTS` cannot alter a table that already exists, so
  * a pre-existing database keeps the old constraint until this rebuilds the
  * table with the widened list. Rebuild order matters: the new table is created
- * from the full canonical column set (the custom-endpoint and effort columns
- * are guaranteed present by the time this runs, and the effort columns stay
- * last to match a fresh install), and the provider-order index is recreated by
+ * from the full canonical column set (the custom-endpoint, effort and system
+ * prompt columns are guaranteed present by the time this runs, and the effort
+ * and system prompt columns stay last, in that order, to match a fresh
+ * install), and the provider-order index is recreated by
  * the `CREATE INDEX IF NOT EXISTS` that follows in `runMigrations`. A legacy
  * `effort_levels` column is left behind by the rebuild on purpose: its data was
  * copied into `effort_values` just before this runs.
@@ -577,17 +578,21 @@ const widenProviderModelsProviderCheck = (db: Database): void => {
         context_window INTEGER,
         effort_values TEXT DEFAULT NULL,
         effort_default TEXT DEFAULT NULL,
+        system_prompt_agent TEXT DEFAULT NULL,
+        system_prompt TEXT DEFAULT NULL,
         UNIQUE(provider, model_id)
       )
     `);
     db.exec(`
       INSERT INTO provider_models__new (
         id, provider, model_id, model_name, sort_order, created_at, updated_at,
-        base_url, api_key, context_window, effort_values, effort_default
+        base_url, api_key, context_window, effort_values, effort_default,
+        system_prompt_agent, system_prompt
       )
       SELECT
         id, provider, model_id, model_name, sort_order, created_at, updated_at,
-        base_url, api_key, context_window, effort_values, effort_default
+        base_url, api_key, context_window, effort_values, effort_default,
+        system_prompt_agent, system_prompt
       FROM provider_models
     `);
     db.exec('DROP TABLE provider_models');
@@ -612,6 +617,20 @@ const addProviderModelEffortColumns = (db: Database): void => {
   const columnNames = getTableInfo(db, 'provider_models').map((column) => column.name);
   addColumnToTableIfNotExists(db, 'provider_models', columnNames, 'effort_values', 'TEXT DEFAULT NULL');
   addColumnToTableIfNotExists(db, 'provider_models', columnNames, 'effort_default', 'TEXT DEFAULT NULL');
+};
+
+/**
+ * Adds the `system_prompt_agent`/`system_prompt` columns that let a Claude
+ * custom model replace Claude Code's default system prompt.
+ *
+ * Left NULL for every pre-existing row: both NULL means "use the default
+ * prompt", so old models behave exactly as before. Must run before
+ * `widenProviderModelsProviderCheck`, whose rebuild lists these columns.
+ */
+const addProviderModelSystemPromptColumns = (db: Database): void => {
+  const columnNames = getTableInfo(db, 'provider_models').map((column) => column.name);
+  addColumnToTableIfNotExists(db, 'provider_models', columnNames, 'system_prompt_agent', 'TEXT DEFAULT NULL');
+  addColumnToTableIfNotExists(db, 'provider_models', columnNames, 'system_prompt', 'TEXT DEFAULT NULL');
 };
 
 /**
@@ -801,6 +820,7 @@ export const runMigrations = (db: Database) => {
     // Order matters: the effort columns and the legacy `effort_levels` data
     // must be in place before the CHECK widening rebuilds the table without it.
     addProviderModelEffortColumns(db);
+    addProviderModelSystemPromptColumns(db);
     copyProviderModelEffortLevels(db);
     widenProviderModelsProviderCheck(db);
     dropProviderModelEffortLevelsColumn(db);

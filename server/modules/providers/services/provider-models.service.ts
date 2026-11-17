@@ -4,6 +4,7 @@ import {
   assertCustomModelEndpointFieldsPaired,
   assertValidContextWindow,
   buildCustomModelEffort,
+  normalizeCustomModelSystemPrompt,
 } from '@/modules/providers/services/custom-model-endpoint.js';
 import { providerCapabilitiesService } from '@/modules/providers/services/provider-capabilities.service.js';
 import type { IProvider } from '@/shared/interfaces.js';
@@ -81,6 +82,9 @@ const toCustomProviderModelOption = (
     apiKey: record.apiKey ?? undefined,
     ...(effort ? { effort } : {}),
     contextWindow: record.contextWindow ?? undefined,
+    // Left out entirely (not undefined) while unset: both absent = default prompt.
+    ...(record.systemPromptAgent ? { systemPromptAgent: record.systemPromptAgent } : {}),
+    ...(record.systemPrompt ? { systemPrompt: record.systemPrompt } : {}),
   };
 };
 
@@ -135,11 +139,15 @@ const mergeProviderModels = (
   };
 };
 
-const normalizeCustomModelInput = (input: CustomProviderModelInput): CustomProviderModelInput => {
+const normalizeCustomModelInput = (
+  provider: LLMProvider,
+  input: CustomProviderModelInput,
+): CustomProviderModelInput => {
   const baseUrl = input.baseUrl?.trim() || undefined;
   const apiKey = input.apiKey?.trim() || undefined;
   assertCustomModelEndpointFieldsPaired(baseUrl, apiKey);
   assertValidContextWindow(input.contextWindow);
+  const systemPromptSource = normalizeCustomModelSystemPrompt(provider, input);
 
   return {
     id: input.id.trim(),
@@ -147,6 +155,7 @@ const normalizeCustomModelInput = (input: CustomProviderModelInput): CustomProvi
     baseUrl,
     apiKey,
     contextWindow: input.contextWindow,
+    ...systemPromptSource,
     ...(input.effort === undefined ? {} : { effort: input.effort }),
   };
 };
@@ -284,7 +293,7 @@ export const createProviderModelsService = (dependencies: ProviderModelsServiceD
     input: CustomProviderModelInput,
   ): Promise<{ model: ProviderModelOption; models: ProviderModelsDefinition }> => {
     const predefined = await resolveProvider(provider).models.getSupportedModels();
-    const normalized = normalizeCustomModelInput(input);
+    const normalized = normalizeCustomModelInput(provider, input);
     assertModelIdAvailable(provider, predefined, normalized.id);
     assertEffortLevelsSupported(provider, normalized);
 
@@ -312,7 +321,7 @@ export const createProviderModelsService = (dependencies: ProviderModelsServiceD
   ): Promise<{ model: ProviderModelOption; models: ProviderModelsDefinition }> => {
     const predefined = await resolveProvider(provider).models.getSupportedModels();
     readCustomModel(provider, recordId);
-    const normalized = normalizeCustomModelInput(input);
+    const normalized = normalizeCustomModelInput(provider, input);
     assertModelIdAvailable(provider, predefined, normalized.id, recordId);
     assertEffortLevelsSupported(provider, normalized);
 

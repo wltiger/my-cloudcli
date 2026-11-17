@@ -102,6 +102,14 @@ export type ProviderModelOption = {
    * fork-customizations.md.
    */
   contextWindow?: number;
+  /**
+   * Claude-only system prompt source that replaces Claude Code's default one,
+   * stored unmasked like `baseUrl`. At most one of the two is present: the name
+   * of an agent file in the global agents directory, or the prompt text itself.
+   * Both absent means the default prompt.
+   */
+  systemPromptAgent?: string;
+  systemPrompt?: string;
 };
 
 /**
@@ -146,6 +154,9 @@ export type CustomProviderModelRecord = {
   apiKey: string | null;
   /** Claude-only declared context window in raw tokens, or null. */
   contextWindow: number | null;
+  /** Claude-only system prompt source (agent name or prompt text), or null for both. */
+  systemPromptAgent: string | null;
+  systemPrompt: string | null;
   /** NULL for rows that never declared effort levels, including pre-existing rows. */
   effort: CustomProviderModelEffort | null;
 };
@@ -183,6 +194,13 @@ export type CustomProviderModelInput = {
    * endpoint fields behave.
    */
   contextWindow?: number;
+  /**
+   * Claude-only system prompt source: an agent name or the prompt text, never
+   * both. Absent clears any previous choice, the same way the endpoint fields
+   * behave.
+   */
+  systemPromptAgent?: string;
+  systemPrompt?: string;
   /**
    * Optional reasoning-effort declaration. `undefined` leaves stored metadata
    * untouched on update (and stores none on create) so clients that predate
