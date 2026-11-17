@@ -312,7 +312,11 @@ async function waitFor(condition: () => boolean, timeoutMs = 2000): Promise<void
   }
 }
 
-/** Runs the cancelled-native-question scenario for `model` and returns what the retried fork saw. */
+/**
+ * Runs the cancelled-native-question scenario for a side question on `model`
+ * and returns what the retried fork saw. The live turns run on a built-in
+ * model: a turn on an agent model whose file is gone fails before it starts.
+ */
 async function askCancelledNativeQuestion(
   model: string,
   appSessionId: string,
@@ -329,7 +333,7 @@ async function askCancelledNativeQuestion(
   const fork = captureForkOptions();
 
   try {
-    const firstRun = queryClaudeSDK('hello', { sessionId: appSessionId, cwd, model }, writer as never, context(first.createQuery));
+    const firstRun = queryClaudeSDK('hello', { sessionId: appSessionId, cwd, model: 'sonnet' }, writer as never, context(first.createQuery));
     first.emit({ type: 'system', subtype: 'init', session_id: 'native-session' });
     await waitFor(() => first.consumed() > 0);
 
@@ -338,7 +342,7 @@ async function askCancelledNativeQuestion(
 
     // A new turn on the same session lets the first process go while the
     // native question is still out; the CLI then cancels that question.
-    const secondRun = queryClaudeSDK('continue', { sessionId: appSessionId, cwd, model }, writer as never, context(second.createQuery));
+    const secondRun = queryClaudeSDK('continue', { sessionId: appSessionId, cwd, model: 'sonnet' }, writer as never, context(second.createQuery));
     await waitFor(() => first.released());
     rejectNative(new Error('Side question cancelled'));
     const outcome = await asked;

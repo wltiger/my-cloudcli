@@ -28,6 +28,7 @@ import {
 import { createBackgroundWorkSnapshot } from '@/modules/providers/list/claude/claude-background-work.js';
 import {
   applyClaudeSystemPromptSource,
+  assertClaudeAgentReadable,
   resolveClaudeCustomModelEnv,
   resolveClaudeSystemPromptSource
 } from '@/modules/providers/list/claude/claude-custom-endpoint.js';
@@ -1443,6 +1444,9 @@ async function queryClaudeSDK(
       model: resolvedModel || options.model,
       effortModels,
     });
+    // Fails the turn here, before anything is registered or sent, when the
+    // model's agent file is gone (the CLI itself would not notice).
+    await assertClaudeAgentReadable(sdkOptions);
 
     // The window this turn's model declares, resolved once: it is both the
     // total every budget this run publishes reports, and the value the turn's

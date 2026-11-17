@@ -52,6 +52,7 @@ const PROMPT_MODELS: ProviderModelsDefinition = {
     { value: 'agent-a', label: 'Agent A', isCustom: true, systemPromptAgent: 'agent-a' },
     { value: 'agent-a-twin', label: 'Agent A twin', isCustom: true, systemPromptAgent: 'agent-a' },
     { value: 'agent-b', label: 'Agent B', isCustom: true, systemPromptAgent: 'agent-b' },
+    { value: 'agent-ghost', label: 'Agent with no file', isCustom: true, systemPromptAgent: 'agent-ghost' },
     { value: 'prompt-a', label: 'Prompt A', isCustom: true, systemPrompt: 'You are A.' },
     { value: 'prompt-a-twin', label: 'Prompt A twin', isCustom: true, systemPrompt: 'You are A.' },
     { value: 'prompt-b', label: 'Prompt B', isCustom: true, systemPrompt: 'You are B.' },
@@ -282,9 +283,25 @@ test('Claude per-turn process-reuse compatibility', async (t) => {
   process.env.USERPROFILE = home;
   await writeMcpConfig({});
 
+  // An agent model's file is checked before its turn is sent, and a temporary
+  // HOME does not isolate `os.homedir()` on Windows, so the agents directory is
+  // pointed at through `CLAUDE_CONFIG_DIR` instead.
+  const configDirectory = path.join(workspace, 'claude-config');
+  const previousConfigDirectory = process.env.CLAUDE_CONFIG_DIR;
+  await mkdir(path.join(configDirectory, 'agents'), { recursive: true });
+  for (const agent of ['agent-a', 'agent-b']) {
+    await writeFile(path.join(configDirectory, 'agents', `${agent}.md`), `---\nname: ${agent}\n---\n\nYou are ${agent}.\n`, 'utf8');
+  }
+  process.env.CLAUDE_CONFIG_DIR = configDirectory;
+
   t.after(async () => {
     process.env.HOME = previousHome.HOME;
     process.env.USERPROFILE = previousHome.USERPROFILE;
+    if (previousConfigDirectory === undefined) {
+      delete process.env.CLAUDE_CONFIG_DIR;
+    } else {
+      process.env.CLAUDE_CONFIG_DIR = previousConfigDirectory;
+    }
     await rm(workspace, { recursive: true, force: true });
   });
 
@@ -490,6 +507,36 @@ test('Claude per-turn process-reuse compatibility', async (t) => {
 
     await first.live.emit(RESULT);
     await second.turn;
+    await releaseHeldRun(first.live, first.turn);
+  });
+
+  await t.test('a turn whose agent file is missing fails alone and leaves the held process untouched', async () => {
+    const first = await startHeldTurn('compat-missing-agent', {}, PROMPT_MODELS);
+
+    const connection = new FakeConnection();
+    await queryClaudeSDK(
+      'second question',
+      { ...BASE_OPTIONS, cwd: workspace, model: 'agent-ghost', sessionId: 'compat-missing-agent' },
+      connection,
+      createContext(PROMPT_MODELS),
+    );
+    await flush();
+
+    const failure = connection.frames.find((frame) => frame.kind === 'error');
+    assert.match(String(failure?.content), /^Agent "agent-ghost" was not found/);
+    assert.equal(connection.frames.some((frame) => frame.code === 'background_work_not_kept'), false, 'a failed turn, not a refused send');
+    assert.equal(connection.frames.find((frame) => frame.kind === 'complete')?.exitCode, 1);
+    assert.equal(queries.length, 1, 'no new process was started');
+    assert.equal(first.live.promptStreamClosed, false, 'the held process keeps its work');
+    assert.equal(first.live.prompts.length, 1, 'nothing was pushed into the held stream');
+
+    // The failed turn left nothing half-registered: the next ordinary turn still joins the held process.
+    const third = await startTurn('compat-missing-agent', {}, 'third question', PROMPT_MODELS);
+    assert.equal(queries.length, 1);
+    assert.equal(first.live.prompts.length, 2, 'the held process took the next turn');
+
+    await first.live.emit(RESULT);
+    await third.turn;
     await releaseHeldRun(first.live, first.turn);
   });
 

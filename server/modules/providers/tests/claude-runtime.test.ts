@@ -1,4 +1,7 @@
 import assert from 'node:assert/strict';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
 import test from 'node:test';
 
 import type { ProviderModelsDefinition } from '@/shared/types.js';
@@ -49,6 +52,8 @@ const CUSTOM_ENDPOINT_CATALOG: ProviderModelsDefinition = {
       apiKey: 'sk-local-123',
       systemPromptAgent: 'relay-agent',
     },
+    { value: 'ghost-agent-model', label: 'Agent with no file', isCustom: true, systemPromptAgent: 'ghost-agent' },
+    { value: 'empty-agent-model', label: 'Agent with an empty body', isCustom: true, systemPromptAgent: 'empty-agent' },
     {
       value: 'prompt-model',
       label: 'Endpoint model with its own prompt',
@@ -109,6 +114,27 @@ test('Claude runtime environment overrides', async (t) => {
         process.env[key] = value;
       }
     }
+  });
+  // The agents directory the runtime checks an agent model against, found
+  // through `CLAUDE_CONFIG_DIR` (a temporary HOME does not isolate
+  // `os.homedir()` on Windows, this variable does).
+  const configDirectory = await mkdtemp(path.join(tmpdir(), 'claude-runtime-agents-'));
+  const previousConfigDirectory = process.env.CLAUDE_CONFIG_DIR;
+  await mkdir(path.join(configDirectory, 'agents'), { recursive: true });
+  await writeFile(
+    path.join(configDirectory, 'agents', 'relay-agent.md'),
+    '---\nname: relay-agent\n---\n\nYou are the relay agent.\n',
+    'utf8',
+  );
+  await writeFile(path.join(configDirectory, 'agents', 'empty-agent.md'), '---\nname: empty-agent\n---\n\n  \n', 'utf8');
+  process.env.CLAUDE_CONFIG_DIR = configDirectory;
+  t.after(async () => {
+    if (previousConfigDirectory === undefined) {
+      delete process.env.CLAUDE_CONFIG_DIR;
+    } else {
+      process.env.CLAUDE_CONFIG_DIR = previousConfigDirectory;
+    }
+    await rm(configDirectory, { recursive: true, force: true });
   });
   t.mock.module('@anthropic-ai/claude-agent-sdk', {
     namedExports: {
@@ -419,10 +445,73 @@ test('Claude runtime environment overrides', async (t) => {
     });
   }
 
-  // What the runtime does with a CLI failure on an agent turn, whatever its
-  // cause. Measured against CLI 2.1.326 / SDK 0.3.322 (M2): an unknown `agent`
-  // makes no CLI error at all — the run proceeds on the default prompt — so in
-  // practice the error shown is the endpoint's, not "agent not found".
+  // Measured against CLI 2.1.326 / SDK 0.3.322 (M2): an unknown `agent` makes
+  // the CLI report nothing — the run proceeds on the default prompt, which the
+  // endpoint behind a custom model may reject. So the runtime checks the agent
+  // file itself before it sends anything.
+  for (const [model, label] of [
+    ['ghost-agent-model', 'no agent file'],
+    ['empty-agent-model', 'an agent file with an empty body'],
+  ] as const) {
+    await t.test(`an agent model with ${label} fails the turn before any query is sent`, async () => {
+      const callsBefore = calls.length;
+      const ws = createFakeWs();
+      await queryClaudeSDK(
+        'hello',
+        { sessionId: `session-precheck-${model}`, model, images: [], files: [] },
+        ws,
+        createFakeContext(CUSTOM_ENDPOINT_CATALOG),
+      );
+
+      assert.equal(calls.length, callsBefore, 'no query, so nothing reaches the endpoint on the default prompt');
+      const errors = ws.frames.filter((frame) => frame.kind === 'error');
+      assert.equal(errors.length, 1);
+      assert.match(
+        String(errors[0].content),
+        /^Agent "(ghost|empty)-agent" was not found, could not be read, or has an empty prompt\. Pick another agent or fix the file in the model settings\.$/,
+      );
+      const completes = ws.frames.filter((frame) => frame.kind === 'complete');
+      assert.equal(completes.length, 1);
+      assert.equal(completes[0].exitCode, 1);
+    });
+  }
+
+  await t.test('an agent model whose file exists runs without any error frame', async () => {
+    const ws = createFakeWs();
+    await queryClaudeSDK(
+      'hello',
+      { sessionId: 'session-precheck-ok', model: 'agent-model', images: [], files: [] },
+      ws,
+      createFakeContext(CUSTOM_ENDPOINT_CATALOG),
+    );
+
+    assert.equal(calls.at(-1)?.options.agent, 'relay-agent');
+    assert.deepEqual(ws.frames.filter((frame) => frame.kind === 'error'), []);
+  });
+
+  await t.test('prompt and default models never look at the agents directory', async () => {
+    const previous = process.env.CLAUDE_CONFIG_DIR;
+    process.env.CLAUDE_CONFIG_DIR = path.join(configDirectory, 'does-not-exist');
+    try {
+      for (const model of ['prompt-model', 'default']) {
+        const ws = createFakeWs();
+        const callsBefore = calls.length;
+        await queryClaudeSDK(
+          'hello',
+          { sessionId: `session-precheck-skip-${model}`, model, images: [], files: [] },
+          ws,
+          createFakeContext(CUSTOM_ENDPOINT_CATALOG),
+        );
+
+        assert.equal(calls.length, callsBefore + 1, `${model} still sends its query`);
+        assert.deepEqual(ws.frames.filter((frame) => frame.kind === 'error'), []);
+      }
+    } finally {
+      process.env.CLAUDE_CONFIG_DIR = previous;
+    }
+  });
+
+  // What the runtime does with a CLI failure on an agent turn, whatever its cause.
   await t.test('a failed agent run is reported as the run error, never retried on the default prompt', async () => {
     const callsBefore = calls.length;
     const ws = createFakeWs();

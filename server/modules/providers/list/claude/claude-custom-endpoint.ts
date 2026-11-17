@@ -1,3 +1,4 @@
+import { readClaudeAgentPrompt } from '@/modules/providers/services/claude-agents.service.js';
 import { readDeclaredContextWindow } from '@/modules/providers/services/claude-context-window.js';
 import type { AnyRecord, ProviderModelsDefinition } from '@/shared/types.js';
 
@@ -91,5 +92,27 @@ export function applyClaudeSystemPromptSource(
     sdkOptions.agent = source.agent;
   } else if (source?.kind === 'prompt') {
     sdkOptions.systemPrompt = source.prompt;
+  }
+}
+
+/**
+ * Throws when a turn's mapped SDK options name an agent whose file is missing,
+ * unreadable or empty. The CLI says nothing about an unknown `agent` — it runs
+ * the turn on the default prompt, which the endpoint behind the model may
+ * reject — so the runtime checks the file itself, with the same lookup the
+ * side-question fork uses, and fails the turn instead of falling back. Options
+ * with no agent (default and prompt models) pass without any file access. Used
+ * by `queryClaudeSDK` in `claude-runtime.provider.ts`. See fork-customizations.md.
+ */
+export async function assertClaudeAgentReadable(sdkOptions: AnyRecord): Promise<void> {
+  const agent = sdkOptions.agent;
+  if (typeof agent !== 'string') {
+    return;
+  }
+  if (await readClaudeAgentPrompt(agent) === null) {
+    throw new Error(
+      `Agent "${agent}" was not found, could not be read, or has an empty prompt. `
+      + 'Pick another agent or fix the file in the model settings.',
+    );
   }
 }
