@@ -158,6 +158,18 @@ test('the Claude form offers the three-way choice and other providers do not', (
   assert.equal(screen.queryByRole('radio', { name: 'Custom prompt' }) === null, true);
 });
 
+test('the form tells the user to test a change in a new session', () => {
+  renderPanel('claude');
+
+  assert.equal(
+    screen.queryByText(/test it in a new session — an existing conversation may keep its original prompt/) !== null,
+    true,
+  );
+
+  fireEvent.click(screen.getByText('Cursor'));
+  assert.equal(screen.queryByText(/test it in a new session/) === null, true);
+});
+
 test('editing a model opens in the mode that matches what it stores', async () => {
   renderPanel();
 

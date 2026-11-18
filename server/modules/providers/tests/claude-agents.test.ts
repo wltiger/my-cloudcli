@@ -107,6 +107,28 @@ test('listClaudeAgents reads only top-level markdown files', async () => {
   });
 });
 
+test('listClaudeAgents leaves out names a custom model could not save', async () => {
+  await withTempDir(async (agentsDir) => {
+    await writeAgents(agentsDir, {
+      'valid.md': '---\nname: valid_agent-1\n---\nBody.\n',
+      // The name is the frontmatter one, so a valid file name does not help.
+      'valid-file-name.md': '---\nname: has space\n---\nBody.\n',
+      'chinese.md': '---\nname: 中文助手\n---\nBody.\n',
+      // No frontmatter name: the file name stands in, dots included.
+      'dotted.name.md': 'Body.\n',
+      [`${'a'.repeat(65)}.md`]: 'Body.\n',
+      [`${'b'.repeat(64)}.md`]: 'Body.\n',
+    });
+
+    const names = (await listClaudeAgents({ agentsDir })).map((agent) => agent.name);
+
+    // 64 characters is the longest name the save-time check accepts.
+    assert.deepEqual(names, ['b'.repeat(64), 'valid_agent-1']);
+    // Only the list is filtered: reading takes whatever name is stored.
+    assert.equal(await readClaudeAgentPrompt('dotted.name', { agentsDir }), 'Body.');
+  });
+});
+
 test('listClaudeAgents returns an empty list when the directory does not exist', async () => {
   await withTempDir(async (dir) => {
     assert.deepEqual(await listClaudeAgents({ agentsDir: path.join(dir, 'missing') }), []);
@@ -180,6 +202,8 @@ test('GET /api/providers/claude/agents serves the agent list from the resolved d
     await writeAgents(path.join(configDir, 'agents'), {
       'coder.md': '---\nname: dispatch-coder\ndescription: Writes code\ntools: Read, Grep\n---\nYou are a coder.\n',
       'plain.md': 'Plain prompt.\n',
+      // A name a model could not be saved with must not be offered.
+      'dotted.md': '---\nname: has.dot\n---\nBody.\n',
     });
 
     const previousConfigDir = process.env.CLAUDE_CONFIG_DIR;

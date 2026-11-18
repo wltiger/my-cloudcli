@@ -29,6 +29,7 @@ import { createBackgroundWorkSnapshot } from '@/modules/providers/list/claude/cl
 import {
   applyClaudeSystemPromptSource,
   assertClaudeAgentReadable,
+  describeUnreadableClaudeAgent,
   resolveClaudeCustomModelEnv,
   resolveClaudeSystemPromptSource
 } from '@/modules/providers/list/claude/claude-custom-endpoint.js';
@@ -2531,7 +2532,7 @@ async function buildSideQuestionSystemPrompt(
   const agentPrompt = await readClaudeAgentPrompt(source.agent);
   return agentPrompt
     ? { text: agentPrompt }
-    : { error: `Agent "${source.agent}" was not found, could not be read, or has an empty prompt.` };
+    : { error: describeUnreadableClaudeAgent(source.agent) };
 }
 
 /**

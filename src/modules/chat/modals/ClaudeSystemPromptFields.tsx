@@ -11,7 +11,7 @@ import type { ClaudeAgentSummary, LLMProvider, ProviderModelOption } from '@/sha
  * `agent` and `prompt` both live in the form state whatever `mode` is, so
  * switching modes never loses what was typed; only the selected one is saved.
  */
-export type ClaudeSystemPromptMode = 'default' | 'agent' | 'prompt';
+type ClaudeSystemPromptMode = 'default' | 'agent' | 'prompt';
 
 export type ClaudeSystemPromptValue = {
   mode: ClaudeSystemPromptMode;
@@ -106,10 +106,18 @@ type ClaudeSystemPromptFieldsProps = {
   onChange: (next: ClaudeSystemPromptValue) => void;
 };
 
+/**
+ * Rendered by the chat module's ModelLibraryPanel inside the Claude add/edit
+ * model form, which uses it to collect where the model's system prompt comes
+ * from and to fetch the agent list for the dropdown.
+ */
 export default function ClaudeSystemPromptFields({ value, onChange }: ClaudeSystemPromptFieldsProps) {
   // null until the list answers. It is fetched the first time agent mode is
   // shown and kept for the life of the form, so switching modes never refetches.
   const [agents, setAgents] = useState<ClaudeAgentSummary[] | null>(null);
+  // Set when the agent request fails. It cannot be derived from `agents`, which
+  // stays null both while loading and after a failure; it ends the loading
+  // state and shows the "Could not load agents" line instead.
   const [loadFailed, setLoadFailed] = useState(false);
   const requested = useRef(false);
 
@@ -148,6 +156,10 @@ export default function ClaudeSystemPromptFields({ value, onChange }: ClaudeSyst
       <p className="mt-0.5 text-[11px] leading-4 text-muted-foreground">
         Claude Code&apos;s default system prompt is used unless you replace it here. Some endpoints
         reject requests that carry it.
+      </p>
+      <p className="mt-0.5 text-[11px] leading-4 text-muted-foreground">
+        After changing this, test it in a new session — an existing conversation may keep its
+        original prompt.
       </p>
 
       <div

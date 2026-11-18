@@ -1,3 +1,4 @@
+import { isValidClaudeAgentName } from '@/modules/providers/services/claude-agents.service.js';
 import type {
   CustomProviderModelEffort,
   CustomProviderModelInput,
@@ -104,13 +105,6 @@ export const assertValidContextWindow = (contextWindow: number | undefined): voi
 const CUSTOM_MODEL_SYSTEM_PROMPT_MAX_LENGTH = 50_000;
 
 /**
- * The shape of an agent name a model may store. Narrower than a file name on
- * purpose: the name is matched against agent frontmatter and handed to the CLI,
- * never joined into a file path.
- */
-const SYSTEM_PROMPT_AGENT_NAME_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;
-
-/**
  * Validates and normalizes where a custom model's system prompt comes from: an
  * agent name or a prompt text, never both. Both values are trimmed and an empty
  * one counts as not set, so the result carries only the keys that hold a value
@@ -143,7 +137,7 @@ export const normalizeCustomModelSystemPrompt = (
       statusCode: 400,
     });
   }
-  if (systemPromptAgent && !SYSTEM_PROMPT_AGENT_NAME_PATTERN.test(systemPromptAgent)) {
+  if (systemPromptAgent && !isValidClaudeAgentName(systemPromptAgent)) {
     throw new AppError(
       'Agent name must be 1-64 characters: letters, digits, hyphens or underscores.',
       {

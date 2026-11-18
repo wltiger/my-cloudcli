@@ -48,7 +48,7 @@ export function resolveClaudeCustomModelEnv(
  * Code's default one: the name of an agent file in the global agents directory,
  * or the prompt text itself.
  */
-export type ClaudeSystemPromptSource =
+type ClaudeSystemPromptSource =
   | { kind: 'agent'; agent: string }
   | { kind: 'prompt'; prompt: string };
 
@@ -96,6 +96,16 @@ export function applyClaudeSystemPromptSource(
 }
 
 /**
+ * The sentence for an agent whose file is missing, unreadable or empty, so a
+ * turn and a side question say it the same way. The main chat adds advice to it
+ * (see {@link assertClaudeAgentReadable}). Used by `buildSideQuestionSystemPrompt`
+ * in `claude-runtime.provider.ts`.
+ */
+export function describeUnreadableClaudeAgent(agent: string): string {
+  return `Agent "${agent}" was not found, could not be read, or has an empty prompt.`;
+}
+
+/**
  * Throws when a turn's mapped SDK options name an agent whose file is missing,
  * unreadable or empty. The CLI says nothing about an unknown `agent` — it runs
  * the turn on the default prompt, which the endpoint behind the model may
@@ -111,8 +121,7 @@ export async function assertClaudeAgentReadable(sdkOptions: AnyRecord): Promise<
   }
   if (await readClaudeAgentPrompt(agent) === null) {
     throw new Error(
-      `Agent "${agent}" was not found, could not be read, or has an empty prompt. `
-      + 'Pick another agent or fix the file in the model settings.',
+      `${describeUnreadableClaudeAgent(agent)} Pick another agent or fix the file in the model settings.`,
     );
   }
 }

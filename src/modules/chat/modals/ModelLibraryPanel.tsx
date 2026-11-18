@@ -68,6 +68,9 @@ export default function ModelLibraryPanel({
   const [model, setModel] = useState('');
   const [modelId, setModelId] = useState('');
   const [customEndpoint, setCustomEndpoint] = useState<ClaudeCustomEndpointValue>(EMPTY_CUSTOM_ENDPOINT);
+  // The Claude form's system prompt choice (default, agent or custom text).
+  // The panel owns it so it resets and loads per model like the other form
+  // fields, and turns it into the create/update payload on save.
   const [systemPrompt, setSystemPrompt] = useState<ClaudeSystemPromptValue>(EMPTY_SYSTEM_PROMPT);
   // Effort levels ticked in the form; they become the custom model's declared
   // levels, which is what makes the composer offer Reasoning for it.

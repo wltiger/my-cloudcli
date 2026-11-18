@@ -33,7 +33,8 @@ type ClaudeAgentsOptions = {
  * CLI), otherwise `~/.claude/agents`. `env` and `home` are parameters so a test
  * can resolve against its own values; on Windows `os.homedir()` ignores HOME.
  * Used by `listClaudeAgents` and `readClaudeAgentPrompt`, the one place the
- * agent list endpoint and the side-question fork agree on the directory.
+ * agent list endpoint, the main-chat preflight (`assertClaudeAgentReadable`)
+ * and the side-question fork agree on the directory.
  */
 export function resolveClaudeAgentsDir(
   env: Record<string, string | undefined> = process.env,
@@ -107,21 +108,37 @@ const readClaudeAgentFiles = async (agentsDir: string): Promise<ClaudeAgentFile[
 };
 
 /**
+ * The shape of an agent name a custom model may store: 1-64 letters, digits,
+ * hyphens or underscores. Narrower than a file name on purpose: the name is
+ * matched against agent frontmatter and handed to the CLI, never joined into a
+ * file path. The one owner of the rule: `normalizeCustomModelSystemPrompt`
+ * rejects a name that fails it, and `listClaudeAgents` offers only names that
+ * pass it, so every option in the dropdown can be saved.
+ */
+export function isValidClaudeAgentName(name: string): boolean {
+  return /^[A-Za-z0-9_-]{1,64}$/.test(name);
+}
+
+/**
  * Lists the global agents a Claude custom model can pick. The name is the
  * frontmatter `name` (what `claude --agent` matches), falling back to the file
- * name. Used by `GET /api/providers/claude/agents` in `provider.routes.ts`,
- * which feeds the model library's agent dropdown.
+ * name; an agent whose name fails {@link isValidClaudeAgentName} is left out,
+ * since choosing it could only end in a rejected save. Used by
+ * `GET /api/providers/claude/agents` in `provider.routes.ts`, which feeds the
+ * model library's agent dropdown.
  */
 export async function listClaudeAgents(
   options: ClaudeAgentsOptions = {},
 ): Promise<ClaudeAgentSummary[]> {
   const files = await readClaudeAgentFiles(options.agentsDir ?? resolveClaudeAgentsDir());
-  return files.map((agent) => ({
-    name: agent.name,
-    description: agent.description,
-    tools: agent.tools,
-    disallowedTools: agent.disallowedTools,
-  }));
+  return files
+    .filter((agent) => isValidClaudeAgentName(agent.name))
+    .map((agent) => ({
+      name: agent.name,
+      description: agent.description,
+      tools: agent.tools,
+      disallowedTools: agent.disallowedTools,
+    }));
 }
 
 /**
@@ -129,7 +146,9 @@ export async function listClaudeAgents(
  * frontmatter, trimmed. Null when no agent has that name, its file cannot be
  * read, or the body is empty, so a caller can tell "nothing to send" from a
  * prompt. The name is only compared with agent names, never joined into a path.
- * Used by the side-question fork, which cannot look an agent up by name itself.
+ * Used by the side-question fork, which cannot look an agent up by name itself,
+ * and by `assertClaudeAgentReadable`, the main chat's preflight that fails a
+ * turn whose agent file is gone.
  */
 export async function readClaudeAgentPrompt(
   name: string,
