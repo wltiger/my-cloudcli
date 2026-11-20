@@ -2,7 +2,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { Dispatch, KeyboardEvent, RefObject, SetStateAction } from 'react';
 import { useTranslation } from 'react-i18next';
 
-import { withClearCommand } from '@/modules/chat/utils/clearCommand';
 import { withCompactCommand } from '@/modules/chat/utils/compactCommand';
 import { safeLocalStorage } from '@/modules/chat/utils/chatStorage';
 import { useProjectSlashCommands } from '@/shared/hooks/useProjectSlashCommands';
@@ -22,8 +21,6 @@ type UseSlashCommandsOptions = {
   onExecuteCommand: (command: SlashCommand, rawInput?: string) => void | Promise<void>;
   /** Whether the active provider can run Compact; gates the `/compact` completion entry. */
   currentProviderSupportsCompact: boolean;
-  /** Whether the active provider offers Clear; gates the `/clear` completion entry. */
-  currentProviderSupportsClear: boolean;
 };
 
 const getCommandHistoryKey = (projectName: string) => `command_history_${projectName}`;
@@ -148,13 +145,7 @@ export function useSlashCommands({
     usage: selectedProject ? readCommandHistory(selectedProject.projectId) : {},
   }), [fetchedCommands, currentProviderSupportsCompact, t, selectedProject]);
 
-  // Clear folds in one entry later, for the same reason and on the same terms.
-  // Unlike Compact it is never sent anywhere: the composer intercepts it.
-  const slashCommands = useMemo(() => withClearCommand(compactCommands, {
-    supported: currentProviderSupportsClear,
-    description: t('clear.description'),
-    usage: selectedProject ? readCommandHistory(selectedProject.projectId) : {},
-  }), [compactCommands, currentProviderSupportsClear, t, selectedProject]);
+  const slashCommands = compactCommands;
 
   useEffect(() => {
     if (!showCommandMenu) {

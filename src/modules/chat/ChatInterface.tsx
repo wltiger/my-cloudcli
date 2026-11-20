@@ -20,9 +20,9 @@ import { useScheduledMessages } from '@/modules/chat/composer/useScheduledMessag
 import { useChatSessionState } from '@/modules/chat/hooks/useChatSessionState';
 import { useChatRealtimeHandlers } from '@/modules/chat/hooks/useChatRealtimeHandlers';
 import { useChatComposerState } from '@/modules/chat/hooks/useChatComposerState';
-import { useSessionClear } from '@/modules/chat/hooks/useSessionClear';
 import { useSessionFork } from '@/modules/chat/hooks/useSessionFork';
 import { useSessionStore } from '@/modules/chat/hooks/useSessionStore';
+import { useEscapeToAbortSession } from '@/modules/chat/hooks/useEscapeToAbortSession';
 import {
   useBackgroundWorkSessionIds,
   useProcessingSessions,
@@ -137,6 +137,7 @@ function ChatInterface({
     supportsSessionForking,
     supportsSideQuestions,
     supportsSteering,
+    supportsContextClearing,
   } = useChatProviderState({
     selectedSession,
     selectedProject,
@@ -251,25 +252,48 @@ function ChatInterface({
     onError: handleForkFailed,
   });
 
-  // Clear opens a brand-new session too, so it takes the very same handoff a
-  // Fork does -- a new session is a new session, whichever gesture made it.
-  // The retired conversation rides along in the same context so it leaves the
-  // sidebar's active lists in the update that adds its replacement.
-  const handleSessionCleared = useCallback((openedSessionId: string, retiredSessionId: string) => {
-    if (!selectedProject) {
+  /**
+   * Clears the open session's context: the conversation stays on screen, with
+   * a divider where the clear happened, and the next message starts fresh.
+   */
+  const handleClearContext = useCallback(async () => {
+    const sessionId = currentSessionId || selectedSession?.id;
+    if (!supportsContextClearing) {
+      addMessage({ type: 'assistant', content: t('misc.clearContextUnsupported'), timestamp: Date.now() });
       return;
     }
-    handleSessionEstablished(openedSessionId, {
-      provider,
-      project: selectedProject,
-      retiredSessionId,
-    });
-  }, [handleSessionEstablished, provider, selectedProject]);
+    // A chat that has not sent its first message has no context yet.
+    if (!sessionId) {
+      addMessage({ type: 'assistant', content: t('misc.clearContextEmpty'), timestamp: Date.now() });
+      return;
+    }
 
-  const clearSession = useSessionClear({
-    sessionId: currentSessionId || selectedSession?.id || null,
-    onCleared: handleSessionCleared,
-  });
+    try {
+      const response = await api.clearSessionContext(sessionId);
+      const payload = await response.json().catch(() => null);
+      if (!response.ok) {
+        throw new Error(payload?.error?.message || payload?.message || `HTTP ${response.status}`);
+      }
+      if (!payload?.data?.cleared) {
+        addMessage({ type: 'assistant', content: t('misc.clearContextEmpty'), timestamp: Date.now() });
+        return;
+      }
+      // The counter described the context that was just left behind.
+      setTokenBudget(null);
+      // Brings in the divider the server now ends the history with.
+      await requestLatestMessages(sessionId, true);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      addMessage({ type: 'error', content: t('misc.clearContextFailed', { message }), timestamp: Date.now() });
+    }
+  }, [addMessage, currentSessionId, requestLatestMessages, selectedSession?.id, setTokenBudget, supportsContextClearing, t]);
+
+  // The button asks first: unlike a typed `/clear`, a click can be a slip.
+  const handleClearContextClick = useCallback(() => {
+    if (window.confirm(t('misc.clearContextConfirm'))) {
+      void handleClearContext();
+    }
+  }, [handleClearContext, t]);
 
   const {
     input,
@@ -293,7 +317,8 @@ function ChatInterface({
     selectFile,
     attachedFiles,
     setAttachedFiles,
-    fileErrors,
+    attachmentRejections,
+    dismissAttachmentRejections,
     getRootProps,
     getInputProps,
     isDragActive,
@@ -338,8 +363,6 @@ function ChatInterface({
     currentProviderModel,
     currentProviderEffort,
     currentProviderSupportsCompact,
-    currentProviderSupportsClear,
-    onClearSession: clearSession,
     isLoading: isProcessing,
     processingSessions,
     canAbortSession,
@@ -352,6 +375,7 @@ function ChatInterface({
     onSessionEstablished: handleSessionEstablished,
     onFileOpen,
     onShowSettings,
+    onClearContext: handleClearContext,
     scrollToBottom,
     addMessage,
     setIsUserScrolledUp,
@@ -427,25 +451,11 @@ function ChatInterface({
 
   usePaletteOpsRegister({ insertComposerText });
 
-  useEffect(() => {
-    if (!canAbortSession) {
-      return;
-    }
-
-    const handleGlobalEscape = (event: KeyboardEvent) => {
-      if (event.key !== 'Escape' || event.repeat || event.defaultPrevented) {
-        return;
-      }
-
-      event.preventDefault();
-      handleAbortSession();
-    };
-
-    document.addEventListener('keydown', handleGlobalEscape, { capture: true });
-    return () => {
-      document.removeEventListener('keydown', handleGlobalEscape, { capture: true });
-    };
-  }, [canAbortSession, handleAbortSession]);
+  useEscapeToAbortSession({
+    canAbortSession,
+    onAbortSession: handleAbortSession,
+    composerRef: textareaRef,
+  });
 
   useEffect(() => {
     return () => {
@@ -647,6 +657,7 @@ function ChatInterface({
           modelsLoading={providerModelsLoading}
           tokenBudget={tokenBudget}
           onShowTokenUsage={showCostModal}
+          onClearContext={supportsContextClearing && (currentSessionId || selectedSession?.id) ? handleClearContextClick : undefined}
           isEditingSentMessage={Boolean(editingAnchorId)}
           // Editing on OpenCode is a revert of its session, so it moves the
           // working tree too; the notice has to say which of the two it is.
@@ -675,7 +686,8 @@ function ChatInterface({
               previous.filter((_, currentIndex) => currentIndex !== index),
             )
           }
-          fileErrors={fileErrors}
+          attachmentRejections={attachmentRejections}
+          onDismissAttachmentRejections={dismissAttachmentRejections}
           showFileDropdown={showFileDropdown}
           filteredFiles={filteredFiles}
           selectedFileIndex={selectedFileIndex}

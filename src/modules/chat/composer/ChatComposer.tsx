@@ -10,13 +10,13 @@ import type {
   RefObject,
   TouchEvent,
 } from 'react';
-import { PaperclipIcon, MessageSquareIcon, XIcon, Loader2, PencilIcon } from 'lucide-react';
+import { EraserIcon, PaperclipIcon, MessageSquareIcon, XIcon, Loader2, PencilIcon } from 'lucide-react';
 
 import { useVoiceInput } from '@/modules/chat/hooks/useVoiceInput';
 import { useVoiceAvailable } from '@/modules/chat/hooks/useVoiceAvailable';
 import { useChatWidthClasses } from '@/shared/hooks/useChatTypography';
 import { MCP_ELICITATION_TOOL_NAME } from '@/shared/constants';
-import type { BackgroundSendChoice, BackgroundSendPrompt, PendingSteer, QueuedDraft, ScheduledMessage, SlashCommand,SessionActivity,PendingPermissionRequest,PermissionMode,ProviderModelOption } from '@/shared/types';
+import type { AttachmentRejection, BackgroundSendChoice, BackgroundSendPrompt, PendingSteer, QueuedDraft, ScheduledMessage, SlashCommand,SessionActivity,PendingPermissionRequest,PermissionMode,ProviderModelOption } from '@/shared/types';
 import {
   PromptInput,
   PromptInputHeader,
@@ -31,6 +31,7 @@ import CommandMenu from '@/modules/chat/composer/CommandMenu';
 import ActivityIndicator from '@/modules/chat/composer/ActivityIndicator';
 import { isActivityIndicatorVisible } from '@/modules/chat/composer/indicatorVisibility';
 import ComposerAttachment from '@/modules/chat/composer/ComposerAttachment';
+import AttachmentRejectionNotice from '@/modules/chat/composer/AttachmentRejectionNotice';
 import VoiceInputButton from '@/modules/chat/composer/VoiceInputButton';
 import PermissionRequestsBanner from '@/modules/chat/composer/PermissionRequestsBanner';
 import TokenUsageSummary from '@/modules/chat/composer/TokenUsageSummary';
@@ -84,6 +85,8 @@ type ChatComposerProps = {
   modelsLoading: boolean;
   tokenBudget: Record<string, unknown> | null;
   onShowTokenUsage: () => void;
+  /** Clears the session's context; absent when the session cannot be cleared. */
+  onClearContext?: () => void;
   slashCommandsCount: number;
   onToggleCommandMenu: () => void;
   hasInput: boolean;
@@ -120,7 +123,9 @@ type ChatComposerProps = {
   pendingSteers?: PendingSteer[];
   attachedFiles: File[];
   onRemoveAttachment: (index: number) => void;
-  fileErrors: Map<string, string>;
+  /** Files the latest attach attempt refused (too large, or past the count limit), listed in a notice above the chips. */
+  attachmentRejections: AttachmentRejection[];
+  onDismissAttachmentRejections: () => void;
   showFileDropdown: boolean;
   filteredFiles: MentionableFile[];
   selectedFileIndex: number;
@@ -181,6 +186,7 @@ export default function ChatComposer({
   onSelectModel,
   modelsLoading,
   tokenBudget,
+  onClearContext,
   onShowTokenUsage,
   slashCommandsCount,
   onToggleCommandMenu,
@@ -205,7 +211,8 @@ export default function ChatComposer({
   pendingSteers = NO_PENDING_STEERS,
   attachedFiles,
   onRemoveAttachment,
-  fileErrors,
+  attachmentRejections,
+  onDismissAttachmentRejections,
   showFileDropdown,
   filteredFiles,
   selectedFileIndex,
@@ -405,6 +412,14 @@ export default function ChatComposer({
         />
       )}
 
+      {/* The question panel replaces the input, but how to answer often depends on
+          how much context is left, so the token usage stays reachable below it. */}
+      {hasQuestionPanel && (
+        <div className={`mx-auto flex ${widthClasses.column} justify-end`}>
+          <TokenUsageSummary usage={tokenBudget} onClick={onShowTokenUsage} />
+        </div>
+      )}
+
       {!hasQuestionPanel && <div className={`relative mx-auto ${widthClasses.column}`}>
         {showFileDropdown && filteredFiles.length > 0 && (
           <div
@@ -472,20 +487,25 @@ export default function ChatComposer({
             </div>
           )}
 
-          {attachedFiles.length > 0 && (
-            <PromptInputHeader>
-              <div className="rounded-xl bg-muted/40 p-2">
-                <div className="flex flex-wrap gap-2">
-                  {attachedFiles.map((file, index) => (
-                    <ComposerAttachment
-                      key={`${file.name}-${file.lastModified}-${index}`}
-                      file={file}
-                      onRemove={() => onRemoveAttachment(index)}
-                      error={fileErrors.get(file.name)}
-                    />
-                  ))}
+          {(attachmentRejections.length > 0 || attachedFiles.length > 0) && (
+            <PromptInputHeader className="flex flex-col gap-2">
+              <AttachmentRejectionNotice
+                rejections={attachmentRejections}
+                onDismiss={onDismissAttachmentRejections}
+              />
+              {attachedFiles.length > 0 && (
+                <div className="rounded-xl bg-muted/40 p-2">
+                  <div className="flex flex-wrap gap-2">
+                    {attachedFiles.map((file, index) => (
+                      <ComposerAttachment
+                        key={`${file.name}-${file.lastModified}-${index}`}
+                        file={file}
+                        onRemove={() => onRemoveAttachment(index)}
+                      />
+                    ))}
+                  </div>
                 </div>
-              </div>
+              )}
             </PromptInputHeader>
           )}
 
@@ -529,6 +549,18 @@ export default function ChatComposer({
             )}
 
             <TokenUsageSummary usage={tokenBudget} onClick={onShowTokenUsage} />
+
+            {onClearContext && (
+              <PromptInputButton
+                tooltip={{ content: t('misc.clearContext') }}
+                onClick={onClearContext}
+                // A running turn is still writing to the context being cleared.
+                disabled={isLoading}
+                aria-label={t('misc.clearContext')}
+              >
+                <EraserIcon />
+              </PromptInputButton>
+            )}
 
             <PromptInputButton
               tooltip={{ content: t('input.showAllCommands') }}

@@ -287,6 +287,10 @@ export const api = {
   // `upToAnchorId` (all of it when omitted). The source is left untouched.
   forkSession: (sessionId: string, body: { upToAnchorId?: string; title?: string } = {}) =>
     post(`/api/providers/sessions/${encodeURIComponent(sessionId)}/fork`, body),
+  // Starts the session's next message on a fresh context. Its history stays
+  // visible; `cleared` is false when there was no context to clear.
+  clearSessionContext: (sessionId: string) =>
+    post(`/api/providers/sessions/${encodeURIComponent(sessionId)}/clear-context`),
   renameSession: (sessionId: string, summary: string) =>
     put(`/api/providers/sessions/${sessionId}`, { summary }),
   // Fork (this fork's own, Anchor-based flavor): the pre-filled dialog name,
@@ -297,9 +301,6 @@ export const api = {
     get(`/api/providers/sessions/${encodeURIComponent(sessionId)}/fork-name`),
   forkSessionAtAnchor: (sessionId: string, anchor: string, name: string) =>
     post(`/api/providers/sessions/${encodeURIComponent(sessionId)}/fork-at-anchor`, { anchor, name }),
-  // Clear: retires the open conversation and opens an empty one beside it.
-  clearSession: (sessionId: string) =>
-    post(`/api/providers/sessions/${encodeURIComponent(sessionId)}/clear`),
   // What one agent of a workflow run did, read from its transcript on demand
   // when its row in the workflow card is opened.
   workflowAgentActivity: (sessionId: string, runId: string, agentId: string) =>

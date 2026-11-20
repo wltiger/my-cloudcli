@@ -22,7 +22,6 @@ import {
   AntigravitySessionsProvider,
   writeAntigravityAnnotationTitle,
 } from '@/modules/providers/list/antigravity/antigravity-sessions.provider.js';
-import { sessionClearService } from '@/modules/providers/services/session-clear.service.js';
 import { sessionsService } from '@/modules/providers/services/sessions.service.js';
 
 const patchHomeDir = (nextHomeDir: string) => {
@@ -532,7 +531,8 @@ test('clearing a session names it in agy too, and the archive holds through the 
     await synchronizer.synchronize();
     const sessionId = sessionsDb.getSessionByProviderSessionId('conv-a')!.session_id;
 
-    sessionClearService.clearSession(sessionId);
+    await sessionsService.summarizeSession(sessionId, '[Cleared] Auto Title');
+    sessionsDb.updateSessionIsArchived(sessionId, true);
 
     assert.equal(
       await fs.readFile(annotationPathFor(homeDir, 'conv-a'), 'utf8'),
