@@ -356,8 +356,10 @@ test('stopping the last task while a pushed turn is answered does not cut that t
 
     // The pushed turn has produced nothing yet when the user stops the agent:
     // the turn is in flight from the moment it was pushed.
-    assert.equal(await stopClaudeSDKTask(SESSION_ID, 'a1'), true);
+    const stopping = stopClaudeSDKTask(SESSION_ID, 'a1');
+    await waitFor(() => first.script.stopped.length > 0);
     first.script.emit(taskNotification('a1', 'toolu_agent', 'stopped'));
+    assert.equal(await stopping, true);
     await settle();
     assert.equal(first.script.released(), false, 'the pushed turn is still being answered');
 

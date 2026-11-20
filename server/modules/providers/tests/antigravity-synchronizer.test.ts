@@ -531,7 +531,7 @@ test('clearing a session names it in agy too, and the archive holds through the 
     await synchronizer.synchronize();
     const sessionId = sessionsDb.getSessionByProviderSessionId('conv-a')!.session_id;
 
-    await sessionsService.summarizeSession(sessionId, '[Cleared] Auto Title');
+    sessionsService.renameSessionById(sessionId, '[Cleared] Auto Title');
     sessionsDb.updateSessionIsArchived(sessionId, true);
 
     assert.equal(

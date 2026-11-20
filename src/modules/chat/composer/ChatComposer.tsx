@@ -105,7 +105,7 @@ type ChatComposerProps = {
    * re-run the conversation. The notice says one or the other, and saying the
    * wrong one is a promise about the reader's files that does not hold.
    */
-  editRestoresFiles: boolean;
+  editRestoresFiles?: boolean;
   onCancelEditMessage: () => void;
   /** Messages waiting to be sent to this session later. */
   scheduledMessages: ScheduledMessage[];
@@ -198,7 +198,7 @@ export default function ChatComposer({
   backgroundSendPrompt,
   onResolveBackgroundSendPrompt,
   isEditingSentMessage,
-  editRestoresFiles,
+  editRestoresFiles = false,
   onCancelEditMessage,
   scheduledMessages,
   onScheduleMessage,

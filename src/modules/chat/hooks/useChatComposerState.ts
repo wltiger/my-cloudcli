@@ -52,7 +52,9 @@ type UseChatComposerStateArgs = {
   currentProviderModel: string;
   currentProviderEffort: string;
   /** Whether the active provider can run Compact; gates the `/compact` completion entry. */
-  currentProviderSupportsCompact: boolean;
+  currentProviderSupportsCompact?: boolean;
+  /** Retired in v1.37.9: upstream commands include /clear directly. Retained as optional for compatibility. */
+  currentProviderSupportsClear?: boolean;
   isLoading: boolean;
   processingSessions?: SessionActivityMap;
   canAbortSession: boolean;
@@ -273,7 +275,7 @@ export function useChatComposerState({
   resolvePermissionModeForProvider,
   currentProviderModel,
   currentProviderEffort,
-  currentProviderSupportsCompact,
+  currentProviderSupportsCompact = false,
   isLoading,
   processingSessions,
   canAbortSession,

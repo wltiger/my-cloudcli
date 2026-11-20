@@ -20,7 +20,9 @@ type UseSlashCommandsOptions = {
   textareaRef: RefObject<HTMLTextAreaElement>;
   onExecuteCommand: (command: SlashCommand, rawInput?: string) => void | Promise<void>;
   /** Whether the active provider can run Compact; gates the `/compact` completion entry. */
-  currentProviderSupportsCompact: boolean;
+  currentProviderSupportsCompact?: boolean;
+  /** Retired in v1.37.9: upstream commands include /clear directly. Retained as optional for compatibility. */
+  currentProviderSupportsClear?: boolean;
 };
 
 const getCommandHistoryKey = (projectName: string) => `command_history_${projectName}`;
@@ -93,8 +95,7 @@ export function useSlashCommands({
   setInput,
   textareaRef,
   onExecuteCommand,
-  currentProviderSupportsCompact,
-  currentProviderSupportsClear,
+  currentProviderSupportsCompact = false,
 }: UseSlashCommandsOptions) {
   const { t } = useTranslation('chat');
   const { commands: projectCommands } = useProjectSlashCommands(selectedProject, provider);

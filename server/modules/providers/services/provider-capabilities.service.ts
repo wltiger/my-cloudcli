@@ -229,6 +229,7 @@ const PROVIDER_CAPABILITIES: Record<LLMProvider, ProviderCapabilities> = {
     // The agy runtime has neither an `askSideQuestion` nor a `steer` facet.
     supportsSideQuestions: false,
     supportsSteering: false,
+    supportsContextClearing: false,
   },
 };
 
