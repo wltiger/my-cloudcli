@@ -120,7 +120,6 @@ function ChatInterface({
     currentProviderModelOptions,
     currentProviderSupportsCompact,
     currentProviderSupportsFork,
-    currentProviderSupportsClear,
     currentProviderRewindRestoresFiles,
     permissionMode,
     pendingPermissionRequests,

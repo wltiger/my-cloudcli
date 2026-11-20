@@ -198,7 +198,7 @@ async function readClearedContextSegment(
     }) ?? await loadFull();
 
   const messages: NormalizedMessage[] = (full?.messages ?? [])
-    .map((message) => ({ ...message, transcriptAnchorId: undefined }));
+    .map((message) => ({ ...message, transcriptAnchorId: undefined, anchor: undefined }));
   messages.push(createNormalizedMessage({
     // Stable across reads, so the client can tell it already has this row.
     id: `context_cleared_${segment.providerSessionId}`,
@@ -685,7 +685,7 @@ export const sessionsService = {
 
     const hasBackgroundWork = (providerRegistry.resolveProvider(provider).runtime.listBackgroundWork?.() ?? [])
       .some((entry) => entry.sessionId === sessionId);
-    if (chatRunRegistry.isProcessing(sessionId) || hasBackgroundWork) {
+    if (chatRunRegistry.isProcessing(sessionId) || hasBackgroundWork || chatRunRegistry.hasBackgroundWorkOutstanding(sessionId)) {
       throw new AppError('Wait for the session to finish, or stop it, before clearing its context.', {
         code: 'SESSION_BUSY',
         statusCode: 409,

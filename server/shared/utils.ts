@@ -1022,8 +1022,8 @@ export function readProviderSkillMarkdownDefinitionFromContent(
  *
  * A fixed English literal rather than a translated string: it is written into
  * the session's stored name (by `sessions.service.ts` when the first message
- * yields no words, and behind the `[Fork]`/`[Cleared]` prefixes that
- * `session-fork.service.ts` and `session-clear.service.ts` build), so it has to
+ * yields no words, and behind the `[Fork]` prefix that
+ * `session-fork.service.ts` builds), so it has to
  * survive a language switch and stay editable by the sidebar's inline rename.
  * One definition because all three must agree on what an unnamed session reads
  * as.

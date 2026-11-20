@@ -282,27 +282,6 @@ test('the fork-name route answers with a name the project has not used', async (
   });
 });
 
-test('the clear route retires the open conversation and answers with the empty one', async () => {
-  await withProviderServer(async (baseUrl, workspacePath) => {
-    sessionsDb.createAppSession('clear-source', 'claude', workspacePath, 'Wire up the sidebar');
-    sessionsDb.assignProviderSessionId('clear-source', 'claude-native-1');
-
-    const response = await fetch(
-      `${baseUrl}/api/providers/sessions/clear-source/clear`,
-      { method: 'POST' },
-    );
-    const payload = await response.json() as {
-      data: { sessionId: string; retiredSessionId: string; retiredSessionName: string };
-    };
-
-    assert.equal(response.status, 201);
-    assert.equal(payload.data.retiredSessionId, 'clear-source');
-    assert.equal(payload.data.retiredSessionName, '[Cleared] Wire up the sidebar');
-    assert.notEqual(payload.data.sessionId, 'clear-source');
-    assert.equal(sessionsDb.getSessionById('clear-source')?.isArchived, 1);
-    assert.equal(sessionsDb.getSessionById(payload.data.sessionId)?.isArchived, 0);
-  });
-});
 /**
  * The Antigravity grant route writes into `~/.gemini/config/projects/`, a
  * directory the Antigravity IDE also owns, so every case here runs against a
