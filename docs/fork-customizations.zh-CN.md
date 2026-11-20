@@ -252,7 +252,7 @@
 - **编辑会话的第一条消息，是 Edit 唯一走不通的情况。** 官方把它当成 `resumeFromScratch`（`chat-websocket.service.ts` 找不到需要保留的锚点），于是这一轮会新开一个 provider session——但没有任何东西把 app 会话重指过去：原会话继续显示本该被替换的那一轮，重跑的内容则变成一个独立的侧边栏条目，由会话 watcher 建出来。除首条之外的 Edit 一切正常。fork 自己的 Rewind 从来就不在第一条消息上提供这个手势，所以这是"新变得可达"的边界，不是回归；目前保持原样——真要把重指接上得改三个上游自有文件，而退回老规则（第一条消息上不允许 Edit）只要一个判断，将来真想要再说。Claude 上确认过，其他 provider 未复现。
 - **实测结论比按钮活得久，因为 Edit 复用了它们。** 仍然在跑、只是改由官方的 Edit 触达：`filterClaudeAbandonedBranchRows`（Claude 压缩边界之后的废弃分支过滤——Claude 的 Edit 一样会把 transcript 变成树，没有它刷新后旧消息就会回来）；`buildOpenCodeRewindAnchorIndex`，现在负责给 OpenCode 提供 `transcriptAnchorId`，因为"Edit 即 revert"命名的是那条消息**本身**（inclusive）；`filterOpenCodeRevertedRows`，仍然是唯一能把一次未提交的 revert 藏起来的东西；`OpenCodeSessionsProvider.rewindSession` 背后的 `revertOpenCodeSession`；以及 `rewindRestoresFiles` 能力位，官方的编辑提示条读它来提醒 OpenCode 会把被跟踪文件回滚。`claude-rewind.ts` 和 `opencode-rewind.ts` 保留这个名字是故意的——操作没了，机制还是 rewind（见 `CONTEXT.md` 的 Rewind 词条，以及仍然生效的 ADR 0009）。
 - **Fork 凡是官方能覆盖的 provider 都改走官方的路由。** 走哪条路由由「这个 provider 能不能走官方的 fork」决定，**不是**由消息带哪个字段决定：OpenCode 的消息同时带着 `transcriptAnchorId`（Edit 的锚）和 `anchor`（Fork 的锚），字段已经说明不了一次 Fork 想要哪个。这里当初按字段判断，正是后来 OpenCode 的 Fork 坏掉的原因——每条 OpenCode 消息都为了 Edit 带着 `transcriptAnchorId`，于是 Fork 走了官方路由，回来一个 `FORK_NOT_SUPPORTED`。分叉逻辑就是 `useSessionFork` 里的一个三元表达式，判断依据是**能力位而不是 provider 名字**，`docs/adr/0011-opencode-forks-in-the-client-not-through-the-fork-facet.md` 记了什么条件下可以把它直接删掉。`SessionForkControl.tsx` 已经删了——按钮是官方的，在官方那一行里。fork 自己的 Fork 体验只剩命名这一步：fork 建好**之后**才弹重命名框，预填 `[Fork] <名字>`，取消不会发任何请求，会话就留在后端给的默认名字下。
-- **Clear 完全没受影响**，仍然整个是本 fork 的。
+- **Clear 在 v1.37.9 已退役。** 官方发布了原生的 Clear Session Context（#1787：新增 `cleared_context_segments` 库表、原会话内清空上下文加分割线展示、`/clear` 快捷指令与橡皮擦按钮）。fork 退役了原来把当前会话改名 `[Cleared]` 归档并新建空白会话的整套方案：删除了 `server/modules/providers/services/session-clear.service.ts`（含测试）、`src/modules/chat/hooks/useSessionClear.ts`、`src/modules/chat/utils/clearCommand.ts`（含测试）、`POST /sessions/:sessionId/clear` 路由与 `api.clearSession`。fork 全面拥抱上游的 `clearSessionContext`。本条目现在仅保留 Fork（重命名弹窗以及针对 Claude 的不透明锚点计算）。
 
 **为什么改：** 在 Claude 会话里，用户可以从任意一条消息发起 **Fork**——这个词以及本条目大量用到的 **Anchor**、**Transcript row**、**Compact**，定义都在 `CONTEXT.md` 的术语表里。到那条消息为止的对话会被复制成一个全新的会话（有自己的 id），原会话完全不动，仍然可以继续跑。官方完全没有这个概念。工单 [#22](https://github.com/wltiger/my-cloudcli/issues/22)；这是一组五个工单的打头阵那个（[#23](https://github.com/wltiger/my-cloudcli/issues/23) OpenCode fork、[#24](https://github.com/wltiger/my-cloudcli/issues/24) Clear、[#25](https://github.com/wltiger/my-cloudcli/issues/25) Claude rewind、[#26](https://github.com/wltiger/my-cloudcli/issues/26) OpenCode rewind），所以这里的代码大部分是给后面几个工单留的接缝，而不是那个按钮本身。
 
@@ -503,6 +503,11 @@ Stop 是能看见的那一半。`chat.abort` 现在接受「run 已结束、但�
 > 排队消息带上 `waitFor`。`turn`（回合进行中排的，或被拒的插话）在回合结束后就推进挂着的进程；`background`（在后台工作期间主动排的，以及所有旧数据）等后台工作结束；`turn` 推送被拒时会改成 `background` 放回去，而不是每次轮询都再推。dispatcher 判断「会话还挂着后台工作」时同时看任务追踪器和运行注册表（cron 撑着时任务列表是空的）。定时消息带上 `onBusy`：`interrupt`（默认，官方的做法：按时发，挂着的进程拒收时就停掉后台工作）或 `wait`（定时弹窗里的开关，`ScheduleBusyModeToggle.tsx`）；这也修掉了「定时消息被拒却标成已发送、悄悄丢失」的问题。新 run 会接过上一个 run 的连接（`chatRunRegistry.startRun`），所以正在看这个会话的页面能实时看到排队或定时消息的回复，而不是刷新后才看到。插话只属于「回合正在产出」（待读的插话会延长它）；旁问两个状态都不碰。已知缺口（已记 backlog）：被拒那条发送的乐观气泡会留到 transcript 重新加载；拒绝只按会话和本标签页最近一次发送对应，两个标签页几乎同时发送时，一个标签页可能把另一个的拒绝当成自己的。
 >
 > 代码位置（code review 后调整）：被拒处理在 fork 自有的 hook `src/modules/chat/hooks/useRefusedSend.ts` 里（composer 只调用 `recordSend`）；被拒的**编辑**会以编辑状态回来——取消时保持编辑状态，排队则被拒绝并给出提示（`input.queue.editCannotQueue`），因为排队消息会被追加在最后，而不是替换被编辑的那条。dispatcher 处理忙碌会话的规则在 fork 自有的 `server/modules/scheduled-messages/services/busy-session-sends.service.ts` 里；上游 dispatcher 只保留四处调用（并去掉了上游的 `isSessionBusy`）。`wait` 的定时消息和其他消息一起被认领，需要等时立刻退回（`scheduledMessagesDb.releaseClaim`，这是给那个上游存储文件加的唯一方法）。运行注册表会记住每个订阅过某会话的 socket（`watchSession`，在 `chat.subscribe` 时调用），每个新 run 都带上这批观众，所以即使会话之前闲着，服务端代发的回复也能实时到达打开着的页面。上面列表之外，这次还改到的上游文件：`ComposerSendMenu.tsx`、`ScheduleMessagePopover.tsx`、`SteeredMessageCard.tsx`、`scheduled-messages.db.ts`、`session-drafts.db.ts`、`user.service.ts`、`src/shared/chatDrafts.ts`。
+>
+> **⚠️ v1.37.9 更新（2026-11-20）：** 上游发布了 `onRunSettled`（轮次 settle 立即派发排队消息）与 `sessionsSending`（单会话并发锁）。fork 将其合并进 `scheduled-message-dispatcher.service.ts`：
+> 1. 单会话 `claimNextDue` 循环中，一旦消息被 `putBack` 放回立即 `break`，彻底避免因为 busy/refused 导致的致命死循环。
+> 2. 增加 `queuedSending`，并在排队闸门（`isQueuedMessageBlocked`）中检查 `sessionsSending`，杜绝排队消息插队到两轮定时发送之间被强行打断。
+> 3. 完整保留 fork 对 `sendClaimedMessage` 的失败原因记录。
 
 ## 32. 问题面板的「其他」输入是多行的，Enter 是换行
 
@@ -630,6 +635,8 @@ Stop 是能看见的那一半。`chat.abort` 现在接受「run 已结束、但�
 **同步官方时怎么办：** 保留我方——但这只是“一张数据表 + 一个解析函数”，所以要手工套，不要整份取任一方。官方很可能自己也会补 Haiku 的 effort 块，或者开始认 `effort.default`；真那样的话，`values` 数组和解析函数的形状采用官方那份，只重新套上本 fork 的 `default` 选择——它的列表更权威，它新增的档位否则会被本 fork 丢掉。反过来同样成立：丢掉本 fork 的这个块，Haiku 的 Reasoning 菜单会重新变空；丢掉解析函数的改动，所有 `default` 值会第二次变成没人读的死数据。届时值得重新判断一次：各模型分别设默认值是否仍优于官方统一的 `high`。
 
 > **v1.37.4 更新（2026-10-12）：不需要改动——本条依赖的那条 sentinel 通路没被碰。** 官方的 effort 工作（`51fb5757`，见条目 25）改的是自定义模型 `option.effort` 的**存储与来源**，不是它的形状：`resolveClaudeEffort` 仍然读 `option.effort.values` 作白名单、并把字面量 `'default'` sentinel 解析成 `option.effort.default`，所以本条运行时那一半原样适用。两件值得知道的事。第一，sentinel 本身（`DEFAULT_EFFORT_VALUE`）是 composer 侧的字面量，官方的模型库表单从不发出它——两条通路不相交，这也是这里不需要返工的原因。第二，fork 的读时派生（`buildCustomModelEffort`）现在是**唯一**给新建自定义模型提供 `default` 的东西，因为官方表单留着 `effort_default` 为 NULL——所以本条和条目 25 现在共用那一个函数，而且只对 Claude 生效。如果官方哪天改成保存时就写 `default`，要重查这个派生是否还需要，还是已经变成了第二个真源。
+>
+> **v1.37.9 更新（2026-11-20）：** 上游 #1790 正式发布固定版本模型（`CLAUDE_PINNED_MODEL_OPTIONS`），并给 Haiku 官方补齐了 reasoning effort（`default: 'medium'`，支持 low~max，不带 ultracode）。按维护者决议，本 fork 所有模型的 catalog effort 默认档位（含 Haiku 与别名）完全与上游对齐，不再维护私有的各模型默认档位。
 
 ## 39. 在 CloudCLI 之外删掉的 OpenCode 会话会从索引里清掉
 
